@@ -75,13 +75,21 @@ class TestPlanArchiveE2E:
     async def test_dispatch_claims_plan_archive_from_registry(self):
         from app.models.task_schedule import TaskSchedule
         from app.modules.dev_runner.schedulers.plan_archive_schedule import PlanArchiveScheduler
-        from app.worker.schedule_handler_base import ClaimedRun
+        from app.worker.schedule_handler_base import ClaimedRun, ScheduleExecutionSpec
         from app.worker.scheduled_worker import ScheduledCrawlWorker
 
         worker = ScheduledCrawlWorker(browser_manager=MagicMock(is_initialized=False))
         handler = PlanArchiveScheduler()
-        schedule = MagicMock(id=1)
-        claimed = ClaimedRun(run=MagicMock(id=10), task_name="plan_archive_analyze_1_run_10")
+        schedule = MagicMock(
+            id=1,
+            target_type=TaskSchedule.TARGET_TYPE_PLAN_ARCHIVE_ANALYZE,
+            name="plan_archive",
+            schedule_value=None,
+            schedule_type=TaskSchedule.SCHEDULE_TYPE_CRON,
+            display_name="Plan Archive",
+        )
+        schedule.get_target_config.return_value = {}
+        claimed = ClaimedRun(run_id=10, schedule_id=1, task_name="plan_archive_analyze_1_run_10")
         db = MagicMock()
         svc = MagicMock()
         svc.get_schedules_by_type.side_effect = lambda target_type, enabled_only=True: (
@@ -99,7 +107,12 @@ class TestPlanArchiveE2E:
             worker._schedule_claimed_run = AsyncMock()
             await worker._dispatch_scheduled_runs()
 
-        worker._schedule_claimed_run.assert_awaited_once_with(handler, schedule, claimed)
+        worker._schedule_claimed_run.assert_awaited_once()
+        called_handler, spec, called_claimed = worker._schedule_claimed_run.await_args.args
+        assert called_handler is handler
+        assert isinstance(spec, ScheduleExecutionSpec)
+        assert spec.schedule_id == 1
+        assert called_claimed is claimed
 
 
 # ──────────────────────────────────────────────────────────────

@@ -11,7 +11,7 @@ from sqlalchemy.pool import StaticPool
 from app.models.plan_record import PlanRecord
 from app.modules.claude_worker.models.llm_request import LLMRequest
 from app.modules.dev_runner.schedulers.plan_archive_schedule import PlanArchiveScheduler
-from app.worker.schedule_handler_base import ClaimedRun, WorkerContext
+from app.worker.schedule_handler_base import ClaimedRun, ScheduleExecutionSpec, WorkerContext
 
 
 @pytest.fixture
@@ -39,8 +39,16 @@ async def test_execute_propagates_queue_failures(session_factory):
     with patch.object(PlanArchiveScheduler, "_enqueue_unprocessed_plans", side_effect=RuntimeError("queue failed")):
         with pytest.raises(RuntimeError, match="queue failed"):
             await scheduler.execute(
-                MagicMock(id=1),
-                ClaimedRun(run=MagicMock(id=3), task_name="plan_archive_1_run_3"),
+                ScheduleExecutionSpec(
+                    schedule_id=1,
+                    target_type="plan_archive_analyze",
+                    name="plan_archive",
+                    target_config={},
+                    schedule_value=None,
+                    schedule_type="cron",
+                    display_name="Plan Archive",
+                ),
+                ClaimedRun(run_id=3, schedule_id=1, task_name="plan_archive_1_run_3"),
                 _make_ctx(session_factory),
             )
 

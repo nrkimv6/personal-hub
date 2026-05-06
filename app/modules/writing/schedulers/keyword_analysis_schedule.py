@@ -9,6 +9,7 @@ from app.models import TaskSchedule
 from app.worker.schedule_handler_base import (
     ClaimedRun,
     HandlerRunOutcome,
+    ScheduleExecutionSpec,
     ScheduleHandler,
     WorkerContext,
     claim_pending_manual_run,
@@ -34,7 +35,7 @@ class KeywordAnalysisScheduler(ScheduleHandler):
     ) -> ClaimedRun | None:
         claimed = claim_pending_manual_run(db, schedule, svc, ctx, "keyword_analysis")
         if claimed:
-            logger.info("[%s] 수동 Keyword Analysis 태스크 시작: run_id=%s", ctx.worker_name, claimed.run.id)
+            logger.info("[%s] 수동 Keyword Analysis 태스크 시작: run_id=%s", ctx.worker_name, claimed.run_id)
             return claimed
 
         config = schedule.get_target_config()
@@ -57,8 +58,8 @@ class KeywordAnalysisScheduler(ScheduleHandler):
             config_snapshot=config,
         )
 
-    async def execute(self, schedule: TaskSchedule, claimed: ClaimedRun, ctx: WorkerContext) -> HandlerRunOutcome:
-        config = schedule.get_target_config()
+    async def execute(self, spec: ScheduleExecutionSpec, claimed: ClaimedRun, ctx: WorkerContext) -> HandlerRunOutcome:
+        config = spec.target_config
         if ctx.update_worker_state:
             ctx.update_worker_state("analyzing", "keywords")
 

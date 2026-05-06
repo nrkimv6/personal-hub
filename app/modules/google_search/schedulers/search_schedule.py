@@ -10,7 +10,14 @@ from app.modules.google_search.services.queue_service import enqueue_google_sear
 from app.modules.instagram.services.scheduler import InstagramScheduler
 from app.services.task_schedule_service import TaskScheduleService
 from app.utils.error_utils import format_error_message
-from app.worker.schedule_handler_base import ClaimedRun, HandlerRunOutcome, ScheduleHandler, WorkerContext, start_claimed_run
+from app.worker.schedule_handler_base import (
+    ClaimedRun,
+    HandlerRunOutcome,
+    ScheduleExecutionSpec,
+    ScheduleHandler,
+    WorkerContext,
+    start_claimed_run,
+)
 from app.worker.schedule_time_utils import parse_time_windows
 
 if TYPE_CHECKING:
@@ -68,11 +75,11 @@ class GoogleSearchScheduler(ScheduleHandler):
 
     async def execute(
         self,
-        schedule: TaskSchedule,
+        spec: ScheduleExecutionSpec,
         claimed: ClaimedRun,
         ctx: WorkerContext,
     ) -> HandlerRunOutcome:
-        config = claimed.target_config_snapshot or {}
+        config = spec.target_config
         saved_search_id = config.get("saved_search_id")
         if not saved_search_id:
             raise RuntimeError("saved_search_id 없음")
@@ -100,7 +107,7 @@ class GoogleSearchScheduler(ScheduleHandler):
                 service_account_id=saved_search.service_account_id,
                 search_params=saved_search.search_params,
                 saved_search_id=saved_search_id,
-                schedule_id=claimed.schedule_id,
+                schedule_id=spec.schedule_id,
                 status=GoogleSearchQueue.STATUS_QUEUED,
             )
             db.add(queue_item)
@@ -113,7 +120,7 @@ class GoogleSearchScheduler(ScheduleHandler):
                 ctx.worker_name,
                 search_id,
                 saved_search.query,
-                claimed.schedule_id,
+                spec.schedule_id,
                 "redis" if status == GoogleSearchQueue.STATUS_QUEUED else "sqlite",
                 status,
             )

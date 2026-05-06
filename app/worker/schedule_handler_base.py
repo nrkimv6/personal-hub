@@ -3,6 +3,10 @@
 Handlers are co-located under domain modules (``app/modules/*/schedulers``)
 and return counts-only completion outcomes. The worker owns task creation,
 complete/fail lifecycle, and run metadata patch persistence.
+
+Contract: ``claim_run()`` runs inside an ORM session, while ``execute()`` only
+receives a primitive ``ScheduleExecutionSpec`` snapshot. Passing ORM schedule or
+run objects into ``execute()`` can trigger DetachedInstanceError after dispatch.
 """
 
 from __future__ import annotations
@@ -12,7 +16,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import TYPE_CHECKING, Any, Awaitable, Callable, Optional, Protocol
 
-from app.models import TaskSchedule, TaskScheduleRun
+from app.models import TaskSchedule
 from app.services.task_schedule_service import TaskScheduleService
 
 if TYPE_CHECKING:
@@ -32,13 +36,23 @@ class WorkerContext:
     now: Optional[datetime] = None
 
 
+@dataclass(frozen=True)
+class ScheduleExecutionSpec:
+    schedule_id: int
+    target_type: str
+    name: str
+    target_config: dict
+    schedule_value: str | None
+    schedule_type: str
+    display_name: str
+
+
 @dataclass
 class ClaimedRun:
-    run: TaskScheduleRun
+    run_id: int
+    schedule_id: int
     task_name: str
-    schedule_id: int = 0
     config_snapshot_patch: dict | None = None
-    target_config_snapshot: dict | None = None
 
 
 @dataclass
@@ -63,11 +77,24 @@ class ScheduleHandler(Protocol):
 
     async def execute(
         self,
-        schedule: TaskSchedule,
+        spec: ScheduleExecutionSpec,
         claimed: ClaimedRun,
         ctx: WorkerContext,
     ) -> HandlerRunOutcome:
-        """Run the handler body and return counts-only completion metadata."""
+        """Run with a primitive schedule snapshot, never a detached ORM object."""
+
+
+def build_schedule_execution_spec(schedule: TaskSchedule) -> ScheduleExecutionSpec:
+    """Copy schedule ORM fields into a primitive execution snapshot."""
+    return ScheduleExecutionSpec(
+        schedule_id=schedule.id,
+        target_type=schedule.target_type,
+        name=schedule.name,
+        target_config=dict(schedule.get_target_config() or {}),
+        schedule_value=schedule.schedule_value,
+        schedule_type=schedule.schedule_type,
+        display_name=schedule.display_name or schedule.name,
+    )
 
 
 def load_schedule_value(schedule: TaskSchedule) -> dict:
@@ -96,7 +123,7 @@ def claim_pending_manual_run(
     manual_run.worker_id = ctx.worker_name
     db.commit()
     return ClaimedRun(
-        run=manual_run,
+        run_id=manual_run.id,
         schedule_id=schedule.id,
         task_name=f"{task_name_prefix}_{schedule.id}_run_{manual_run.id}",
     )
@@ -117,11 +144,10 @@ def start_claimed_run(
         config_snapshot=config_snapshot,
     )
     return ClaimedRun(
-        run=run,
+        run_id=run.id,
         schedule_id=schedule.id,
         task_name=f"{task_name_prefix}_{schedule.id}_run_{run.id}",
         config_snapshot_patch=config_snapshot_patch,
-        target_config_snapshot=dict(config_snapshot or {}),
     )
 
 

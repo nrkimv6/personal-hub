@@ -201,8 +201,9 @@ async def test_run_handler_logs_connection_warning_once_cross():
     mock_handler.execute = AsyncMock(side_effect=_pg_conn_err())
 
     mock_claimed = MagicMock()
-    mock_claimed.run.id = 1
+    mock_claimed.run_id = 1
     mock_claimed.config_snapshot_patch = {}
+    mock_spec = MagicMock(schedule_id=7)
 
     mock_svc = MagicMock()
     mock_db = MagicMock()
@@ -211,7 +212,7 @@ async def test_run_handler_logs_connection_warning_once_cross():
         patch("app.worker.scheduled_worker.SessionLocal", return_value=mock_db),
         patch("app.worker.scheduled_worker.TaskScheduleService", return_value=mock_svc),
     ):
-        await worker._run_handler(mock_handler, MagicMock(), mock_claimed)
+        await worker._run_handler(mock_handler, mock_spec, mock_claimed)
 
     # _log_worker_error 정확히 1회
     assert worker._log_worker_error.call_count == 1

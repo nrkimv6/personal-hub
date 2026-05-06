@@ -21,6 +21,7 @@ from app.services.task_schedule_service import TaskScheduleService
 from app.worker.schedule_handler_base import (
     ClaimedRun,
     HandlerRunOutcome,
+    ScheduleExecutionSpec,
     ScheduleHandler,
     WorkerContext,
     start_claimed_run,
@@ -62,9 +63,9 @@ class PlanArchiveScheduler(ScheduleHandler):
             config_snapshot={},
         )
 
-    async def execute(self, schedule: TaskSchedule, claimed: ClaimedRun, ctx: WorkerContext) -> HandlerRunOutcome:
+    async def execute(self, spec: ScheduleExecutionSpec, claimed: ClaimedRun, ctx: WorkerContext) -> HandlerRunOutcome:
         loop = asyncio.get_event_loop()
-        target_config = schedule.get_target_config() if schedule.target_config else {}
+        target_config = spec.target_config
         stats = await loop.run_in_executor(
             None,
             self._enqueue_unprocessed_plans,

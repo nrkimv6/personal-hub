@@ -8,6 +8,7 @@ from app.modules.writing.services.writing_service import WritingService
 from app.worker.schedule_handler_base import (
     ClaimedRun,
     HandlerRunOutcome,
+    ScheduleExecutionSpec,
     ScheduleHandler,
     WorkerContext,
     claim_pending_manual_run,
@@ -34,7 +35,7 @@ class WritingSourceScheduler(ScheduleHandler):
     ) -> ClaimedRun | None:
         claimed = claim_pending_manual_run(db, schedule, svc, ctx, "writing_source")
         if claimed:
-            logger.info("[%s] 수동 Writing Source 수집 태스크 시작: run_id=%s", ctx.worker_name, claimed.run.id)
+            logger.info("[%s] 수동 Writing Source 수집 태스크 시작: run_id=%s", ctx.worker_name, claimed.run_id)
             return claimed
 
         config = schedule.get_target_config()
@@ -58,8 +59,8 @@ class WritingSourceScheduler(ScheduleHandler):
             config_snapshot=config,
         )
 
-    async def execute(self, schedule: TaskSchedule, claimed: ClaimedRun, ctx: WorkerContext) -> HandlerRunOutcome:
-        config = schedule.get_target_config()
+    async def execute(self, spec: ScheduleExecutionSpec, claimed: ClaimedRun, ctx: WorkerContext) -> HandlerRunOutcome:
+        config = spec.target_config
         db = ctx.db_factory()
         try:
             writing_service = WritingService(db)

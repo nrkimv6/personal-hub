@@ -26,6 +26,7 @@ from app.services.task_schedule_service import TaskScheduleService
 from app.worker.schedule_handler_base import (
     ClaimedRun,
     HandlerRunOutcome,
+    ScheduleExecutionSpec,
     ScheduleHandler,
     WorkerContext,
     claim_pending_manual_run,
@@ -221,7 +222,7 @@ class AutoDevRunnerScheduler(ScheduleHandler):
         )
 
     async def execute(
-        self, schedule: TaskSchedule, claimed: ClaimedRun, ctx: WorkerContext
+        self, spec: ScheduleExecutionSpec, claimed: ClaimedRun, ctx: WorkerContext
     ) -> HandlerRunOutcome:
         today = date.today()
         runs = await _scan_and_run_plans(today)

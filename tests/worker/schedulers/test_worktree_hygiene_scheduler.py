@@ -14,7 +14,7 @@ from app.models.task_schedule import TaskSchedule, TaskScheduleRun
 from app.models.tracking_item import TrackingItem, TrackingItemPlanLink
 from app.modules.dev_runner.schedulers.worktree_hygiene_schedule import WorktreeHygieneScheduler
 from app.modules.reports.models.generated_report import GeneratedReport
-from app.worker.schedule_handler_base import WorkerContext
+from app.worker.schedule_handler_base import ClaimedRun, WorkerContext, build_schedule_execution_spec
 
 
 def _git(repo: Path, *args: str) -> str:
@@ -128,10 +128,9 @@ async def test_execute_R_saves_generated_report_and_run_summary(session_factory,
     repo = _init_repo(tmp_path)
     scheduler = WorktreeHygieneScheduler()
     schedule = _schedule(repo)
-    claimed = MagicMock()
-    claimed.run.id = 20
+    claimed = ClaimedRun(run_id=20, schedule_id=1, task_name="worktree_hygiene_1_run_20")
 
-    outcome = await scheduler.execute(schedule, claimed, _make_ctx(session_factory))
+    outcome = await scheduler.execute(build_schedule_execution_spec(schedule), claimed, _make_ctx(session_factory))
 
     assert outcome.saved_count == 1
     assert outcome.stop_reason == "report_only"
@@ -150,10 +149,9 @@ async def test_execute_R_summary_includes_interest_and_plans_push_counts(session
     (residue / "README.md").write_text("cache\n", encoding="utf-8")
     scheduler = WorktreeHygieneScheduler()
     schedule = _schedule(repo)
-    claimed = MagicMock()
-    claimed.run.id = 21
+    claimed = ClaimedRun(run_id=21, schedule_id=1, task_name="worktree_hygiene_1_run_21")
 
-    outcome = await scheduler.execute(schedule, claimed, _make_ctx(session_factory))
+    outcome = await scheduler.execute(build_schedule_execution_spec(schedule), claimed, _make_ctx(session_factory))
 
     stats = outcome.config_snapshot_patch["statistics"]
     assert "plans_push_needed" in stats
@@ -188,9 +186,8 @@ async def test_execute_R_archive_merge_gap_creates_tracking_item_with_memo(sessi
 
     scheduler = WorktreeHygieneScheduler()
     schedule = _schedule(repo)
-    claimed = MagicMock()
-    claimed.run.id = 22
-    await scheduler.execute(schedule, claimed, _make_ctx(session_factory))
+    claimed = ClaimedRun(run_id=22, schedule_id=1, task_name="worktree_hygiene_1_run_22")
+    await scheduler.execute(build_schedule_execution_spec(schedule), claimed, _make_ctx(session_factory))
 
     with session_factory() as db:
         item = db.query(TrackingItem).one()
@@ -215,10 +212,10 @@ async def test_execute_B_archive_merge_gap_dedupes_existing_tracking_item(sessio
     )
     scheduler = WorktreeHygieneScheduler()
     schedule = _schedule(repo)
-    claimed = MagicMock()
-    claimed.run.id = 23
-    await scheduler.execute(schedule, claimed, _make_ctx(session_factory))
-    await scheduler.execute(schedule, claimed, _make_ctx(session_factory))
+    claimed = ClaimedRun(run_id=23, schedule_id=1, task_name="worktree_hygiene_1_run_23")
+    spec = build_schedule_execution_spec(schedule)
+    await scheduler.execute(spec, claimed, _make_ctx(session_factory))
+    await scheduler.execute(spec, claimed, _make_ctx(session_factory))
 
     with session_factory() as db:
         assert db.query(TrackingItem).count() == 1
@@ -241,9 +238,8 @@ async def test_execute_B_discarded_archive_never_becomes_merge_candidate(session
 
     scheduler = WorktreeHygieneScheduler()
     schedule = _schedule(repo)
-    claimed = MagicMock()
-    claimed.run.id = 24
-    await scheduler.execute(schedule, claimed, _make_ctx(session_factory))
+    claimed = ClaimedRun(run_id=24, schedule_id=1, task_name="worktree_hygiene_1_run_24")
+    await scheduler.execute(build_schedule_execution_spec(schedule), claimed, _make_ctx(session_factory))
 
     with session_factory() as db:
         assert db.query(TrackingItem).count() == 0

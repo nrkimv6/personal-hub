@@ -54,7 +54,8 @@ class TestPlanArchiveClaimRun:
             claimed = scheduler.claim_run(db, schedule, svc, _make_ctx(session_factory))
 
         assert claimed is not None
-        assert claimed.run is run
+        assert claimed.run_id == run.id
+        assert claimed.schedule_id == 1
         assert claimed.task_name == "plan_archive_analyze_1_run_10"
         svc.start_run.assert_called_once_with(
             schedule_id=1,

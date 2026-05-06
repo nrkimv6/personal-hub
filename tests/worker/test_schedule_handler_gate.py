@@ -9,7 +9,7 @@ from app.modules.writing.schedulers.keyword_analysis_schedule import KeywordAnal
 from app.modules.writing.schedulers.writing_source_schedule import WritingSourceScheduler
 from app.modules.writing.schedulers.writing_task_schedule import WritingTaskScheduler
 from app.worker.schedule_time_utils import build_time_window_scheduler
-from app.worker.schedule_handler_base import ClaimedRun, HandlerRunOutcome, WorkerContext
+from app.worker.schedule_handler_base import ClaimedRun, HandlerRunOutcome, ScheduleExecutionSpec, WorkerContext
 from app.worker.scheduled_worker import ScheduledCrawlWorker
 
 
@@ -21,6 +21,17 @@ def _make_ctx():
         update_worker_state=MagicMock(),
     )
 
+
+def _spec(schedule_id: int = 7) -> ScheduleExecutionSpec:
+    return ScheduleExecutionSpec(
+        schedule_id=schedule_id,
+        target_type="dummy",
+        name=f"dummy-{schedule_id}",
+        target_config={},
+        schedule_value=None,
+        schedule_type="manual",
+        display_name=f"Dummy {schedule_id}",
+    )
 
 def test_claim_run_starts_run_when_time_window_is_due():
     handler = WritingTaskScheduler()
@@ -88,7 +99,7 @@ def test_claim_run_prefers_pending_manual_run_over_due_check():
     claimed = handler.claim_run(db, schedule, svc, _make_ctx())
 
     assert claimed is not None
-    assert claimed.run is manual_run
+    assert claimed.run_id == 21
     assert claimed.schedule_id == 9
     assert claimed.task_name == "writing_source_9_run_21"
     assert manual_run.worker_id == "scheduled_worker"
@@ -117,10 +128,9 @@ async def test_schedule_claimed_run_skips_when_task_is_already_running():
     worker._create_task = MagicMock()
     worker._is_task_running = MagicMock(return_value=True)
     handler = MagicMock(target_type="dummy")
-    schedule = MagicMock(id=1)
-    claimed = ClaimedRun(run=MagicMock(id=2), schedule_id=1, task_name="dummy_1_run_2")
+    claimed = ClaimedRun(run_id=2, schedule_id=1, task_name="dummy_1_run_2")
 
-    await worker._schedule_claimed_run(handler, schedule, claimed)
+    await worker._schedule_claimed_run(handler, _spec(1), claimed)
 
     worker._create_task.assert_not_called()
 
@@ -136,9 +146,8 @@ async def test_run_handler_completes_and_merges_config_snapshot():
         stop_reason="completed",
         config_snapshot_patch={"outcome": "patched"},
     )
-    schedule = MagicMock(id=7)
     claimed = ClaimedRun(
-        run=MagicMock(id=3),
+        run_id=3,
         schedule_id=7,
         task_name="dummy_7_run_3",
         config_snapshot_patch={"claimed": "yes"},
@@ -154,7 +163,7 @@ async def test_run_handler_completes_and_merges_config_snapshot():
         "app.worker.scheduled_worker.TaskScheduleService",
         return_value=svc,
     ):
-        await worker._run_handler(handler, schedule, claimed)
+        await worker._run_handler(handler, _spec(7), claimed)
 
     svc.complete_run.assert_called_once_with(
         3,
@@ -180,7 +189,7 @@ async def test_run_handler_right_updates_schedule_by_claimed_schedule_id():
     handler = MagicMock()
     handler.target_type = "dummy"
     handler.execute.return_value = HandlerRunOutcome()
-    claimed = ClaimedRun(run=MagicMock(id=3), schedule_id=99, task_name="dummy_99_run_3")
+    claimed = ClaimedRun(run_id=3, schedule_id=99, task_name="dummy_99_run_3")
 
     db = MagicMock()
     svc = MagicMock()
@@ -189,7 +198,7 @@ async def test_run_handler_right_updates_schedule_by_claimed_schedule_id():
         "app.worker.scheduled_worker.TaskScheduleService",
         return_value=svc,
     ):
-        await worker._run_handler(handler, DetachedSchedule(), claimed)
+        await worker._run_handler(handler, _spec(99), claimed)
 
     svc.update_schedule_after_run.assert_called_once_with(99)
 
@@ -201,8 +210,7 @@ async def test_run_handler_records_fail_run_when_execute_raises():
     handler = MagicMock()
     handler.target_type = "dummy"
     handler.execute.side_effect = RuntimeError("boom")
-    schedule = MagicMock(id=7)
-    claimed = ClaimedRun(run=MagicMock(id=3), schedule_id=7, task_name="dummy_7_run_3")
+    claimed = ClaimedRun(run_id=3, schedule_id=7, task_name="dummy_7_run_3")
 
     db = MagicMock()
     svc = MagicMock()
@@ -211,7 +219,7 @@ async def test_run_handler_records_fail_run_when_execute_raises():
         "app.worker.scheduled_worker.TaskScheduleService",
         return_value=svc,
     ):
-        await worker._run_handler(handler, schedule, claimed)
+        await worker._run_handler(handler, _spec(7), claimed)
 
     svc.fail_run.assert_called_once_with(3, error_message="boom")
     worker._log_worker_error.assert_called_once()

@@ -9,6 +9,7 @@ from app.modules.reports.services.report_service import ReportService
 from app.worker.schedule_handler_base import (
     ClaimedRun,
     HandlerRunOutcome,
+    ScheduleExecutionSpec,
     ScheduleHandler,
     WorkerContext,
     start_claimed_run,
@@ -52,12 +53,12 @@ class ReportScheduler(ScheduleHandler):
             config_snapshot=config,
         )
 
-    async def execute(self, schedule: TaskSchedule, claimed: ClaimedRun, ctx: WorkerContext) -> HandlerRunOutcome:
-        config = schedule.get_target_config()
+    async def execute(self, spec: ScheduleExecutionSpec, claimed: ClaimedRun, ctx: WorkerContext) -> HandlerRunOutcome:
+        config = spec.target_config
         db = ctx.db_factory()
         try:
             if ctx.update_worker_state:
-                ctx.update_worker_state("generating", f"report_{schedule.id}")
+                ctx.update_worker_state("generating", f"report_{spec.schedule_id}")
 
             report_service = ReportService(db)
             period = config.get("period", "daily")

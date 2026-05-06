@@ -524,11 +524,18 @@ class TestGoogleSearchSchedulerExecute:
         mock_query.first.return_value = saved_search
         return mock_db
 
-    def _make_schedule(self, schedule_id=99, saved_search_id=1):
-        schedule = Mock()
-        schedule.id = schedule_id
-        schedule.get_target_config.return_value = {"saved_search_id": saved_search_id}
-        return schedule
+    def _make_spec(self, schedule_id=99, saved_search_id=1):
+        from app.worker.schedule_handler_base import ScheduleExecutionSpec
+
+        return ScheduleExecutionSpec(
+            schedule_id=schedule_id,
+            target_type=TaskSchedule.TARGET_TYPE_GOOGLE_SEARCH,
+            name=f"google_schedule_{schedule_id}",
+            target_config={"saved_search_id": saved_search_id},
+            schedule_value=None,
+            schedule_type=TaskSchedule.SCHEDULE_TYPE_CRON,
+            display_name=f"Google Schedule {schedule_id}",
+        )
 
     def _make_ctx(self, mock_db, update_worker_state):
         from app.worker.schedule_handler_base import WorkerContext
@@ -568,8 +575,8 @@ class TestGoogleSearchSchedulerExecute:
             enqueue_mock,
         ):
             outcome = await scheduler.execute(
-                self._make_schedule(),
-                ClaimedRun(run=Mock(id=1), task_name="google_schedule_99_run_1"),
+                self._make_spec(),
+                ClaimedRun(run_id=1, schedule_id=99, task_name="google_schedule_99_run_1"),
                 self._make_ctx(mock_db, update_worker_state),
             )
 
@@ -596,8 +603,8 @@ class TestGoogleSearchSchedulerExecute:
 
         with pytest.raises(RuntimeError, match="저장된 검색"):
             await scheduler.execute(
-                self._make_schedule(schedule_id=1, saved_search_id=99999),
-                ClaimedRun(run=Mock(id=10), task_name="google_schedule_1_run_10"),
+                self._make_spec(schedule_id=1, saved_search_id=99999),
+                ClaimedRun(run_id=10, schedule_id=1, task_name="google_schedule_1_run_10"),
                 self._make_ctx(mock_db, Mock()),
             )
 

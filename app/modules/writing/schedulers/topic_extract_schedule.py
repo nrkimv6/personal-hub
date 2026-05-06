@@ -10,6 +10,7 @@ from app.modules.writing.worker.topic_extract_worker import TopicExtractWorker
 from app.worker.schedule_handler_base import (
     ClaimedRun,
     HandlerRunOutcome,
+    ScheduleExecutionSpec,
     ScheduleHandler,
     WorkerContext,
     claim_pending_manual_run,
@@ -35,7 +36,7 @@ class TopicExtractScheduler(ScheduleHandler):
     ) -> ClaimedRun | None:
         claimed = claim_pending_manual_run(db, schedule, svc, ctx, "topic_extract")
         if claimed:
-            logger.info("[%s] 수동 Topic Extract 태스크 시작: run_id=%s", ctx.worker_name, claimed.run.id)
+            logger.info("[%s] 수동 Topic Extract 태스크 시작: run_id=%s", ctx.worker_name, claimed.run_id)
             return claimed
 
         config = schedule.get_target_config()
@@ -58,7 +59,7 @@ class TopicExtractScheduler(ScheduleHandler):
             config_snapshot=config,
         )
 
-    async def execute(self, schedule: TaskSchedule, claimed: ClaimedRun, ctx: WorkerContext) -> HandlerRunOutcome:
+    async def execute(self, spec: ScheduleExecutionSpec, claimed: ClaimedRun, ctx: WorkerContext) -> HandlerRunOutcome:
         if ctx.update_worker_state:
             ctx.update_worker_state("extracting", "topics")
 
@@ -67,8 +68,8 @@ class TopicExtractScheduler(ScheduleHandler):
             result = await loop.run_in_executor(
                 None,
                 self._run_topic_job_sync,
-                schedule.id,
-                claimed.run.id,
+                spec.schedule_id,
+                claimed.run_id,
                 ctx.db_factory,
                 ctx.worker_name,
             )

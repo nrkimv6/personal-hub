@@ -12,7 +12,19 @@ from sqlalchemy.pool import StaticPool
 from app.models.task_schedule import TaskSchedule
 from app.models.google_search import GoogleSavedSearch, GoogleSearchQueue
 from app.modules.google_search.schedulers.search_schedule import GoogleSearchScheduler
-from app.worker.schedule_handler_base import ClaimedRun, WorkerContext
+from app.worker.schedule_handler_base import ClaimedRun, ScheduleExecutionSpec, WorkerContext
+
+
+def _spec(schedule_id: int, target_config: dict) -> ScheduleExecutionSpec:
+    return ScheduleExecutionSpec(
+        schedule_id=schedule_id,
+        target_type=TaskSchedule.TARGET_TYPE_GOOGLE_SEARCH,
+        name=f"google-{schedule_id}",
+        target_config=target_config,
+        schedule_value="0 2 * * *",
+        schedule_type=TaskSchedule.SCHEDULE_TYPE_CRON,
+        display_name=f"Google {schedule_id}",
+    )
 
 
 @pytest.fixture
@@ -46,9 +58,6 @@ async def test_execute_returns_search_queued_stop_reason(session_factory):
         saved_search_id = saved_search.id
 
     scheduler = GoogleSearchScheduler()
-    schedule = MagicMock(id=5)
-    # execute() must use ClaimedRun.target_config_snapshot because real schedules
-    # can be detached after claim_run commits and the dispatch session closes.
     ctx = WorkerContext(
         worker_name="test_worker",
         browser_manager=None,
@@ -61,12 +70,11 @@ async def test_execute_returns_search_queued_stop_reason(session_factory):
         AsyncMock(return_value=GoogleSearchQueue.STATUS_QUEUED),
     ):
         outcome = await scheduler.execute(
-            schedule,
+            _spec(5, {"saved_search_id": saved_search_id}),
             ClaimedRun(
-                run=MagicMock(id=3),
+                run_id=3,
                 schedule_id=5,
                 task_name="google_schedule_5_run_3",
-                target_config_snapshot={"saved_search_id": saved_search_id},
             ),
             ctx,
         )
@@ -93,12 +101,11 @@ async def test_execute_error_missing_saved_search_id_from_snapshot(session_facto
 
     with pytest.raises(RuntimeError, match="saved_search_id 없음"):
         await scheduler.execute(
-            MagicMock(id=5),
+            _spec(5, {}),
             ClaimedRun(
-                run=MagicMock(id=3),
+                run_id=3,
                 schedule_id=5,
                 task_name="google_schedule_5_run_3",
-                target_config_snapshot={},
             ),
             ctx,
         )
@@ -149,12 +156,11 @@ async def test_execute_boundary_detached_schedule_not_accessed(session_factory):
         AsyncMock(return_value=GoogleSearchQueue.STATUS_QUEUED),
     ):
         outcome = await scheduler.execute(
-            schedule,
+            _spec(schedule_id, {"saved_search_id": saved_search_id}),
             ClaimedRun(
-                run=MagicMock(id=3),
+                run_id=3,
                 schedule_id=schedule_id,
                 task_name=f"google_schedule_{schedule_id}_run_3",
-                target_config_snapshot={"saved_search_id": saved_search_id},
             ),
             ctx,
         )

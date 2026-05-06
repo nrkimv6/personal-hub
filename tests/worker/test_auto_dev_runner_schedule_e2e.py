@@ -141,8 +141,9 @@ def test_t3_real_manual_run_claimed_from_db(session):
     result = claim_pending_manual_run(session, sched, svc, ctx, "auto_dev_runner")
 
     assert result is not None
-    assert result.run.id == manual_run.id
-    assert result.run.worker_id == ctx.worker_name  # "test-worker"로 갱신
+    assert result.run_id == manual_run.id
+    session.refresh(manual_run)
+    assert manual_run.worker_id == ctx.worker_name  # "test-worker"로 갱신
 
 
 def test_t3_manual_run_prior_to_cron_in_claim_run(session):
@@ -164,7 +165,7 @@ def test_t3_manual_run_prior_to_cron_in_claim_run(session):
 
     mock_start.assert_not_called()
     assert result is not None
-    assert result.run.id == manual_run.id
+    assert result.run_id == manual_run.id
 
 
 # ── execute ───────────────────────────────────────────────────────────────────

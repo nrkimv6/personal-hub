@@ -39,8 +39,10 @@ from app.worker.crawl_worker_base import CrawlWorkerBase
 from app.worker.schedule_handler_base import (
     ClaimedRun,
     HandlerRunOutcome,
+    ScheduleExecutionSpec,
     ScheduleHandler,
     WorkerContext,
+    build_schedule_execution_spec,
     merge_config_snapshot,
 )
 from app.worker.schedulers.schedule_date_expire_schedule import ScheduleDateExpireScheduler
@@ -136,7 +138,8 @@ class ScheduledCrawlWorker(CrawlWorkerBase):
                     try:
                         claimed = handler.claim_run(db, schedule, schedule_service, self._get_worker_ctx())
                         if claimed:
-                            await self._schedule_claimed_run(handler, schedule, claimed)
+                            spec = build_schedule_execution_spec(schedule)
+                            await self._schedule_claimed_run(handler, spec, claimed)
                     except Exception as exc:
                         self._log_worker_error(f"{handler.target_type} claim_run", exc)
         except Exception as exc:
@@ -147,7 +150,7 @@ class ScheduledCrawlWorker(CrawlWorkerBase):
     async def _schedule_claimed_run(
         self,
         handler: ScheduleHandler,
-        schedule,
+        spec: ScheduleExecutionSpec,
         claimed: ClaimedRun,
     ) -> None:
         """Create one background task per claimed run when not already running."""
@@ -156,26 +159,26 @@ class ScheduledCrawlWorker(CrawlWorkerBase):
             return
 
         self._create_task(
-            self._run_handler(handler, schedule, claimed),
+            self._run_handler(handler, spec, claimed),
             claimed.task_name,
         )
         logger.info(
             "[%s] %s 태스크 시작: run_id=%s",
             self.name,
             handler.target_type,
-            claimed.run.id,
+            claimed.run_id,
         )
 
     async def _run_handler(
         self,
         handler: ScheduleHandler,
-        schedule,
+        spec: ScheduleExecutionSpec,
         claimed: ClaimedRun,
     ) -> None:
         """Execute a handler and normalize complete/fail lifecycle updates."""
         completed = False
         try:
-            maybe_outcome = handler.execute(schedule, claimed, self._get_worker_ctx())
+            maybe_outcome = handler.execute(spec, claimed, self._get_worker_ctx())
             outcome = await maybe_outcome if inspect.isawaitable(maybe_outcome) else maybe_outcome
             if outcome is None:
                 outcome = HandlerRunOutcome()
@@ -184,7 +187,7 @@ class ScheduledCrawlWorker(CrawlWorkerBase):
             try:
                 schedule_service = TaskScheduleService(db)
                 schedule_service.complete_run(
-                    claimed.run.id,
+                    claimed.run_id,
                     collected_count=outcome.collected_count,
                     saved_count=outcome.saved_count,
                     stop_reason=outcome.stop_reason,
@@ -193,14 +196,14 @@ class ScheduledCrawlWorker(CrawlWorkerBase):
 
                 config_patch = merge_config_snapshot(claimed.config_snapshot_patch, outcome.config_snapshot_patch)
                 if config_patch:
-                    run_obj = db.query(TaskScheduleRun).filter_by(id=claimed.run.id).first()
+                    run_obj = db.query(TaskScheduleRun).filter_by(id=claimed.run_id).first()
                     if run_obj:
                         run_obj.set_config_snapshot(
                             merge_config_snapshot(run_obj.get_config_snapshot(), config_patch)
                         )
                         db.commit()
 
-                schedule_service.update_schedule_after_run(claimed.schedule_id)
+                schedule_service.update_schedule_after_run(spec.schedule_id)
             finally:
                 db.close()
         except Exception as exc:
@@ -208,7 +211,7 @@ class ScheduledCrawlWorker(CrawlWorkerBase):
             if not completed:
                 db = SessionLocal()
                 try:
-                    TaskScheduleService(db).fail_run(claimed.run.id, error_message=str(exc))
+                    TaskScheduleService(db).fail_run(claimed.run_id, error_message=str(exc))
                 except Exception:
                     pass
                 finally:

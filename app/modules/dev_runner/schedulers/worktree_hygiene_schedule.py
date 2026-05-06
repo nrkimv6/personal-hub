@@ -21,6 +21,7 @@ from app.services.task_schedule_service import TaskScheduleService
 from app.worker.schedule_handler_base import (
     ClaimedRun,
     HandlerRunOutcome,
+    ScheduleExecutionSpec,
     ScheduleHandler,
     WorkerContext,
     start_claimed_run,
@@ -58,8 +59,8 @@ class WorktreeHygieneScheduler(ScheduleHandler):
             config_snapshot=schedule.get_target_config(),
         )
 
-    async def execute(self, schedule: TaskSchedule, claimed: ClaimedRun, ctx: WorkerContext) -> HandlerRunOutcome:
-        config = _normalize_config(schedule.get_target_config())
+    async def execute(self, spec: ScheduleExecutionSpec, claimed: ClaimedRun, ctx: WorkerContext) -> HandlerRunOutcome:
+        config = _normalize_config(spec.target_config)
         service = WorktreeHygieneService(config["repo_root"])
         snapshot = service.collect(
             residue_retention_days=config["residue_retention_days"],
@@ -78,7 +79,7 @@ class WorktreeHygieneScheduler(ScheduleHandler):
                 content=content,
                 summary=_build_summary(snapshot.statistics),
                 statistics=snapshot_to_statistics_json(snapshot),
-                schedule_run_id=claimed.run.id,
+                schedule_run_id=claimed.run_id,
                 format="markdown",
             )
             db.add(report)

@@ -13,7 +13,7 @@ from app.models.task_schedule import TaskSchedule, TaskScheduleRun
 from app.models.tracking_item import TrackingItem, TrackingItemPlanLink
 from app.modules.dev_runner.schedulers.worktree_hygiene_schedule import WorktreeHygieneScheduler
 from app.modules.reports.models.generated_report import GeneratedReport
-from app.worker.schedule_handler_base import ClaimedRun, WorkerContext
+from app.worker.schedule_handler_base import ClaimedRun, WorkerContext, build_schedule_execution_spec
 
 
 def _git(repo: Path, *args: str) -> str:
@@ -100,8 +100,8 @@ async def test_schedule_execute_creates_report_and_run_snapshot_counts(session_f
     schedule, run = _seed_schedule(session_factory, repo)
 
     outcome = await WorktreeHygieneScheduler().execute(
-        schedule,
-        ClaimedRun(run=run, task_name="worktree_hygiene_1_run_1"),
+        build_schedule_execution_spec(schedule),
+        ClaimedRun(run_id=run.id, schedule_id=schedule.id, task_name="worktree_hygiene_1_run_1"),
         _ctx(session_factory),
     )
 
@@ -139,8 +139,8 @@ async def test_archive_gap_schedule_execute_creates_tracking_item(session_factor
     schedule, run = _seed_schedule(session_factory, repo)
 
     await WorktreeHygieneScheduler().execute(
-        schedule,
-        ClaimedRun(run=run, task_name="worktree_hygiene_1_run_1"),
+        build_schedule_execution_spec(schedule),
+        ClaimedRun(run_id=run.id, schedule_id=schedule.id, task_name="worktree_hygiene_1_run_1"),
         _ctx(session_factory),
     )
 

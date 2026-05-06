@@ -12,6 +12,7 @@ from app.utils.error_utils import format_error_message
 from app.worker.schedule_handler_base import (
     ClaimedRun,
     HandlerRunOutcome,
+    ScheduleExecutionSpec,
     ScheduleHandler,
     WorkerContext,
     load_schedule_value,
@@ -102,11 +103,11 @@ class InstagramFeedScheduler(ScheduleHandler):
 
     async def execute(
         self,
-        schedule: TaskSchedule,
+        spec: ScheduleExecutionSpec,
         claimed: ClaimedRun,
         ctx: WorkerContext,
     ) -> HandlerRunOutcome:
-        config = schedule.get_target_config()
+        config = spec.target_config
         service_account_id = config.get("service_account_id")
         if not service_account_id:
             raise RuntimeError("service_account_id 없음")
@@ -118,6 +119,10 @@ class InstagramFeedScheduler(ScheduleHandler):
         retry_count = 0
         try:
             crawl_service = CrawlService(db)
+            schedule_obj = db.query(TaskSchedule).filter_by(id=spec.schedule_id).first()
+            run_obj = db.query(TaskScheduleRun).filter_by(id=claimed.run_id).first()
+            if not schedule_obj or not run_obj:
+                raise RuntimeError("Instagram schedule/run not found")
 
             while retry_count <= max_retries:
                 try:
@@ -137,8 +142,8 @@ class InstagramFeedScheduler(ScheduleHandler):
                         callback=self._crawl_feed_with_tab,
                         service_account_id=account.id,
                         operation_timeout=3600.0,
-                        schedule=schedule,
-                        run=claimed.run,
+                        schedule=schedule_obj,
+                        run=run_obj,
                         account=account,
                         db=db,
                         crawl_service=crawl_service,

@@ -14,6 +14,7 @@ from app.services.task_schedule_service import TaskScheduleService
 from app.worker.schedule_handler_base import (
     ClaimedRun,
     HandlerRunOutcome,
+    ScheduleExecutionSpec,
     ScheduleHandler,
     WorkerContext,
     start_claimed_run,
@@ -51,13 +52,13 @@ class PlanArchiveInsightBatchScheduler(ScheduleHandler):
             config_snapshot=schedule.get_target_config(),
         )
 
-    async def execute(self, schedule: TaskSchedule, claimed: ClaimedRun, ctx: WorkerContext) -> HandlerRunOutcome:
+    async def execute(self, spec: ScheduleExecutionSpec, claimed: ClaimedRun, ctx: WorkerContext) -> HandlerRunOutcome:
         loop = asyncio.get_event_loop()
         result = await loop.run_in_executor(
             None,
             self._enqueue_in_db,
             ctx.db_factory,
-            schedule.get_target_config(),
+            spec.target_config,
         )
         queued = 1 if result.get("queued") else 0
         stop_reason = result.get("reason") or "queued"

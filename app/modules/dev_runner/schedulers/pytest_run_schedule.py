@@ -9,6 +9,7 @@ from app.services.task_schedule_service import TaskScheduleService
 from app.worker.schedule_handler_base import (
     ClaimedRun,
     HandlerRunOutcome,
+    ScheduleExecutionSpec,
     ScheduleHandler,
     WorkerContext,
     start_claimed_run,
@@ -49,10 +50,10 @@ class PytestRunScheduler(ScheduleHandler):
             config_snapshot=schedule.get_target_config(),
         )
 
-    async def execute(self, schedule: TaskSchedule, claimed: ClaimedRun, ctx: WorkerContext) -> HandlerRunOutcome:
-        config = schedule.get_target_config()
+    async def execute(self, spec: ScheduleExecutionSpec, claimed: ClaimedRun, ctx: WorkerContext) -> HandlerRunOutcome:
+        config = spec.target_config
         if ctx.update_worker_state:
-            ctx.update_worker_state("running_pytest", f"pytest_{schedule.id}")
+            ctx.update_worker_state("running_pytest", f"pytest_{spec.schedule_id}")
 
         try:
             loop = asyncio.get_event_loop()
@@ -60,7 +61,7 @@ class PytestRunScheduler(ScheduleHandler):
                 None,
                 self._run_pytest_sync,
                 config,
-                claimed.run.id,
+                claimed.run_id,
                 ctx.db_factory,
             )
             if result.get("error"):

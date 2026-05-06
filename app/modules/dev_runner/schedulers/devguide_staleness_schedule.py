@@ -13,6 +13,7 @@ from app.services.task_schedule_service import TaskScheduleService
 from app.worker.schedule_handler_base import (
     ClaimedRun,
     HandlerRunOutcome,
+    ScheduleExecutionSpec,
     ScheduleHandler,
     WorkerContext,
     start_claimed_run,
@@ -53,7 +54,7 @@ class DevguideStalenessScheduler(ScheduleHandler):
             config_snapshot={},
         )
 
-    async def execute(self, schedule: TaskSchedule, claimed: ClaimedRun, ctx: WorkerContext) -> HandlerRunOutcome:
+    async def execute(self, spec: ScheduleExecutionSpec, claimed: ClaimedRun, ctx: WorkerContext) -> HandlerRunOutcome:
         loop = asyncio.get_event_loop()
         count = await loop.run_in_executor(None, self._build_and_save_staleness, ctx.db_factory)
         return HandlerRunOutcome(

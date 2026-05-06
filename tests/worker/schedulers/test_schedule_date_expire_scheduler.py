@@ -7,7 +7,7 @@ from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
-from app.worker.schedule_handler_base import ClaimedRun, WorkerContext
+from app.worker.schedule_handler_base import ClaimedRun, ScheduleExecutionSpec, WorkerContext
 from app.worker.schedulers.schedule_date_expire_schedule import ScheduleDateExpireScheduler
 
 
@@ -54,8 +54,16 @@ async def test_execute_returns_affected_ids_patch(session_factory):
 
     with patch("app.worker.schedulers.schedule_date_expire_schedule.get_today_kst_iso", return_value="2026-04-22"):
         outcome = await scheduler.execute(
-            MagicMock(id=1),
-            ClaimedRun(run=MagicMock(id=2), task_name="schedule_date_expire_1_run_2"),
+            ScheduleExecutionSpec(
+                schedule_id=1,
+                target_type="schedule_date_expire",
+                name="schedule_date_expire",
+                target_config={},
+                schedule_value=None,
+                schedule_type="cron",
+                display_name="Schedule Date Expire",
+            ),
+            ClaimedRun(run_id=2, schedule_id=1, task_name="schedule_date_expire_1_run_2"),
             ctx,
         )
 

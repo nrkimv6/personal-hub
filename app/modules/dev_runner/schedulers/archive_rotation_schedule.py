@@ -9,6 +9,7 @@ from app.services.task_schedule_service import TaskScheduleService
 from app.worker.schedule_handler_base import (
     ClaimedRun,
     HandlerRunOutcome,
+    ScheduleExecutionSpec,
     ScheduleHandler,
     WorkerContext,
     start_claimed_run,
@@ -49,9 +50,9 @@ class ArchiveRotationScheduler(ScheduleHandler):
             config_snapshot={},
         )
 
-    async def execute(self, schedule: TaskSchedule, claimed: ClaimedRun, ctx: WorkerContext) -> HandlerRunOutcome:
+    async def execute(self, spec: ScheduleExecutionSpec, claimed: ClaimedRun, ctx: WorkerContext) -> HandlerRunOutcome:
         loop = asyncio.get_event_loop()
-        config = schedule.get_target_config()
+        config = spec.target_config
         max_files_per_run = int(config.get("max_files_per_run") or 30)
         result = await loop.run_in_executor(None, self._rotate_archives, max_files_per_run)
         removed = result.get("removed", result.get("rotated", 0))

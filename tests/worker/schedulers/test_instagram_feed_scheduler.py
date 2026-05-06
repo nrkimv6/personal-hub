@@ -13,7 +13,7 @@ from app.modules.instagram.models.schemas import TimeWindow
 from app.modules.instagram.schedulers.feed_schedule import InstagramFeedScheduler
 from app.modules.instagram.services.scheduler import InstagramScheduler
 from app.services.task_schedule_service import TaskScheduleService
-from app.worker.schedule_handler_base import ClaimedRun, WorkerContext
+from app.worker.schedule_handler_base import ClaimedRun, ScheduleExecutionSpec, WorkerContext
 
 
 OPERATIONAL_EXACT_SLOTS = ["07:00", "09:20", "10:00", "12:00", "14:00", "15:00", "22:00", "17:00"]
@@ -173,7 +173,7 @@ def test_claim_run_Ca_records_scheduled_for_for_operational_slots():
         claimed = InstagramFeedScheduler().claim_run(db, schedule, svc, ctx)
 
         assert claimed is not None
-        snapshot = db.query(TaskScheduleRun).filter_by(id=claimed.run.id).one().get_config_snapshot()
+        snapshot = db.query(TaskScheduleRun).filter_by(id=claimed.run_id).one().get_config_snapshot()
         assert snapshot["scheduled_for"] == datetime(2026, 5, 4, 22, 0).isoformat()
         assert snapshot["schedule_params"]["time_windows"] == [
             {"start": value, "end": value} for value in OPERATIONAL_EXACT_SLOTS
@@ -262,14 +262,20 @@ def test_claim_run_T_active_run_blocks_duplicate_claim():
 @pytest.mark.asyncio
 async def test_execute_requires_execute_with_tab_context():
     scheduler = InstagramFeedScheduler()
-    schedule = MagicMock(id=1)
-    schedule.get_target_config.return_value = {"service_account_id": 7}
     ctx = WorkerContext(worker_name="test_worker", browser_manager=None, db_factory=MagicMock())
 
     with pytest.raises(RuntimeError, match="execute_with_tab"):
         await scheduler.execute(
-            schedule,
-            ClaimedRun(run=MagicMock(id=2), task_name="instagram_schedule_1_run_2"),
+            ScheduleExecutionSpec(
+                schedule_id=1,
+                target_type=TaskSchedule.TARGET_TYPE_INSTAGRAM_FEED,
+                name="instagram",
+                target_config={"service_account_id": 7},
+                schedule_value=None,
+                schedule_type=TaskSchedule.SCHEDULE_TYPE_TIME_WINDOW,
+                display_name="Instagram",
+            ),
+            ClaimedRun(run_id=2, schedule_id=1, task_name="instagram_schedule_1_run_2"),
             ctx,
         )
 

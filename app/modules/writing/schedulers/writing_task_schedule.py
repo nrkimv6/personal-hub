@@ -10,6 +10,7 @@ from app.modules.writing.worker.writing_worker import WritingWorker
 from app.worker.schedule_handler_base import (
     ClaimedRun,
     HandlerRunOutcome,
+    ScheduleExecutionSpec,
     ScheduleHandler,
     WorkerContext,
     start_claimed_run,
@@ -53,17 +54,17 @@ class WritingTaskScheduler(ScheduleHandler):
             config_snapshot=config,
         )
 
-    async def execute(self, schedule: TaskSchedule, claimed: ClaimedRun, ctx: WorkerContext) -> HandlerRunOutcome:
+    async def execute(self, spec: ScheduleExecutionSpec, claimed: ClaimedRun, ctx: WorkerContext) -> HandlerRunOutcome:
         if ctx.update_worker_state:
-            ctx.update_worker_state("writing", f"schedule_{schedule.id}")
+            ctx.update_worker_state("writing", f"schedule_{spec.schedule_id}")
 
         try:
             loop = asyncio.get_event_loop()
             result = await loop.run_in_executor(
                 None,
                 self._run_writing_job_sync,
-                schedule.id,
-                claimed.run.id,
+                spec.schedule_id,
+                claimed.run_id,
                 ctx.db_factory,
                 ctx.worker_name,
             )

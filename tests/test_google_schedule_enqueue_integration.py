@@ -111,13 +111,17 @@ async def test_google_search_scheduler_pushes_to_real_redis_and_preserves_schedu
     real_async_redis,
 ):
     from app.modules.google_search.schedulers.search_schedule import GoogleSearchScheduler
-    from app.worker.schedule_handler_base import ClaimedRun, WorkerContext
+    from app.worker.schedule_handler_base import ClaimedRun, ScheduleExecutionSpec, WorkerContext
 
     with session_factory() as seed_db:
         saved_search = _create_saved_search(seed_db)
         schedule = _create_schedule(seed_db, saved_search.id)
         saved_search_id = saved_search.id
         schedule_id = schedule.id
+        schedule_name = schedule.name
+        schedule_value = schedule.schedule_value
+        schedule_type = schedule.schedule_type
+        schedule_display_name = schedule.display_name or schedule.name
 
     scheduler = GoogleSearchScheduler()
     queue = RedisQueue(real_async_redis, GOOGLE_SEARCH_QUEUE)
@@ -133,12 +137,19 @@ async def test_google_search_scheduler_pushes_to_real_redis_and_preserves_schedu
         AsyncMock(return_value=real_async_redis),
     ):
         outcome = await scheduler.execute(
-            schedule,
-            ClaimedRun(
-                run=Mock(id=101),
-                task_name=f"google_schedule_{schedule_id}_run_101",
+            ScheduleExecutionSpec(
                 schedule_id=schedule_id,
-                target_config_snapshot={"saved_search_id": saved_search_id},
+                target_type=TaskSchedule.TARGET_TYPE_GOOGLE_SEARCH,
+                name=schedule_name,
+                target_config={"saved_search_id": saved_search_id},
+                schedule_value=schedule_value,
+                schedule_type=schedule_type,
+                display_name=schedule_display_name,
+            ),
+            ClaimedRun(
+                run_id=101,
+                schedule_id=schedule_id,
+                task_name=f"google_schedule_{schedule_id}_run_101",
             ),
             ctx,
         )

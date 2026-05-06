@@ -12,6 +12,7 @@ from app.services.task_schedule_service import TaskScheduleService
 from app.worker.schedule_handler_base import (
     ClaimedRun,
     HandlerRunOutcome,
+    ScheduleExecutionSpec,
     ScheduleHandler,
     WorkerContext,
     start_claimed_run,
@@ -57,7 +58,7 @@ class ScheduleDateExpireScheduler(ScheduleHandler):
             config_snapshot={},
         )
 
-    async def execute(self, schedule: TaskSchedule, claimed: ClaimedRun, ctx: WorkerContext) -> HandlerRunOutcome:
+    async def execute(self, spec: ScheduleExecutionSpec, claimed: ClaimedRun, ctx: WorkerContext) -> HandlerRunOutcome:
         loop = asyncio.get_event_loop()
         today_kst, affected_ids = await loop.run_in_executor(None, self._expire_schedules, ctx.db_factory)
         count = len(affected_ids)
