@@ -8,6 +8,7 @@ import shutil
 import tempfile
 from datetime import datetime
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -201,6 +202,62 @@ def test_queue_archive_candidates_R_imports_file_only_and_queues_selected_target
         )
     assert result["status_key"] == "queued"
     assert result.get("job_id") is not None
+
+
+def test_queue_archive_candidates_R_route_uses_same_selected_targets_for_candidate_and_record(
+    db,
+    archive_dir,
+    monkeypatch,
+):
+    from app.modules.dev_runner.routes import plan_records
+    from app.modules.dev_runner.schemas import (
+        PlanArchiveCandidateQueueRequest,
+        PlanArchiveExecutionTarget,
+    )
+
+    f = _make_plan_file(archive_dir, "2026-05-07_candidate-route.md")
+    record = _record_for_file(str(f), archived=True)
+    record.filename_hash = "route-record-hash"
+    record.file_path = "/archive/2026-05-07_existing-route.md"
+    db.add(record)
+    db.commit()
+
+    monkeypatch.setattr(
+        plan_records._plan_service,
+        "list_registered_paths",
+        lambda: [SimpleNamespace(path=str(archive_dir), path_type="archive")],
+    )
+    selected_target = PlanArchiveExecutionTarget(
+        provider="codex",
+        model="gpt-5.5",
+        dedupe_key="profileless:codex:gpt-5.5",
+    )
+    req = PlanArchiveCandidateQueueRequest(
+        candidate_keys=[str(f)],
+        record_ids=[record.id],
+        selected_targets=[selected_target],
+    )
+    captured_targets: list[list[dict]] = []
+
+    def fake_enqueue(record_arg, **kwargs):
+        captured_targets.append(kwargs["selected_targets"])
+        return {
+            "status_key": "queued",
+            "job_id": len(captured_targets),
+            "request_ids": [1000 + len(captured_targets)],
+        }
+
+    with patch(
+        "app.modules.dev_runner.services.plan_archive_execution_service.PlanArchiveExecutionService.enqueue_record",
+        side_effect=fake_enqueue,
+    ):
+        response = plan_records.queue_archive_candidates(req, db=db)
+
+    assert response.queued == 2
+    assert len(captured_targets) == 2
+    assert captured_targets[0] == captured_targets[1]
+    assert captured_targets[0][0]["provider"] == "codex"
+    assert captured_targets[0][0]["model"] == "gpt-5.5"
 
 
 # ── E: unregistered candidate key ────────────────────────────────────────────
