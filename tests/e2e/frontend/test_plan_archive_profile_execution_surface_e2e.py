@@ -263,9 +263,9 @@ def test_archive_profile_execution_controls_and_capacity_state(
     expect(page.get_by_text("quota 1")).to_be_visible()
 
     page.get_by_role("button", name="Sync").click()
-    expect(page.get_by_text("sync updated 1", exact=True)).to_be_visible()
+    expect(page.get_by_text("동기화 1건", exact=True)).to_be_visible()
     assert calls["sync"] == 1
 
     page.get_by_role("button", name="Backlog 실행").click()
-    expect(page.get_by_text("queued 1", exact=True)).to_be_visible()
+    expect(page.get_by_text("큐잉 1건", exact=True)).to_be_visible()
     assert calls["run"] == 1
