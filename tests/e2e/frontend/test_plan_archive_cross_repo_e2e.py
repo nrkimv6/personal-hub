@@ -191,4 +191,4 @@ def test_archive_cross_repo_surface_runs_dry_run_for_selected_record(archive_cro
     expect(page.get_by_text("Cross-repo index")).to_be_visible()
     expect(page.get_by_text("#42 Plan Archive cross repo")).to_be_visible()
     page.get_by_role("button", name="cross dry-run").click()
-    expect(page.get_by_text("repos 2")).to_be_visible()
+    expect(page.get_by_text("repos 2", exact=True)).to_be_visible()
