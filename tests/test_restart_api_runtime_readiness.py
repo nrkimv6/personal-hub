@@ -2,8 +2,11 @@ from __future__ import annotations
 
 import json
 import urllib.error
+from datetime import datetime, timedelta
 from pathlib import Path
 from unittest.mock import MagicMock, patch
+
+import pytest
 
 from app.core.runtime_fingerprint import (
     WORKER_SOURCE_FILES,
@@ -27,6 +30,64 @@ class _Response:
 
     def __exit__(self, exc_type, exc, tb):
         return False
+
+
+def _restart_target(tmp_path: Path) -> api_actions.RestartApiTarget:
+    return api_actions.RestartApiTarget(
+        api_port=8001,
+        app_mode="admin",
+        pid_suffix="_admin",
+        pid_file=tmp_path / ".pids" / "api_admin.pid",
+        service_name="MonitorPage-Admin",
+    )
+
+
+def _manager_with_log_dir(tmp_path: Path) -> MagicMock:
+    log_dir = tmp_path / "logs" / "admin"
+    log_dir.mkdir(parents=True, exist_ok=True)
+    manager = MagicMock()
+    manager.log_dir = log_dir
+    return manager
+
+
+def _write_service_log(log_dir: Path, lines: list[str]) -> Path:
+    path = log_dir / "service_runner_20260504_113328.log"
+    path.write_text("\n".join(lines), encoding="utf-8")
+    return path
+
+
+def _write_death_log(log_dir: Path, entries: list[dict[str, object]]) -> Path:
+    path = log_dir / "death_log.json"
+    path.write_text("\n".join(json.dumps(entry) for entry in entries), encoding="utf-8")
+    return path
+
+
+def _death_entry(
+    timestamp: datetime,
+    *,
+    cause: str,
+    uptime_seconds: int = 0,
+    last_request: str | None = None,
+) -> dict[str, object]:
+    return {
+        "timestamp": timestamp.isoformat(timespec="seconds"),
+        "pid": 1234,
+        "event": "death",
+        "cause": cause,
+        "exit_code": 1,
+        "uptime_seconds": uptime_seconds,
+        "details": "fixture",
+        "last_request": last_request,
+    }
+
+
+def _runtime_success_urlopen(expected_fingerprint: str):
+    def fake_urlopen(url, timeout=0, **kwargs):
+        if "runtime-fingerprint" in url:
+            return _Response(200, json.dumps({"runtime_fingerprint": expected_fingerprint}).encode("utf-8"))
+        raise AssertionError(f"unexpected url: {url}")
+
+    return fake_urlopen
 
 
 def test_runtime_fingerprint_changes_when_source_or_mode_changes(tmp_path: Path):
@@ -151,6 +212,47 @@ def test_restart_api_waits_for_runtime_fingerprint_match(tmp_path: Path):
         api_actions.restart_api(manager)
 
     assert runtime_calls["count"] >= 2
+
+
+def test_restart_api_success_output_includes_service_log_window_T3(tmp_path: Path):
+    manager = _manager_with_log_dir(tmp_path)
+    manager.api_port = 8001
+    manager.pid_suffix = "_admin"
+    manager.pid_dir = tmp_path / ".pids"
+    manager._check_wmi_health.return_value = True
+    _write_service_log(
+        manager.log_dir,
+        [
+            "[2026-05-04 11:33:28] Monitor Page Service Starting",
+            "[2026-05-04 11:33:35] API Server starting on port 8001",
+        ],
+    )
+    expected_snapshot = build_runtime_fingerprint_snapshot(app_mode="admin")
+    expected_fingerprint = str(expected_snapshot["runtime_fingerprint"])
+    printed: list[str] = []
+
+    def fake_urlopen(request, timeout=0, **kwargs):
+        url = getattr(request, "full_url", request)
+        if "__local/api-gate/close" in url:
+            return _Response(200, b"{}")
+        if "self-restart" in url:
+            return _Response(200, b"{}")
+        if "runtime-fingerprint" in url:
+            return _Response(200, json.dumps({"runtime_fingerprint": expected_fingerprint}).encode("utf-8"))
+        raise AssertionError(f"unexpected url: {url}")
+
+    with patch.object(api_actions.time, "sleep", return_value=None), patch.object(
+        api_actions.urllib.request,
+        "urlopen",
+        side_effect=fake_urlopen,
+    ), patch.object(api_actions, "build_runtime_fingerprint_snapshot", return_value=expected_snapshot), patch.object(
+        api_actions,
+        "cprint",
+        side_effect=lambda message, *args, **kwargs: printed.append(str(message)),
+    ):
+        assert api_actions.restart_api(manager) is True
+
+    assert any("service_log_window=" in message for message in printed)
 
 
 def test_restart_api_falls_back_to_status_when_runtime_fingerprint_missing(tmp_path: Path):
@@ -336,7 +438,8 @@ def test_restart_api_timeout_classifies_slow_app_import_as_non_hard_failure(tmp_
 
     assert result.reason == "cold_import_in_progress"
     assert result.hard_failure is False
-    assert result.evidence and result.evidence.endswith("service_runner_20260504_113328.log")
+    assert result.service_log_window and "service_runner_20260504_113328.log" in result.service_log_window
+    assert result.evidence == result.service_log_window
 
 
 def test_restart_api_timeout_classifies_startup_exception_as_hard_failure(tmp_path: Path):
@@ -369,8 +472,296 @@ def test_restart_api_timeout_classifies_startup_exception_as_hard_failure(tmp_pa
         last_error="connection refused",
     )
 
-    assert result.reason == "startup_exception"
+    assert result.reason == "startup_exception_seen_before_ready"
     assert result.hard_failure is True
+
+
+@pytest.mark.parametrize(
+    "failure_line",
+    [
+        "[2026-05-04 11:33:31] Service failed: ModuleNotFoundError(\"No module named 'app.lifespan'\")",
+        "[2026-05-04 11:33:31] Service failed: ImportError('cannot import name router')",
+        "[2026-05-04 11:33:31] Service failed: RuntimeError('arbitrary startup boom')",
+    ],
+)
+def test_restart_api_liveness_success_with_any_startup_exception_is_hard_failure_E(
+    tmp_path: Path,
+    failure_line: str,
+):
+    manager = _manager_with_log_dir(tmp_path)
+    target = _restart_target(tmp_path)
+    _write_service_log(
+        manager.log_dir,
+        [
+            "[2026-05-04 11:33:28] Monitor Page Service Starting",
+            failure_line,
+        ],
+    )
+    expected_fingerprint = "expected-runtime"
+
+    with patch.object(api_actions.time, "sleep", return_value=None), patch.object(
+        api_actions.urllib.request,
+        "urlopen",
+        side_effect=_runtime_success_urlopen(expected_fingerprint),
+    ):
+        result = api_actions._wait_for_restart_api_readiness(
+            manager,
+            target,
+            expected_fingerprint=expected_fingerprint,
+            expected_source_fingerprint="expected-source",
+            timeout_seconds=5,
+            poll_seconds=5,
+        )
+
+    assert result.healthy is False
+    assert result.reason == "startup_exception_seen_before_ready"
+    assert result.hard_failure is True
+    assert result.service_log_window and "Monitor Page Service Starting" in result.service_log_window
+    assert result.failure_evidence and "service_log=" in result.failure_evidence
+
+
+def test_restart_api_zero_uptime_startup_death_after_restart_is_hard_failure_E(tmp_path: Path):
+    manager = _manager_with_log_dir(tmp_path)
+    target = _restart_target(tmp_path)
+    restart_at = datetime(2026, 5, 4, 11, 33, 28)
+    _write_service_log(
+        manager.log_dir,
+        [
+            "[2026-05-04 11:33:28] Monitor Page Service Starting",
+            "[2026-05-04 11:33:35] API Server starting on port 8001",
+        ],
+    )
+    _write_death_log(
+        manager.log_dir,
+        [
+            _death_entry(restart_at + timedelta(seconds=1), cause="python_exception", uptime_seconds=0),
+        ],
+    )
+    expected_fingerprint = "expected-runtime"
+
+    with patch.object(api_actions.time, "sleep", return_value=None), patch.object(
+        api_actions.urllib.request,
+        "urlopen",
+        side_effect=_runtime_success_urlopen(expected_fingerprint),
+    ):
+        result = api_actions._wait_for_restart_api_readiness(
+            manager,
+            target,
+            expected_fingerprint=expected_fingerprint,
+            expected_source_fingerprint="expected-source",
+            timeout_seconds=5,
+            poll_seconds=5,
+        )
+
+    assert result.healthy is False
+    assert result.reason == "startup_death_seen_before_ready"
+    assert result.hard_failure is True
+    assert result.death_log_window and "python_exception" in result.death_log_window
+    assert result.failure_evidence and "death_log=" in result.failure_evidence
+
+
+def test_restart_api_normal_shutdown_zero_uptime_is_not_hard_failure_B(tmp_path: Path):
+    manager = _manager_with_log_dir(tmp_path)
+    target = _restart_target(tmp_path)
+    restart_at = datetime(2026, 5, 4, 11, 33, 28)
+    _write_service_log(
+        manager.log_dir,
+        [
+            "[2026-05-04 11:33:28] Monitor Page Service Starting",
+            "[2026-05-04 11:33:35] API Server starting on port 8001",
+        ],
+    )
+    _write_death_log(
+        manager.log_dir,
+        [
+            _death_entry(
+                restart_at + timedelta(seconds=1),
+                cause="normal_shutdown",
+                uptime_seconds=0,
+                last_request="/api/v1/ready",
+            ),
+        ],
+    )
+    expected_fingerprint = "expected-runtime"
+
+    with patch.object(api_actions.time, "sleep", return_value=None), patch.object(
+        api_actions.urllib.request,
+        "urlopen",
+        side_effect=_runtime_success_urlopen(expected_fingerprint),
+    ):
+        result = api_actions._wait_for_restart_api_readiness(
+            manager,
+            target,
+            expected_fingerprint=expected_fingerprint,
+            expected_source_fingerprint="expected-source",
+            timeout_seconds=5,
+            poll_seconds=5,
+        )
+
+    assert result.healthy is True
+    assert result.reason == "runtime_fingerprint_matched"
+    assert result.hard_failure is False
+    assert result.service_log_window and "service_runner_20260504_113328.log" in result.service_log_window
+    assert result.death_log_window and "normal_shutdown" in result.death_log_window
+
+
+def test_restart_api_cold_import_in_progress_is_not_hard_failure_B(tmp_path: Path):
+    manager = _manager_with_log_dir(tmp_path)
+    target = _restart_target(tmp_path)
+    _write_service_log(
+        manager.log_dir,
+        [
+            "[2026-05-04 11:33:28] Monitor Page Service Starting",
+            "[2026-05-04 11:33:29] Importing app.config...",
+            "[2026-05-04 11:33:30] Importing app.main...",
+        ],
+    )
+    expected_fingerprint = "expected-runtime"
+
+    with patch.object(api_actions.time, "sleep", return_value=None), patch.object(
+        api_actions.urllib.request,
+        "urlopen",
+        side_effect=_runtime_success_urlopen(expected_fingerprint),
+    ):
+        result = api_actions._wait_for_restart_api_readiness(
+            manager,
+            target,
+            expected_fingerprint=expected_fingerprint,
+            expected_source_fingerprint="expected-source",
+            timeout_seconds=5,
+            poll_seconds=5,
+        )
+
+    assert result.healthy is True
+    assert result.reason == "runtime_fingerprint_matched"
+    assert result.hard_failure is False
+    assert result.service_log_window and "Importing app.main" in result.service_log_window
+
+
+def test_restart_api_old_failure_outside_restart_window_is_ignored_B(tmp_path: Path):
+    manager = _manager_with_log_dir(tmp_path)
+    target = _restart_target(tmp_path)
+    _write_service_log(
+        manager.log_dir,
+        [
+            "[2026-05-04 11:20:00] Monitor Page Service Starting",
+            "[2026-05-04 11:20:01] Service failed: RuntimeError('old failure')",
+            "[2026-05-04 11:33:28] Monitor Page Service Starting",
+            "[2026-05-04 11:33:35] API Server starting on port 8001",
+        ],
+    )
+    expected_fingerprint = "expected-runtime"
+
+    with patch.object(api_actions.time, "sleep", return_value=None), patch.object(
+        api_actions.urllib.request,
+        "urlopen",
+        side_effect=_runtime_success_urlopen(expected_fingerprint),
+    ):
+        result = api_actions._wait_for_restart_api_readiness(
+            manager,
+            target,
+            expected_fingerprint=expected_fingerprint,
+            expected_source_fingerprint="expected-source",
+            timeout_seconds=5,
+            poll_seconds=5,
+        )
+
+    assert result.healthy is True
+    assert result.reason == "runtime_fingerprint_matched"
+    assert result.service_log_window
+    assert "old failure" not in result.service_log_window
+
+
+def test_restart_api_old_failure_in_older_log_file_is_ignored_B(tmp_path: Path):
+    manager = _manager_with_log_dir(tmp_path)
+    target = _restart_target(tmp_path)
+    (manager.log_dir / "service_runner_20260504_112000.log").write_text(
+        "\n".join(
+            [
+                "[2026-05-04 11:20:00] Monitor Page Service Starting",
+                "[2026-05-04 11:20:01] Service failed: RuntimeError('old failure')",
+                "Traceback (most recent call last)",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    (manager.log_dir / "service_runner_20260504_113328.log").write_text(
+        "\n".join(
+            [
+                "[2026-05-04 11:33:28] Monitor Page Service Starting",
+                "[2026-05-04 11:33:35] API Server starting on port 8001",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    expected_fingerprint = "expected-runtime"
+
+    with patch.object(api_actions.time, "sleep", return_value=None), patch.object(
+        api_actions.urllib.request,
+        "urlopen",
+        side_effect=_runtime_success_urlopen(expected_fingerprint),
+    ):
+        result = api_actions._wait_for_restart_api_readiness(
+            manager,
+            target,
+            expected_fingerprint=expected_fingerprint,
+            expected_source_fingerprint="expected-source",
+            timeout_seconds=5,
+            poll_seconds=5,
+        )
+
+    assert result.healthy is True
+    assert result.reason == "runtime_fingerprint_matched"
+    assert result.service_log_window
+    assert "service_runner_20260504_113328.log" in result.service_log_window
+    assert "old failure" not in result.service_log_window
+
+
+def test_restart_api_filesystem_log_fixture_integration_T3(tmp_path: Path):
+    manager = _manager_with_log_dir(tmp_path)
+    target = _restart_target(tmp_path)
+    restart_at = datetime(2026, 5, 4, 11, 33, 28)
+    _write_service_log(
+        manager.log_dir,
+        [
+            "[2026-05-04 11:33:28] Monitor Page Service Starting",
+            "[2026-05-04 11:33:35] API Server starting on port 8001",
+        ],
+    )
+    _write_death_log(
+        manager.log_dir,
+        [
+            _death_entry(restart_at - timedelta(minutes=5), cause="python_exception", uptime_seconds=0),
+            _death_entry(restart_at + timedelta(seconds=2), cause="external_kill", uptime_seconds=0),
+        ],
+    )
+
+    def fake_urlopen(url, timeout=0, **kwargs):
+        if "runtime-fingerprint" in url:
+            raise urllib.error.HTTPError(url, 404, "Not Found", hdrs=None, fp=None)
+        if "system/liveness" in url:
+            return _Response(200, b'{"status":"ok"}')
+        raise AssertionError(f"unexpected url: {url}")
+
+    with patch.object(api_actions.time, "sleep", return_value=None), patch.object(
+        api_actions.urllib.request,
+        "urlopen",
+        side_effect=fake_urlopen,
+    ):
+        result = api_actions._wait_for_restart_api_readiness(
+            manager,
+            target,
+            expected_fingerprint="expected-runtime",
+            expected_source_fingerprint="expected-source",
+            timeout_seconds=5,
+            poll_seconds=5,
+        )
+
+    assert result.healthy is False
+    assert result.reason == "startup_death_seen_before_ready"
+    assert result.service_log_window and "Monitor Page Service Starting" in result.service_log_window
+    assert result.death_log_window and "external_kill" in result.death_log_window
+    assert result.failure_evidence and "external_kill" in result.failure_evidence
 
 
 def test_restart_api_cli_returns_nonzero_for_hard_restart_failure(monkeypatch):
