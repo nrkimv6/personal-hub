@@ -44,6 +44,8 @@ def _response(**overrides):
         "saved": False,
         "record_after": None,
         "save_error": None,
+        "save_outcome_status": None,
+        "save_outcome_reason": None,
     }
     data.update(overrides)
     return data
@@ -67,6 +69,30 @@ def test_post_analyze_response_includes_policy_metadata(client):
     assert data["prompt_policy_version"] == "2026-05-06.1"
     assert mock_analyze.call_args.kwargs["provider"] == "codex"
     assert mock_analyze.call_args.kwargs["model"] == "gpt-5.5"
+
+
+def test_post_analyze_apply_response_includes_save_outcome_metadata(client):
+    with patch(
+        "app.modules.dev_runner.services.plan_archive_manual_analyze_service.PlanArchiveManualAnalyzeService.analyze",
+        return_value=_response(
+            mode="apply",
+            saved=False,
+            save_error="SAVE_PLAN_ARCHIVE_RESULT_FAILED",
+            save_outcome_status="failed",
+            save_outcome_reason="SAVE_PLAN_ARCHIVE_RESULT_FAILED",
+        ),
+    ):
+        resp = client.post(
+            "/api/v1/plans/records/1/analyze",
+            json={"mode": "apply", "provider": "codex", "model": "gpt-5.5"},
+        )
+
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["saved"] is False
+    assert data["save_error"] == "SAVE_PLAN_ARCHIVE_RESULT_FAILED"
+    assert data["save_outcome_status"] == "failed"
+    assert data["save_outcome_reason"] == "SAVE_PLAN_ARCHIVE_RESULT_FAILED"
 
 
 def test_post_analyze_dry_run_rejects_apply_mode(client):

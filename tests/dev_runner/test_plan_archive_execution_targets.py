@@ -70,7 +70,7 @@ def test_targets_to_snapshot_from_targets():
     assert len(result) == 2
     assert result[0]["provider"] == "codex"
     assert result[0]["dedupe_key"] == "profileless:codex:gpt-5.5"
-    assert result[1]["dedupe_key"] == "profile:claude:work"
+    assert result[1]["dedupe_key"] == "profile:claude:work:sonnet"
 
 
 def test_targets_to_snapshot_falls_back_to_profiles():
@@ -80,7 +80,7 @@ def test_targets_to_snapshot_falls_back_to_profiles():
     )
     assert len(result) == 1
     assert result[0]["provider"] == "claude"
-    assert result[0]["dedupe_key"] == "profile:claude:work"
+    assert result[0]["dedupe_key"] == "profile:claude:work:default"
 
 
 def test_targets_to_snapshot_empty():

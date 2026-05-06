@@ -2,6 +2,7 @@
 	import { RefreshCw, ChevronLeft, ChevronRight } from 'lucide-svelte';
 	import { createPagePagination } from '$lib/utils/pagination.svelte';
 	import { archiveScheduleApi, type ArchiveScheduleRunRow, type ArchiveExecutionAttemptRow } from '$lib/api/plan-records';
+	import { actualTargetLabel, effectiveTargetLabel, hasTargetMismatch, requestedTargetLabel } from './planArchiveOperationsState.js';
 
 	let scheduleItems = $state<ArchiveScheduleRunRow[]>([]);
 	let attemptItems = $state<ArchiveExecutionAttemptRow[]>([]);
@@ -17,10 +18,29 @@
 	const attemptPager = createPagePagination(20);
 
 	function attemptTargetText(a: ArchiveExecutionAttemptRow): string {
-		const model = a.model ?? 'default';
-		if (a.engine && a.profile_name) return `${a.engine}/${a.profile_name}/${model}`;
-		if (a.provider) return `${a.provider}/${model}`;
-		return '—';
+		return actualTargetLabel(a);
+	}
+
+	function attemptTargetTitle(a: ArchiveExecutionAttemptRow): string {
+		return `requested: ${requestedTargetLabel(a)}\neffective: ${effectiveTargetLabel(a)}\nactual: ${actualTargetLabel(a)}`;
+	}
+
+	function statusClass(status: string): string {
+		if (status === 'completed') return 'bg-green-100 text-green-700';
+		if (status === 'failed') return 'bg-red-100 text-red-700';
+		if (status === 'stale_skipped' || status === 'superseded') return 'bg-amber-100 text-amber-700';
+		return 'bg-muted';
+	}
+
+	function attemptDisplayStatus(a: ArchiveExecutionAttemptRow): string {
+		if (a.save_outcome_status === 'stale_skipped' || a.save_outcome_status === 'superseded') {
+			return a.save_outcome_status;
+		}
+		return a.status;
+	}
+
+	function attemptErrorText(a: ArchiveExecutionAttemptRow): string {
+		return a.error_message ?? a.save_outcome_reason ?? '—';
 	}
 
 	async function loadScheduleRuns() {
@@ -104,7 +124,7 @@
 						<tr class="border-b border-border/50 hover:bg-muted/30">
 							<td class="px-2 py-1">{r.id}</td>
 							<td class="px-2 py-1">
-								<span class="rounded-full px-1.5 py-0.5 {r.status === 'completed' ? 'bg-green-100 text-green-700' : r.status === 'failed' ? 'bg-red-100 text-red-700' : 'bg-muted'}">{r.status}</span>
+								<span class="rounded-full px-1.5 py-0.5 {statusClass(r.status)}">{r.status}</span>
 							</td>
 							<td class="px-2 py-1 whitespace-nowrap">{r.started_at?.slice(0, 16) ?? '—'}</td>
 							<td class="px-2 py-1 whitespace-nowrap">{r.finished_at?.slice(0, 16) ?? '—'}</td>
@@ -166,15 +186,23 @@
 				</thead>
 				<tbody>
 					{#each attemptItems as a}
+						{@const displayStatus = attemptDisplayStatus(a)}
 						<tr class="border-b border-border/50 hover:bg-muted/30">
 							<td class="px-2 py-1">{a.id}</td>
 							<td class="px-2 py-1">
-								<span class="rounded-full px-1.5 py-0.5 {a.status === 'completed' ? 'bg-green-100 text-green-700' : a.status === 'failed' ? 'bg-red-100 text-red-700' : 'bg-muted'}">{a.status}</span>
+								<span class="rounded-full px-1.5 py-0.5 {statusClass(displayStatus)}">{displayStatus}</span>
 							</td>
-							<td class="px-2 py-1" title={attemptTargetText(a)}>{attemptTargetText(a)}</td>
+							<td class="px-2 py-1" title={attemptTargetTitle(a)}>
+								<div class="flex flex-col gap-0.5">
+									<span>{attemptTargetText(a)}</span>
+									{#if hasTargetMismatch(a)}
+										<span class="text-[10px] text-amber-700">requested {requestedTargetLabel(a)}</span>
+									{/if}
+								</div>
+							</td>
 							<td class="px-2 py-1">{a.record_id ?? '—'}</td>
 							<td class="px-2 py-1 whitespace-nowrap">{a.requested_at?.slice(0, 16) ?? '—'}</td>
-							<td class="px-2 py-1">{a.error_message?.slice(0, 40) ?? '—'}</td>
+							<td class="px-2 py-1">{attemptErrorText(a).slice(0, 40)}</td>
 						</tr>
 					{/each}
 				</tbody>

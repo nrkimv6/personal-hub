@@ -66,7 +66,7 @@ def _make_mock_request(record: PlanRecord, *, source: str = "manual:reanalyze", 
 
 def test_save_plan_archive_result_records_overwritten_audit_snapshot(db):
     """manual:reanalyze 흐름 후 plan_archive_analysis_overwritten 이벤트가 PlanEvent에 기록된다."""
-    from app.modules.claude_worker.services.plan_analyze_handler import save_plan_archive_result
+    from app.modules.claude_worker.services.plan_analyze_handler import save_plan_archive_result_outcome
 
     record = _add_analyzed_record(db, category="infra", summary="old summary")
     request = _make_mock_request(record, source="manual:reanalyze", provider="codex", model="gpt-5.5")
@@ -87,9 +87,11 @@ def test_save_plan_archive_result_records_overwritten_audit_snapshot(db):
     with patch(
         "app.modules.dev_runner.services.plan_archive_relation_service.PlanArchiveRelationService"
     ):
-        save_plan_archive_result(db, request, result)
+        outcome = save_plan_archive_result_outcome(db, request, result)
 
     db.refresh(record)
+    assert outcome.saved is True
+    assert outcome.status == "saved"
     assert record.category == "refactor"
     assert record.summary == "new summary after reanalyze"
 
@@ -155,7 +157,7 @@ def test_save_plan_archive_result_overwritten_event_includes_null_prior_analyzed
 
 def test_save_plan_archive_result_preserves_record_on_failure(db):
     """LLM 결과 저장 실패 시 기존 PlanRecord의 category/summary가 유지된다."""
-    from app.modules.claude_worker.services.plan_analyze_handler import save_plan_archive_result
+    from app.modules.claude_worker.services.plan_analyze_handler import save_plan_archive_result, save_plan_archive_result_outcome
 
     record = _add_analyzed_record(
         db,
@@ -172,6 +174,11 @@ def test_save_plan_archive_result_preserves_record_on_failure(db):
         "app.modules.claude_worker.services.plan_analyze_handler._has_newer_plan_archive_result",
         return_value=True,
     ):
+        outcome = save_plan_archive_result_outcome(
+            db,
+            request,
+            {"success": True, "result": {"category": "overridden"}, "raw_response": ""},
+        )
         result = save_plan_archive_result(
             db,
             request,
@@ -179,6 +186,9 @@ def test_save_plan_archive_result_preserves_record_on_failure(db):
         )
 
     assert result is False
+    assert outcome.saved is False
+    assert outcome.status == "stale_skipped"
+    assert outcome.reason == "newer_completed_result_exists"
     db.refresh(record)
     assert record.category == original_category
     assert record.summary == original_summary

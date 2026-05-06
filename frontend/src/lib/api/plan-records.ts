@@ -73,12 +73,28 @@ export interface PlanArchiveExecutionTarget {
 	kind?: 'profile' | 'engine';
 }
 
+export interface ArchiveProviderModelProfile {
+	provider?: string | null;
+	model?: string | null;
+	profile_key?: string | null;
+	engine?: string | null;
+	profile_name?: string | null;
+	label?: string | null;
+	target_label?: string | null;
+}
+
 export interface PlanArchiveExecutionAttempt {
 	id?: number;
 	record_id?: number;
 	llm_request_id?: number | null;
 	engine?: string | null;
 	profile_name?: string | null;
+	requested_target?: ArchiveProviderModelProfile | null;
+	effective_target?: ArchiveProviderModelProfile | null;
+	actual_target?: ArchiveProviderModelProfile | null;
+	effective_provider_model?: ArchiveProviderModelProfile | null;
+	actual_provider_model?: ArchiveProviderModelProfile | null;
+	assigned_profile?: ArchiveProviderModelProfile | null;
 	status?: string | null;
 	state?: string | null;
 	started_at?: string | null;
@@ -334,6 +350,8 @@ export interface PlanArchiveAnalyzeResponse {
 	saved: boolean;
 	record_after: Record<string, unknown> | null;
 	save_error: string | null;
+	save_outcome_status?: string | null;
+	save_outcome_reason?: string | null;
 }
 
 export interface PlanArchiveInsightCandidate {
@@ -900,6 +918,12 @@ export interface ArchiveLLMRequestRow {
 	engine?: string | null;
 	profile_name?: string | null;
 	target_label?: string | null;
+	requested_target?: ArchiveProviderModelProfile | null;
+	effective_target?: ArchiveProviderModelProfile | null;
+	actual_target?: ArchiveProviderModelProfile | null;
+	effective_provider_model?: ArchiveProviderModelProfile | null;
+	actual_provider_model?: ArchiveProviderModelProfile | null;
+	assigned_profile?: ArchiveProviderModelProfile | null;
 	record_id: string | null;
 	candidate_key: string | null;
 	source_schedule_run_id: number | null;
@@ -911,6 +935,8 @@ export interface ArchiveLLMRequestRow {
 	retry_count: number;
 	applied_request_id: number | null;
 	is_applied_to_record: boolean;
+	save_outcome_status?: string | null;
+	save_outcome_reason?: string | null;
 }
 
 export interface ArchiveRelatedRecord {
@@ -980,7 +1006,15 @@ export interface ArchiveExecutionAttemptRow {
 	model: string | null;
 	engine: string | null;
 	profile_name: string | null;
+	requested_target?: ArchiveProviderModelProfile | null;
+	effective_target?: ArchiveProviderModelProfile | null;
+	actual_target?: ArchiveProviderModelProfile | null;
+	effective_provider_model?: ArchiveProviderModelProfile | null;
+	actual_provider_model?: ArchiveProviderModelProfile | null;
+	assigned_profile?: ArchiveProviderModelProfile | null;
 	error_message: string | null;
+	save_outcome_status?: string | null;
+	save_outcome_reason?: string | null;
 	requested_at: string | null;
 	finished_at: string | null;
 }

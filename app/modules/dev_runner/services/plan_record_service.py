@@ -31,6 +31,7 @@ ARCHIVE_FILE_RETENTION_DAYS = 7
 
 # plan 파일 패턴 필터 — YYYY-MM-DD 로 시작하는 .md 파일만 허용
 PLAN_FILE_PATTERN = re.compile(r"^\d{4}-\d{2}-\d{2}[_-].*\.md$")
+PLAN_ARCHIVE_CATEGORY_FILENAME_PATTERN = re.compile(r"^\d{4}-\d{2}-\d{2}[_-].+\.md$", re.IGNORECASE)
 
 # 등록 제외 파일 목록 — 문서/설정 파일
 EXCLUDE_FILES = {
@@ -81,6 +82,24 @@ def _exclude_temp_pytest_records(query):
 def _is_archive_path(file_path: str) -> bool:
     """경로가 archive 등록 대상인지 보수적으로 판정."""
     return any(part.lower() == "archive" for part in Path(file_path).parts)
+
+
+def _is_plan_archive_category_polluted(category: str | None) -> bool:
+    """Return True when category looks like an archive file path/name."""
+    if not isinstance(category, str):
+        return False
+    value = category.strip()
+    if not value:
+        return False
+    normalized = value.replace("\\", "/")
+    lower = normalized.lower()
+    return (
+        ".md" in lower
+        or "/" in normalized
+        or lower.startswith("docs/archive")
+        or lower.startswith("archive/")
+        or PLAN_ARCHIVE_CATEGORY_FILENAME_PATTERN.match(value) is not None
+    )
 
 
 def _add_event(db: Session, record: PlanRecord, event_type: str, detail: Optional[dict] = None):
@@ -540,6 +559,7 @@ class PlanRecordService:
             PlanRecord.file_removed_at.is_(None),
             PlanRecord.file_delete_after.isnot(None),
         ).with_entities(func.min(PlanRecord.file_delete_after)).scalar()
+        category_pollution_candidates = self.count_plan_archive_category_pollution(include_temp=include_temp)
 
         schedule = (
             self.db.query(TaskSchedule)
@@ -581,6 +601,7 @@ class PlanRecordService:
             "file_retention_due": file_retention_due,
             "file_retention_scheduled": file_retention_scheduled,
             "file_removed": file_removed,
+            "category_pollution_candidates": category_pollution_candidates,
             "oldest_file_delete_after": oldest_file_delete_after.isoformat() if oldest_file_delete_after else None,
             "latest_failed_request": {
                 "id": latest_failed.id,
@@ -604,6 +625,82 @@ class PlanRecordService:
             "retrieval_db_readiness": get_plan_archive_retrieval_readiness(self.db),
             "execution_db_readiness": check_plan_archive_execution_readiness(self.db),
         }
+
+    def count_plan_archive_category_pollution(self, include_temp: bool = False) -> int:
+        query = self.db.query(PlanRecord).filter(
+            PlanRecord.archived_at.isnot(None),
+            PlanRecord.category.isnot(None),
+        )
+        if not include_temp:
+            query = _exclude_temp_pytest_records(query)
+        return sum(1 for record in query.all() if _is_plan_archive_category_polluted(record.category))
+
+    def repair_plan_archive_category_pollution(
+        self,
+        *,
+        apply: bool = False,
+        limit: int = 100,
+    ) -> dict[str, Any]:
+        """Audit or repair existing records whose category was polluted by filename/path."""
+        bounded_limit = max(1, min(int(limit or 100), 1000))
+        query = (
+            self.db.query(PlanRecord)
+            .filter(PlanRecord.archived_at.isnot(None), PlanRecord.category.isnot(None))
+            .order_by(PlanRecord.updated_at.desc(), PlanRecord.id.desc())
+        )
+        items: list[dict[str, Any]] = []
+        repaired = 0
+        now = datetime.now()
+        for record in query.all():
+            if not _is_plan_archive_category_polluted(record.category):
+                continue
+            old_category = record.category
+            suggested = self._suggest_repair_category(record)
+            items.append({
+                "record_id": record.id,
+                "filename_hash": record.filename_hash,
+                "file_path": record.file_path,
+                "old_category": old_category,
+                "suggested_category": suggested,
+                "applied": bool(apply),
+            })
+            if apply:
+                record.category = suggested
+                if record.project is None:
+                    record.project = suggested
+                record.updated_at = now
+                _add_event(
+                    self.db,
+                    record,
+                    "plan_archive_category_repaired",
+                    {
+                        "old_category": old_category,
+                        "new_category": suggested,
+                        "source": "repair_plan_archive_category_pollution",
+                    },
+                )
+                repaired += 1
+            if len(items) >= bounded_limit:
+                break
+        if apply and repaired:
+            self.db.flush()
+        return {
+            "apply": bool(apply),
+            "matched": len(items),
+            "repaired": repaired,
+            "items": items,
+        }
+
+    def _suggest_repair_category(self, record: PlanRecord) -> str:
+        candidates = [
+            self._detect_project_from_path(record.file_path or ""),
+            record.project,
+            "common",
+        ]
+        for candidate in candidates:
+            if candidate and not _is_plan_archive_category_polluted(candidate):
+                return candidate
+        return "common"
 
     def get_guide_status(self, include_history: bool = False) -> List[dict]:
         """가이드별 staleness 정보 반환.

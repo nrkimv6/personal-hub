@@ -8,6 +8,7 @@ from sqlalchemy.pool import StaticPool
 
 from app.models.base import Base
 from app.models.plan_record import PlanRecord
+from app.modules.claude_worker.models.llm_request import LLMRequest
 from app.modules.dev_runner.routes.plan_records import (
     list_archive_execution_history,
     run_archive_executions,
@@ -59,6 +60,49 @@ def test_run_archive_executions_queues_selected_record(db):
     assert result["queued"] == 1
     assert result["profile_count"] == 1
     assert len(result["request_ids"]) == 1
+
+
+def test_run_archive_executions_preserves_selected_target_model_in_request(db):
+    record = PlanRecord(
+        filename_hash="hash-api-selected-target",
+        file_path="/archive/2026-05-06_api-selected-target.md",
+        raw_content="# api selected target",
+        archived_at=datetime(2026, 5, 6),
+        llm_processed_at=None,
+    )
+    db.add(record)
+    db.commit()
+    fake_llm = MagicMock()
+    fake_llm.resolve_provider_model.side_effect = lambda caller_type, provider, model: (
+        provider or "claude",
+        model or "fallback-model",
+    )
+
+    with patch(
+        "app.modules.dev_runner.services.plan_archive_execution_service.LLMService",
+        return_value=fake_llm,
+    ):
+        result = run_archive_executions(
+            PlanArchiveExecutionRunRequest(
+                record_ids=[record.id],
+                selected_targets=[
+                    {
+                        "provider": "claude",
+                        "model": "claude-sonnet-4-5",
+                        "profile_key": "claude:work",
+                        "engine": "claude",
+                        "profile_name": "work",
+                        "label": "claude/work/claude-sonnet-4-5",
+                    }
+                ],
+            ),
+            db=db,
+        )
+
+    request = db.query(LLMRequest).filter_by(id=result["request_ids"][0]).one()
+    assert request.provider == "claude"
+    assert request.model == "claude-sonnet-4-5"
+    assert request.dedupe_key == "profile:claude:work:claude-sonnet-4-5"
 
 
 def test_sync_and_history_endpoints_return_wrapper_shape(db):

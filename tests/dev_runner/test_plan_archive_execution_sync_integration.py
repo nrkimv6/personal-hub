@@ -83,6 +83,7 @@ from sqlalchemy import text
 from app.models.plan_record import PlanEvent
 from app.modules.claude_worker.services.plan_analyze_handler import (
     save_plan_archive_result,
+    save_plan_archive_result_outcome,
     _has_newer_plan_archive_result,
 )
 
@@ -224,10 +225,31 @@ class TestSaveOverwriteGuard:
 
         # 오래된(older)는 저장 거부됨
         older_result = {"success": True, "result": {"category": "old-category"}}
+        outcome_older = save_plan_archive_result_outcome(db, older_req, older_result)
+        assert outcome_older.saved is False
+        assert outcome_older.status == "stale_skipped"
+        assert outcome_older.reason == "newer_completed_result_exists"
         result_older = save_plan_archive_result(db, older_req, older_result)
         assert result_older is False
         db.expire(record)
         assert record.category == "new-category"  # 덮어쓰이지 않음
+
+    def test_missing_record_returns_distinct_outcome(self, overwrite_db):
+        db = overwrite_db
+        """존재하지 않는 record는 stale skip과 구분되는 outcome을 반환한다."""
+        req = _make_request(db, "missing-hash", status="completed")
+        db.flush()
+
+        outcome = save_plan_archive_result_outcome(
+            db,
+            req,
+            {"success": True, "result": {"category": "feature"}},
+        )
+
+        assert outcome.saved is False
+        assert outcome.status == "record_missing"
+        assert outcome.reason == "record_not_found"
+        assert outcome.record_id is None
 
     def test_newest_request_applied_to_record(self, overwrite_db):
         db = overwrite_db

@@ -2,6 +2,7 @@
 	import { RefreshCw, ChevronLeft, ChevronRight } from 'lucide-svelte';
 	import { createPagePagination } from '$lib/utils/pagination.svelte';
 	import { archiveScheduleApi, type ArchiveLLMRequestRow, type ArchiveLLMRequestDetail } from '$lib/api/plan-records';
+	import { actualTargetLabel, effectiveTargetLabel, hasTargetMismatch, requestedTargetLabel } from './planArchiveOperationsState.js';
 
 	interface Props {
 		onSelectRequest?: (req: ArchiveLLMRequestDetail) => void;
@@ -19,10 +20,15 @@
 	let categoryFilter = $state('');
 
 	function targetText(r: ArchiveLLMRequestRow): string {
-		if (r.target_label) return r.target_label;
-		const model = r.model || 'default';
-		if (r.engine && r.profile_name) return `${r.engine}/${r.profile_name}/${model}`;
-		return `${r.provider}/${model}`;
+		return actualTargetLabel(r);
+	}
+
+	function targetTitle(r: ArchiveLLMRequestRow): string {
+		return `requested: ${requestedTargetLabel(r)}\neffective: ${effectiveTargetLabel(r)}\nactual: ${actualTargetLabel(r)}`;
+	}
+
+	function statusLabel(r: ArchiveLLMRequestRow): string {
+		return r.save_outcome_status || r.status;
 	}
 
 	async function load() {
@@ -129,13 +135,21 @@
 							<td class="px-2 py-1">{r.id}</td>
 							<td class="px-2 py-1">
 								<span class="rounded-full px-1.5 py-0.5 {
-									r.status === 'completed' ? 'bg-green-100 text-green-700' :
+									statusLabel(r) === 'completed' ? 'bg-green-100 text-green-700' :
+									statusLabel(r) === 'stale_skipped' || statusLabel(r) === 'superseded' ? 'bg-amber-100 text-amber-700' :
 									r.status === 'failed' ? 'bg-red-100 text-red-700' :
 									r.status === 'processing' ? 'bg-blue-100 text-blue-700' :
 									'bg-muted text-muted-foreground'
-								}">{r.status}</span>
+								}">{statusLabel(r)}</span>
 							</td>
-							<td class="px-2 py-1" title={targetText(r)}>{targetText(r)}</td>
+							<td class="px-2 py-1" title={targetTitle(r)}>
+								<div class="flex flex-col gap-0.5">
+									<span>{targetText(r)}</span>
+									{#if hasTargetMismatch(r)}
+										<span class="text-[10px] text-amber-700">requested {requestedTargetLabel(r)}</span>
+									{/if}
+								</div>
+							</td>
 							<td class="px-2 py-1">
 								{#if r.failure_category}
 									<span class="rounded bg-red-100 px-1 text-red-700">{r.failure_category}</span>

@@ -93,6 +93,7 @@ class TestFindNextPendingInQueue:
             status="pending",
             queue_name="utility",
             provider="gemini",
+            model="gemini-2.5-pro",
             cli_options=json.dumps(
                 {
                     "candidate_profiles": [
@@ -107,6 +108,8 @@ class TestFindNextPendingInQueue:
 
         assert result is not None
         assert result.id == req.id
+        assert result.provider == "gemini"
+        assert result.model == "gemini-2.5-pro"
 
 
 class TestListWithFilters:

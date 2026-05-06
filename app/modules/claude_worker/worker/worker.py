@@ -66,7 +66,7 @@ try:
     logger.debug("execution_window_service import 완료")
 
     from app.modules.claude_worker.services.plan_analyze_handler import (
-        save_plan_archive_result,
+        save_plan_archive_result_outcome,
         save_recurrence_check_result, save_recurrence_suggest_result
     )
     logger.debug("plan_analyze_handler import 완료")
@@ -2082,7 +2082,42 @@ class LLMWorker:
                     )
                     self._increment_processed()
                     logger.info(f"LLM 실행 완료: id={request_id}")
-                    save_success = save_plan_archive_result(db, request, result)
+                    save_outcome = save_plan_archive_result_outcome(db, request, result)
+                    try:
+                        outcome_cli_options = cli_options if isinstance(cli_options, dict) else {}
+                        outcome_cli_options = dict(outcome_cli_options)
+                        outcome_cli_options["plan_archive_save_outcome"] = {
+                            "saved": bool(save_outcome.saved),
+                            "status": save_outcome.status,
+                            "reason": save_outcome.reason,
+                            "record_id": save_outcome.record_id,
+                        }
+                        request.cli_options = json.dumps(outcome_cli_options, ensure_ascii=False)
+                        db.add(request)
+                        db.commit()
+                    except Exception as exc:
+                        db.rollback()
+                        logger.warning(
+                            "Plan Archive save outcome snapshot failed: id=%s error=%s",
+                            request_id,
+                            exc,
+                        )
+                    if save_outcome.status == "stale_skipped":
+                        save_success = True
+                        logger.info(
+                            "Plan Archive stale result skipped without failing request: "
+                            "id=%s record_id=%s reason=%s",
+                            request_id,
+                            save_outcome.record_id,
+                            save_outcome.reason,
+                        )
+                    else:
+                        save_success = save_outcome.saved
+                        if not save_success:
+                            failure_reason = (
+                                f"Save result failed for {caller_type}: "
+                                f"{save_outcome.status}"
+                            )
                 elif caller_type == "plan_recurrence_check":
                     service.mark_completed(
                         request_id,
