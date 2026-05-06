@@ -20,6 +20,9 @@ DEFAULT_LLM_PROFILES_FILE = PROJECT_ROOT / "data" / "llm_profiles.json"
 # 테스트 monkeypatch seam
 LLM_PROFILES_FILE = DEFAULT_LLM_PROFILES_FILE
 
+# Profile 관리가 필요한 엔진 (CLI config dir 기반 계정 분리)
+# Codex/cc-codex 등 profile-less 실행 엔진은 여기에 포함하지 않는다.
+# 실행 가능 provider 전체 목록은 provider_registry.py를 참조한다.
 SUPPORTED_ENGINES = {"claude", "gemini"}
 SECRET_EXTRA_ENV_RE = re.compile(r"(^|_)(API_KEY|TOKEN)$")
 SECRET_EXTRA_ENV_KEYS = {"ANTHROPIC_API_KEY", "GOOGLE_API_KEY"}
@@ -53,6 +56,9 @@ def _dt_to_str(value: Optional[datetime]) -> Optional[str]:
 def _is_secret_extra_env_key(key: str) -> bool:
     upper = key.upper()
     return upper in SECRET_EXTRA_ENV_KEYS or SECRET_EXTRA_ENV_RE.search(upper) is not None
+
+# SUPPORTED_PROFILE_ENGINES — profile 저장/조회가 필요한 엔진 (SUPPORTED_ENGINES의 역할 명시)
+SUPPORTED_PROFILE_ENGINES = SUPPORTED_ENGINES
 
 
 @dataclass

@@ -1,7 +1,7 @@
 """Dev Runner Pydantic Schemas"""
 
 import json as _json
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 from datetime import date, datetime
 from typing import Literal, Optional, List, Union
 
@@ -691,6 +691,16 @@ class PlanArchiveExecutionSyncResponse(BaseModel):
     errors: List[str] = Field(default_factory=list)
 
 
+class PlanRecordsSyncResponse(BaseModel):
+    """plan_records 파일 동기화 응답"""
+    created: int
+    updated: int
+    missing: int
+    archive_created: int = 0
+    archive_updated: int = 0
+    archive_normalized: int = 0
+
+
 class PlanRecordResponse(BaseModel):
     """계획서 레코드 응답"""
     model_config = ConfigDict(from_attributes=True)
@@ -745,6 +755,94 @@ class PlanRecordResponse(BaseModel):
 class PlanRecordWithEventsResponse(PlanRecordResponse):
     """계획서 레코드 + 이벤트 목록"""
     events: List[PlanEventResponse] = []
+    applied_request_id: Optional[int] = None
+
+    @model_validator(mode="after")
+    def compute_applied_request_id(self) -> "PlanRecordWithEventsResponse":
+        """plan_archive_analysis_saved 이벤트에서 가장 최근 적용된 request_id 추출"""
+        saved_events = [
+            e for e in self.events
+            if e.event_type == "plan_archive_analysis_saved" and e.detail
+        ]
+        if saved_events:
+            latest = max(saved_events, key=lambda e: e.id)
+            rid = latest.detail.get("request_id")
+            if isinstance(rid, int):
+                self.applied_request_id = rid
+        return self
+
+
+class ArchiveCandidateRecordResponse(BaseModel):
+    """archive 후보에 붙이는 DB 레코드 요약"""
+    id: int
+    filename_hash: str
+    file_path: str
+    project: Optional[str] = None
+    title: Optional[str] = None
+    status: Optional[str] = None
+    archived_at: Optional[datetime] = None
+    category: Optional[str] = None
+    tags: Optional[list] = None
+    summary: Optional[str] = None
+    intent: Optional[str] = None
+    trigger: Optional[str] = None
+    scope: Optional[list] = None
+    llm_processed_at: Optional[datetime] = None
+    updated_at: datetime
+
+    @field_validator("scope", mode="before")
+    @classmethod
+    def deserialize_scope(cls, v):
+        return PlanRecordResponse.deserialize_scope(v)
+
+
+class ArchiveCandidateResponse(BaseModel):
+    """archive 파일 + DB 상태를 합친 실행 후보"""
+    filename_hash: str
+    file_path: str
+    file_exists: bool
+    db_exists: bool
+    state: str
+    reason: str
+    eligible_for_import: bool
+    eligible_for_analysis: bool
+    registered_path: Optional[str] = None
+    duplicate_paths: List[str] = []
+    file_mtime: Optional[datetime] = None
+    file_size: Optional[int] = None
+    record: Optional[ArchiveCandidateRecordResponse] = None
+
+
+class ArchiveCandidateSummaryResponse(BaseModel):
+    """archive 후보 목록 요약"""
+    total: int
+    returned: int
+    file_only: int = 0
+    db_only: int = 0
+    matched: int = 0
+    needs_archive_normalization: int = 0
+    stale_path: int = 0
+    duplicate_hash: int = 0
+    llm_pending: int = 0
+    candidates: List[ArchiveCandidateResponse]
+
+
+class ArchiveAnalyzeRequest(BaseModel):
+    """archive plan LLM 분석 큐잉 요청."""
+    provider: Optional[str] = None
+    model: Optional[str] = None
+    profile_key: Optional[str] = None
+
+
+class ArchiveAnalyzeResponse(BaseModel):
+    """archive plan LLM 분석 큐잉 응답."""
+    id: int
+    caller_type: str
+    caller_id: str
+    status: str
+    provider: str
+    model: str
+    profile_key: Optional[str] = None
 
 
 class MemoUpdateRequest(BaseModel):
@@ -1022,6 +1120,12 @@ __all__ = [
     'PlanArchiveDocPatchProposalResponse',
     'PlanArchiveAnalyzeRequest',
     'PlanArchiveAnalyzeResponse',
+    'PlanRecordsSyncResponse',
+    'ArchiveCandidateRecordResponse',
+    'ArchiveCandidateResponse',
+    'ArchiveCandidateSummaryResponse',
+    'ArchiveAnalyzeRequest',
+    'ArchiveAnalyzeResponse',
     'MemoUpdateRequest',
     'RunRequest',
     'RunStatusResponse',

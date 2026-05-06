@@ -3,12 +3,15 @@
 from __future__ import annotations
 
 import json
+import logging
 from datetime import datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, Optional, Tuple
 
 from sqlalchemy import and_, func, or_
 from sqlalchemy.orm import Session
+
+logger = logging.getLogger(__name__)
 
 from app.models.plan_archive_execution import PlanArchiveExecutionAttempt, PlanArchiveExecutionJob
 from app.models.plan_record import PlanRecord
@@ -514,3 +517,87 @@ class PlanArchiveExecutionService:
             "model": attempt.model if attempt else None,
             "latest_attempt": self._attempt_to_dict(attempt),
         }
+
+    # ------------------------------------------------------------------
+    # Compatibility entry point: queue_analysis(record, provider, model, profile_key)
+    # Used by /records/{id}/reanalyze. profile_key=None is allowed (codex 등
+    # profile-less provider 지원).
+    # ------------------------------------------------------------------
+    CALLER_TYPE = "plan_archive_analyze"
+
+    def queue_analysis(
+        self,
+        record: PlanRecord,
+        provider: str,
+        model: str = "",
+        profile_key: Optional[str] = None,
+    ) -> Tuple[LLMRequest, bool]:
+        """archive record에 대해 LLM 분석 요청을 큐에 등록한다.
+
+        profile-backed provider(claude/gemini)와 profile-less provider(codex 등)
+        모두 동일한 인터페이스로 큐잉한다. profile_key가 None이어도 허용한다.
+
+        기존 pending/processing 요청이 있으면 그 요청을 재사용한다.
+
+        Returns:
+            (LLMRequest, created): created=False면 기존 요청 재사용
+        """
+        from app.modules.claude_worker.services import provider_registry
+        if not provider_registry.is_supported(provider):
+            raise ValueError(f"unsupported provider: {provider!r}")
+
+        filename_hash = record.filename_hash
+        if not filename_hash:
+            raise ValueError(f"record id={record.id} has no filename_hash")
+
+        existing = (
+            self.db.query(LLMRequest)
+            .filter(
+                LLMRequest.caller_type == self.CALLER_TYPE,
+                LLMRequest.caller_id == filename_hash,
+                LLMRequest.provider == provider,
+                LLMRequest.status.in_(["pending", "processing"]),
+            )
+            .first()
+        )
+        if existing:
+            logger.info(
+                "[exec-svc] 중복 요청 스킵: record_id=%s filename_hash=%s provider=%s request_id=%s",
+                record.id, filename_hash[:8], provider, existing.id,
+            )
+            return existing, False
+
+        try:
+            path = Path(record.file_path)
+            content = path.read_text(encoding="utf-8", errors="replace")
+            filename_only = path.name
+        except Exception:
+            content = record.raw_content or ""
+            filename_only = Path(record.file_path).name if record.file_path else "unknown.md"
+
+        from app.modules.claude_worker.services.plan_analyze_handler import build_plan_analyze_prompt
+        prompt = build_plan_analyze_prompt(file_content=content, filename=filename_only)
+
+        cli_options: dict[str, Any] = {"parse_json": True}
+        if profile_key is not None:
+            cli_options["profile_key"] = profile_key
+            cli_options["profile_optional"] = True
+
+        req = LLMRequest(
+            caller_type=self.CALLER_TYPE,
+            caller_id=filename_hash,
+            prompt=prompt,
+            requested_by="api",
+            request_source="manual_reanalyze",
+            queue_name="utility",
+            status="pending",
+            provider=provider,
+            model=model,
+            cli_options=json.dumps(cli_options, ensure_ascii=False),
+        )
+        self.db.add(req)
+        logger.info(
+            "[exec-svc] 분석 요청 큐 등록: record_id=%s provider=%s model=%s profile_key=%s",
+            record.id, provider, model or "(default)", profile_key,
+        )
+        return req, True

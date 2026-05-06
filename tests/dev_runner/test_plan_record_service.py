@@ -408,6 +408,79 @@ class TestSyncAll:
         result = svc.sync_all([{"path": str(tmp_path / "nonexistent"), "type": "plan"}])
         assert result["created"] == 0
 
+    def test_sync_all_archive_path_creates_archived_record(self, svc, db, tmp_path):
+        """/records/sync가 archive 경로 신규 파일을 archived 상태로 등록한다."""
+        archive_dir = tmp_path / "docs" / "archive" / "monitor-page"
+        archive_dir.mkdir(parents=True)
+        archive_file = archive_dir / "2026-05-06_sync-archive-create.md"
+        archive_file.write_text("# Archive Sync Create\n본문", encoding="utf-8")
+
+        result = svc.sync_all([{"path": str(tmp_path / "docs" / "archive"), "type": "archive"}])
+
+        record = db.query(PlanRecord).filter_by(filename_hash=_compute_filename_hash(str(archive_file))).first()
+        assert result["archive_created"] == 1
+        assert record is not None
+        assert record.status == "archived"
+        assert record.archived_at is not None
+        assert record.category == "monitor-page"
+        assert record.raw_content and "Archive Sync Create" in record.raw_content
+
+    def test_sync_all_archive_path_normalizes_existing_planned_record(self, svc, db, tmp_path):
+        """기존 planned 레코드가 archive 경로에서 발견되면 archived_at/status를 보정한다."""
+        plan_file = tmp_path / "plans" / "2026-05-06_sync-archive-normalize.md"
+        plan_file.parent.mkdir()
+        plan_file.write_text("# Planned Before Archive\n", encoding="utf-8")
+        record = svc.get_or_create(str(plan_file))
+        db.flush()
+        assert record.status == "planned"
+
+        archive_dir = tmp_path / "docs" / "archive" / "common"
+        archive_dir.mkdir(parents=True)
+        archive_file = archive_dir / plan_file.name
+        archive_file.write_text("# Planned Before Archive\narchived", encoding="utf-8")
+
+        result = svc.sync_all([{"path": str(tmp_path / "docs" / "archive"), "type": "archive"}])
+        db.refresh(record)
+
+        assert result["archive_normalized"] == 1
+        assert record.status == "archived"
+        assert record.archived_at is not None
+        assert record.file_path == str(archive_file)
+        assert record.raw_content and "archived" in record.raw_content
+
+    def test_list_archive_candidates_combines_files_and_db(self, svc, db, tmp_path):
+        """archive 후보 목록은 파일-only, 분석대기 DB 매칭 상태를 함께 반환한다."""
+        archive_dir = tmp_path / "docs" / "archive" / "common"
+        archive_dir.mkdir(parents=True)
+        file_only = archive_dir / "2026-05-06_archive-candidate-file-only.md"
+        file_only.write_text("# File Only\n", encoding="utf-8")
+        db_ready = archive_dir / "2026-05-06_archive-candidate-db-ready.md"
+        db_ready.write_text("# DB Ready\n", encoding="utf-8")
+        svc.mark_archived(str(db_ready), str(db_ready), raw_content=db_ready.read_text(encoding="utf-8"))
+        db.flush()
+
+        result = svc.list_archive_candidates(
+            [{"path": str(tmp_path / "docs" / "archive"), "type": "archive"}],
+            include_temp=True,
+        )
+
+        by_name = {Path(item["file_path"]).name: item for item in result["candidates"]}
+        assert by_name[file_only.name]["state"] == "file_only"
+        assert by_name[file_only.name]["eligible_for_import"] is True
+        assert by_name[db_ready.name]["eligible_for_analysis"] is True
+        assert result["llm_pending"] >= 1
+
+    def test_list_archive_candidates_excludes_pytest_temp_by_default(self, svc, db, tmp_path):
+        """후보 목록은 기본값으로 pytest 임시 경로를 숨긴다."""
+        archive_dir = tmp_path / "docs" / "archive" / "common"
+        archive_dir.mkdir(parents=True)
+        archive_file = archive_dir / "2026-05-06_archive-candidate-temp-filter.md"
+        archive_file.write_text("# Temp Filter\n", encoding="utf-8")
+
+        result = svc.list_archive_candidates([{"path": str(tmp_path / "docs" / "archive"), "type": "archive"}])
+
+        assert result["total"] == 0
+
 
 # ========== list_records / list_events ==========
 

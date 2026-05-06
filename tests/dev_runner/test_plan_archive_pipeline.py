@@ -89,6 +89,38 @@ def test_save_plan_archive_result_right(db, sample_record):
     assert (sample_record.file_delete_after - sample_record.llm_processed_at).days == 7
 
 
+def test_save_plan_archive_result_skips_stale_older_request(db):
+    """R: 더 최신 completed 요청이 있으면 오래된 결과가 DB 값을 덮어쓰지 않는다."""
+    record = PlanRecord(
+        filename_hash="stale_guard_hash_001",
+        file_path="/docs/archive/common/2026-05-06_stale-guard.md",
+        project="common",
+        category="latest",
+        summary="최신 결과",
+        archived_at=datetime.now(),
+        status="archived",
+    )
+    db.add(record)
+    db.commit()
+
+    older_request = MagicMock()
+    older_request.id = 15450
+    older_request.caller_type = "plan_archive_analyze"
+    older_request.caller_id = "stale_guard_hash_001"
+
+    with patch("app.modules.claude_worker.services.plan_analyze_handler._has_newer_plan_archive_result", return_value=True):
+        saved = save_plan_archive_result(
+            db,
+            older_request,
+            {"success": True, "result": {"category": "old", "summary": "오래된 결과"}},
+        )
+
+    db.refresh(record)
+    assert saved is False
+    assert record.category == "latest"
+    assert record.summary == "최신 결과"
+
+
 def test_save_plan_archive_result_error_no_record(db):
     """E: 존재하지 않는 filename_hash → 에러 로깅, 예외 없음"""
     mock_request = MagicMock()
