@@ -533,6 +533,12 @@ export const planRecordsApi = {
 			body: JSON.stringify(payload)
 		}),
 
+	indexCrossRepoArchive: (payload: PlanArchiveCrossRepoIndexRequest) =>
+		planRecordsRequest<PlanArchiveCrossRepoIndexResponse>('/retrieval/cross-repo/index', {
+			method: 'POST',
+			body: JSON.stringify(payload)
+		}),
+
 	runArchiveExecutions: (payload: PlanArchiveExecutionRunPayload = {}) =>
 		planRecordsRequest<PlanArchiveExecutionRunResponse>('/records/archive-executions/run', {
 			method: 'POST',

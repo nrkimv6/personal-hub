@@ -13,6 +13,8 @@
     type PlanArchiveRetrievalResult,
     type PlanArchiveMetricsResponse,
     type PlanArchiveIndexResponse,
+    type PlanArchiveCrossRepoIndexResponse,
+    type PlanArchiveAnalyzeResponse,
     type PlanArchiveExecutionAttempt,
     type PlanArchiveSelectedProfile,
     type SyncResult,
@@ -140,7 +142,7 @@
       const res = await planRecordsApi.importArchived();
       importResult = res;
       showToast(`DB 이관 완료: ${res.created}개 생성, ${res.updated}개 갱신, ${res.skipped}개 스킵`);
-      await Promise.all([loadRecords(), loadLlmStats(), loadCandidates()]);
+      await Promise.all([loadRecords(), refreshArchiveSurfaces(), loadArchiveRequests(), loadCandidates()]);
     } catch (e) {
       showToast(e instanceof Error ? e.message : 'DB 이관 실패');
     } finally {
@@ -177,7 +179,7 @@
       const res = await planRecordsApi.sync();
       syncResult = res;
       showToast(`Sync 완료: archive 생성 ${res.archive_created}, 정규화 ${res.archive_normalized}`);
-      await Promise.all([loadRecords(), loadLlmStats(), loadCandidates()]);
+      await Promise.all([loadRecords(), refreshArchiveSurfaces(), loadArchiveRequests(), loadCandidates()]);
     } catch (e) {
       showToast(e instanceof Error ? e.message : 'Sync 실패');
     } finally {
@@ -2409,7 +2411,7 @@
                   {#if expandedFields.has('summary_db')}
                     {requestDetailRecord.summary || '-'}
                   {:else}
-                    {(requestDetailRecord.summary ?? '').slice(0, 80)}{(requestDetailRecord.summary?.length ?? 0) > 80 ? '…' : '' || '-'}
+                      {requestDetailRecord.summary ? `${requestDetailRecord.summary.slice(0, 80)}${requestDetailRecord.summary.length > 80 ? '…' : ''}` : '-'}
                   {/if}
                   {#if (requestDetailRecord.summary?.length ?? 0) > 80}<button class="text-muted-foreground ml-1" onclick={() => toggleExpand('summary_db')}>{expandedFields.has('summary_db') ? '접기' : '더보기'}</button>{/if}
                 </dd>
