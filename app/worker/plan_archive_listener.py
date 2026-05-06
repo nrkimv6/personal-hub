@@ -247,6 +247,18 @@ class PlanArchiveListener(BaseWorker):
             if record.applied_at is None and file_content:
                 record.applied_at = parse_applied_at(file_content)
 
+            if file_content:
+                try:
+                    from app.modules.dev_runner.services.plan_archive_relation_service import (
+                        PlanArchiveRelationService,
+                    )
+
+                    PlanArchiveRelationService(db).refresh_relations_for_record(record.id)
+                except Exception as relation_error:
+                    logger.warning(
+                        f"[{self.name}] relation refresh skipped: {filename} ({relation_error})"
+                    )
+
             # 빈 내용 skip 가드: LLMRequest 생성 억제
             if not file_content:
                 logger.error(

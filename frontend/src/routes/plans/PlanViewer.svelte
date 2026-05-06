@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { devRunnerPlanApi } from '$lib/api/dev-runner';
-	import { planRecordsApi, type PlanRecord } from '$lib/api/plan-records';
+	import { planRecordsApi, type PlanRecord, type PlanRecordRelation } from '$lib/api/plan-records';
 	import MarkdownContent from '$lib/components/markdown/MarkdownContent.svelte';
 
 	interface Props {
@@ -17,6 +17,7 @@
 
 	// 체인 + AI 제안
 	let chainRecords = $state<PlanRecord[]>([]);
+	let relations = $state<PlanRecordRelation[]>([]);
 	let suggestion = $state<{ root_cause: string; pattern: string; suggestion: string } | null>(null);
 
 	async function loadContent(path: string) {
@@ -66,9 +67,20 @@
 		}
 	}
 
+	async function loadRelations(id: number) {
+		try {
+			relations = await planRecordsApi.getRelations(id, { direction: 'both' });
+		} catch {
+			relations = [];
+		}
+	}
+
 	onMount(() => {
 		loadContent(filePath);
-		if (recordId) loadChain(recordId);
+		if (recordId) {
+			loadChain(recordId);
+			loadRelations(recordId);
+		}
 	});
 
 	$effect(() => {
@@ -78,8 +90,10 @@
 	$effect(() => {
 		if (recordId) {
 			loadChain(recordId);
+			loadRelations(recordId);
 		} else {
 			chainRecords = [];
+			relations = [];
 			suggestion = null;
 		}
 	});
@@ -87,6 +101,23 @@
 	function formatDate(s: string | null) {
 		if (!s) return '?';
 		return s.slice(0, 10);
+	}
+
+	function relationLabel(type: string) {
+		const labels: Record<string, string> = {
+			predecessor: '선행',
+			successor: '후속',
+			unresolved_followup: '미해결 후속',
+			cause: '원인',
+			guard: '방어',
+			supersedes: '대체',
+			mentions: '언급'
+		};
+		return labels[type] ?? type;
+	}
+
+	function relationPeer(relation: PlanRecordRelation) {
+		return relation.direction === 'incoming' ? relation.source : relation.target;
 	}
 </script>
 
@@ -114,6 +145,27 @@
 							{i + 1}회 {formatDate(r.archived_at ?? r.created_at)}
 							{#if i < chainRecords.length - 1}<span class="text-orange-400">→</span>{:else}<span class="text-orange-400 font-semibold">(현재)</span>{/if}
 						</span>
+					{/each}
+				</div>
+			</div>
+		{/if}
+
+		{#if relations.length > 0}
+			<div class="mb-3 border border-border rounded p-3 text-xs">
+				<div class="font-semibold text-foreground mb-2">계획 관계</div>
+				<div class="space-y-1">
+					{#each relations.slice(0, 8) as relation}
+						<div class="flex items-center gap-2 min-w-0">
+							<span class="shrink-0 rounded bg-muted px-1.5 py-0.5 text-muted-foreground">
+								{relation.direction === 'incoming' ? '들어옴' : '나감'}
+							</span>
+							<span class="shrink-0 rounded px-1.5 py-0.5 {relation.relation_type === 'unresolved_followup' ? 'bg-red-100 text-red-700 dark:bg-red-900 dark:text-red-200' : 'bg-blue-100 text-blue-700 dark:bg-blue-900 dark:text-blue-200'}">
+								{relationLabel(relation.relation_type)}
+							</span>
+							<span class="truncate text-muted-foreground" title={relationPeer(relation).file_path}>
+								{relationPeer(relation).title || relationPeer(relation).file_path.split(/[\\/]/).pop()}
+							</span>
+						</div>
 					{/each}
 				</div>
 			</div>

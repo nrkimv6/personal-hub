@@ -3,7 +3,7 @@
 import json as _json
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 from datetime import date, datetime
-from typing import Literal, Optional, List, Union
+from typing import Any, Literal, Optional, List, Union
 
 SUPPORTED_RUN_ENGINES = {"claude", "gemini", "codex", "cc-codex"}
 
@@ -266,6 +266,7 @@ class ImportArchivedResponse(BaseModel):
     updated: int
     skipped: int
     errors: List[str]
+    relation_refreshed: int = 0
 
 
 class PlanArchiveScheduleSnapshot(BaseModel):
@@ -416,6 +417,35 @@ class PlanArchivePlanHit(BaseModel):
     intent: Optional[str] = None
     scope: Optional[Union[str, list]] = None
     archived_at: Optional[datetime] = None
+
+
+class PlanRecordRelationPlanSummary(BaseModel):
+    id: int
+    filename_hash: str
+    file_path: str
+    title: Optional[str] = None
+    status: Optional[str] = None
+    archived_at: Optional[datetime] = None
+
+
+class PlanRecordRelationResponse(BaseModel):
+    id: int
+    direction: Literal["outgoing", "incoming"]
+    relation_type: str
+    score: int
+    evidence: Optional[dict[str, Any]] = None
+    source: PlanRecordRelationPlanSummary
+    target: PlanRecordRelationPlanSummary
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
+
+
+class PlanRecordRelationStatisticsResponse(BaseModel):
+    relation_counts: dict[str, int] = {}
+    unresolved_followup_count: int = 0
+    recent_unresolved_followups: List[PlanRecordRelationResponse] = []
+    top_sources: List[dict[str, Any]] = []
+    top_targets: List[dict[str, Any]] = []
 
 
 class PlanArchiveRetrievalHit(BaseModel):
@@ -699,6 +729,7 @@ class PlanRecordsSyncResponse(BaseModel):
     archive_created: int = 0
     archive_updated: int = 0
     archive_normalized: int = 0
+    relation_refreshed: int = 0
 
 
 class PlanRecordResponse(BaseModel):

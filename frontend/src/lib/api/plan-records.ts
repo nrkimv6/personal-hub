@@ -229,6 +229,35 @@ export interface PlanArchiveMetricsResponse {
 	}>;
 }
 
+export interface PlanRecordRelationPlanSummary {
+	id: number;
+	filename_hash: string;
+	file_path: string;
+	title: string | null;
+	status: string | null;
+	archived_at: string | null;
+}
+
+export interface PlanRecordRelation {
+	id: number;
+	direction: 'outgoing' | 'incoming';
+	relation_type: string;
+	score: number;
+	evidence: Record<string, unknown> | null;
+	source: PlanRecordRelationPlanSummary;
+	target: PlanRecordRelationPlanSummary;
+	created_at: string | null;
+	updated_at: string | null;
+}
+
+export interface PlanRecordRelationStatistics {
+	relation_counts: Record<string, number>;
+	unresolved_followup_count: number;
+	recent_unresolved_followups: PlanRecordRelation[];
+	top_sources: Array<Record<string, unknown>>;
+	top_targets: Array<Record<string, unknown>>;
+}
+
 export interface PlanArchiveIndexRequest {
 	limit?: number;
 	force?: boolean;
@@ -594,6 +623,17 @@ export const planRecordsApi = {
 
 	getContent: (id: number) =>
 		planRecordsRequest<{ id: number; raw_content: string | null }>(`/records/${id}/content`),
+
+	getRelations: (id: number, params?: { direction?: 'outgoing' | 'incoming' | 'both'; relation_type?: string }) => {
+		const q = new URLSearchParams();
+		if (params?.direction) q.set('direction', params.direction);
+		if (params?.relation_type) q.set('relation_type', params.relation_type);
+		const qs = q.toString();
+		return planRecordsRequest<PlanRecordRelation[]>(`/records/${id}/relations${qs ? '?' + qs : ''}`);
+	},
+
+	getRelationStatistics: () =>
+		planRecordsRequest<PlanRecordRelationStatistics>('/statistics/relations'),
 
 	/**
 	 * file_path로 레코드 get_or_create

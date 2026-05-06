@@ -131,6 +131,21 @@ def save_plan_archive_result(db: Session, request, result: dict) -> bool:
         db.commit()
         logger.info(f"save_plan_archive_result: updated record id={record.id} category={category}")
 
+        try:
+            from app.modules.dev_runner.services.plan_archive_relation_service import (
+                PlanArchiveRelationService,
+            )
+
+            PlanArchiveRelationService(db).refresh_relations_for_record(record.id)
+            db.commit()
+        except Exception as relation_error:
+            db.rollback()
+            logger.warning(
+                "save_plan_archive_result: relation refresh skipped for record %s: %s",
+                record.id,
+                relation_error,
+            )
+
         # dev-guide staleness 자동 감지
         _maybe_flag_guide_staleness(db, record.file_path)
 
