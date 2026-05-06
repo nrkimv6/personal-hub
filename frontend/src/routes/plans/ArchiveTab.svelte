@@ -223,7 +223,7 @@
         model: selectedModel || null,
         profile_key: null
       });
-      showToast(`분석 큐 등록: #${res.id} ${res.provider}/${res.model}`);
+      showToast(`분석 큐 등록: #${res.request_id} ${res.provider}/${res.model || 'default'}`);
       await Promise.all([loadArchiveRequests(), loadCandidates()]);
     } catch (e) {
       showToast(e instanceof Error ? e.message : '분석 큐 등록 실패');
@@ -272,7 +272,7 @@
 
   // ── 수동 분석 preview/apply ───────────────────────────────
   let manualAnalyzeProvider = $state('codex');
-  let manualAnalyzeModel = $state('gpt-5.2');
+  let manualAnalyzeModel = $state('gpt-5.5');
   let manualAnalyzeTimeout = $state(120);
   let manualAnalyzeLoading = $state(false);
   let manualAnalyzeResult: PlanArchiveAnalyzeResponse | null = $state(null);

@@ -735,7 +735,9 @@ def sync_records(db: Session = Depends(get_db)):
     registered = _plan_service.list_registered_paths()
     paths = [{"path": r.path, "type": r.path_type} for r in registered]
     svc = PlanRecordService(db)
-    return svc.sync_all(paths)
+    result = svc.sync_all(paths)
+    db.commit()
+    return result
 
 
 @router.post("/records/{record_id}/reanalyze")

@@ -975,7 +975,7 @@ class PlanRecordService:
                 _add_event(self.db, record, "missing", {"file_path": record.file_path})
                 missing += 1
 
-        self.db.commit()
+        self.db.flush()
         return {
             "created": created,
             "updated": updated,
