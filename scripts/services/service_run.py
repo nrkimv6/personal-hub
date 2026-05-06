@@ -9,6 +9,7 @@ NSSM 서비스로 등록되어 실행된다:
 """
 import argparse
 import atexit
+import json
 import os
 import shutil
 import signal
@@ -31,11 +32,27 @@ def _resolve_bootstrap_app_mode(argv: list[str] | None = None) -> str:
 
 
 def bootstrap_service_environment(argv: list[str] | None = None, env: dict[str, str] | None = None) -> str:
+    _ensure_project_root_on_sys_path()
     target_env = os.environ if env is None else env
     app_mode = _resolve_bootstrap_app_mode(argv)
     target_env["APP_MODE"] = app_mode
     target_env["PYTHONIOENCODING"] = "utf-8"
+    if env is None:
+        target_env.setdefault("MONITOR_SERVICE_RUN_ENTRY_SCRIPT", str(Path(sys.argv[0]).resolve()))
     return app_mode
+
+
+def build_bootstrap_diagnostics(argv: list[str] | None = None) -> dict[str, str]:
+    _ensure_project_root_on_sys_path()
+    entry_script = os.environ.get("MONITOR_SERVICE_RUN_ENTRY_SCRIPT") or str(Path(sys.argv[0]).resolve())
+    return {
+        "app_mode": _resolve_bootstrap_app_mode(argv),
+        "entry_script": str(Path(entry_script).resolve()),
+        "runner_module": str(Path(__file__).resolve()),
+        "project_root": str(PROJECT_ROOT),
+        "cwd": os.getcwd(),
+        "sys_path_0": sys.path[0] if sys.path else "",
+    }
 
 
 def get_runtime_fingerprint_snapshot(*args, **kwargs):
@@ -102,6 +119,12 @@ from scripts.services.frontend_mode import (
 import psutil
 
 
+def _ensure_project_root_on_sys_path() -> None:
+    project_root = str(PROJECT_ROOT)
+    sys.path[:] = [path for path in sys.path if path != project_root]
+    sys.path.insert(0, project_root)
+
+
 class ServiceRunner:
     def __init__(self, dev: bool):
         self.dev = dev
@@ -163,9 +186,15 @@ class ServiceRunner:
         session_id = get_session_id()
         self.log.info(f"PID: {os.getpid()} | Session: {session_id} | Python: {sys.version.split()[0]}")
         self.log.info(f"Script: {Path(__file__).resolve()}")
+        self.log.info(f"Entry script: {build_bootstrap_diagnostics()['entry_script']}")
+        self.log.info(f"Runner module: {Path(__file__).resolve()}")
         self.log.info(f"PROJECT_ROOT: {PROJECT_ROOT}")
         self.log.info(f"sys.path[0]: {sys.path[0] if sys.path else ''}")
         self.log.info(f"CWD: {os.getcwd()}")
+        self.log.info(
+            "Git checkout note: the stable entry script reduces AppParameters churn, "
+            "but scripts/services/__pycache__/service_run.cpython-*.pyc can still be a separate lock surface."
+        )
         fingerprint = get_runtime_fingerprint_snapshot()
         self.log.info(
             "Runtime fingerprint: "
@@ -600,16 +629,26 @@ class ServiceRunner:
         sys.exit(0)
 
 
-def main():
+def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Monitor Page Service Runner")
     parser.add_argument("--admin", action="store_true", help="Admin mode (port 8001/6101)")
-    args = parser.parse_args()
+    parser.add_argument(
+        "--dry-run-bootstrap",
+        action="store_true",
+        help=argparse.SUPPRESS,
+    )
+    args = parser.parse_args(argv)
 
     # main() 진입 즉시 APP_MODE를 고정해 이후 app import가 stale settings를 만들지 않게 한다.
     bootstrap_service_environment(["--admin"] if args.admin else [])
+    if args.dry_run_bootstrap:
+        print(json.dumps(build_bootstrap_diagnostics(["--admin"] if args.admin else []), ensure_ascii=False, sort_keys=True))
+        return 0
+
     runner = ServiceRunner(dev=args.admin)
     runner.run()
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())

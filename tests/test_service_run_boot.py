@@ -1,8 +1,39 @@
 from __future__ import annotations
 
+import runpy
+import sys
 from unittest.mock import MagicMock, patch
 
 from scripts.services import service_run
+
+
+def test_service_run_stub_invokes_runner_main_R():
+    source = (service_run.PROJECT_ROOT / "scripts" / "service_run.py").read_text(encoding="utf-8")
+    assert "exec(" not in source
+    assert "open(" not in source
+
+    calls: list[list[str] | None] = []
+
+    def fake_main(argv=None):
+        calls.append(argv)
+        return 0
+
+    with patch.object(service_run, "main", side_effect=fake_main), patch.object(
+        sys, "argv", ["scripts/service_run.py", "--admin", "--dry-run-bootstrap"]
+    ):
+        try:
+            runpy.run_path(str(service_run.PROJECT_ROOT / "scripts" / "service_run.py"), run_name="__main__")
+        except SystemExit as exc:
+            assert exc.code == 0
+
+    assert calls == [["--admin", "--dry-run-bootstrap"]]
+
+
+def test_service_run_stub_preserves_project_root_resolution_Re():
+    diagnostics = service_run.build_bootstrap_diagnostics(["--admin"])
+    assert diagnostics["project_root"] == str(service_run.PROJECT_ROOT)
+    assert diagnostics["runner_module"] == str(service_run.Path(service_run.__file__).resolve())
+    assert diagnostics["sys_path_0"] == str(service_run.PROJECT_ROOT)
 
 
 def test_bootstrap_service_environment_sets_mode_and_encoding():
