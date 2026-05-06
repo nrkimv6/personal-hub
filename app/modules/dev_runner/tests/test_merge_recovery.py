@@ -2,6 +2,11 @@
 
 _recover_pending_merge, _cleanup_process_state, _reconnect_surviving_runners의
 resolving 상태 처리를 로직 복제 방식으로 검증한다.
+
+6-axis note:
+- preserver: reconnect/heartbeat cleanup protects approval_required and active merge states.
+- boundary: reconnect recovery is a different path from _stream_output finally cleanup.
+- overwrite-block for _stream_output finally is covered by service_lock approval flow tests.
 """
 
 import threading
@@ -180,7 +185,7 @@ class TestCleanupProcessStateMergeGuard:
         assert blocked is False
 
     def test_rejects_approval_required_on_reconnect(self):
-        """R(Right): merge_status="approval_required" + reconnect_* reason → cleanup 거부"""
+        """preserver: reconnect_* cleanup rejects terminal approval_required."""
         redis_client, _ = _make_redis({
             f"{RUNNER_KEY_PREFIX}:abc:merge_status": "approval_required",
         })

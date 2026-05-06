@@ -1,3 +1,10 @@
+"""Static overwrite-block gate for merge lifecycle keys.
+
+Axis map:
+- overwrite-block: listener modules must not bypass MergePersistence for
+  merge_status, merge_reason, merge_message, or merge_requested writes.
+"""
+
 from pathlib import Path
 import re
 
