@@ -30,13 +30,6 @@ from app.modules.dev_runner.services.plan_archive_embedding_service import (
     PlanArchiveEmbeddingService,
 )
 from app.modules.dev_runner.services.plan_archive_metrics_service import PlanArchiveMetricsService
-from app.modules.dev_runner.services.plan_archive_retrieval_service import (
-    PlanArchiveRetrievalService,
-    RetrievalQuery,
-)
-from app.modules.dev_runner.services.plan_archive_retrieval_readiness import (
-    get_plan_archive_retrieval_readiness,
-)
 from app.modules.dev_runner.services.plan_archive_insight_service import (
     PlanArchiveInsightBatchQuery,
     PlanArchiveInsightService,
@@ -46,6 +39,16 @@ from app.modules.dev_runner.services.plan_archive_insight_review_service import 
 )
 from app.modules.dev_runner.services.plan_archive_doc_patch_service import (
     PlanArchiveDocPatchService,
+)
+from app.modules.dev_runner.services.plan_archive_retrieval_service import (
+    PlanArchiveRetrievalService,
+    RetrievalQuery,
+)
+from app.modules.dev_runner.services.plan_archive_retrieval_readiness import (
+    get_plan_archive_retrieval_readiness,
+)
+from app.modules.dev_runner.services.plan_archive_execution_readiness import (
+    check_plan_archive_execution_readiness,
 )
 from app.modules.dev_runner.schemas import (
     PlanRecordResponse, PlanRecordWithEventsResponse,
@@ -695,6 +698,20 @@ def _ensure_retrieval_db_ready(db: Session) -> None:
     )
 
 
+def _ensure_execution_db_ready(db: Session) -> dict:
+    readiness = check_plan_archive_execution_readiness(db)
+    if readiness["ok"]:
+        return readiness
+    raise HTTPException(
+        status_code=503,
+        detail={
+            "message": "Plan Archive execution DB is not ready",
+            "execution_db_readiness": readiness,
+            "missing_tables": readiness["missing_tables"],
+        },
+    )
+
+
 @router.post("/retrieval/search", response_model=PlanArchiveRetrievalResult)
 def search_archive(req: PlanArchiveRetrievalQuery, db: Session = Depends(get_db)):
     """Search archived plans through metadata, lexical chunks, and file refs."""
@@ -963,6 +980,7 @@ def run_archive_executions(req: PlanArchiveExecutionRunRequest, db: Session = De
         PlanArchiveExecutionService,
     )
 
+    _ensure_execution_db_ready(db)
     svc = PlanArchiveExecutionService(db)
     if req.record_ids:
         records = db.query(PlanRecord).filter(PlanRecord.id.in_(req.record_ids)).all()
@@ -997,6 +1015,21 @@ def sync_archive_executions(db: Session = Depends(get_db)):
     registered = _plan_service.list_registered_paths()
     paths = [{"path": r.path, "type": r.path_type} for r in registered]
     record_sync = PlanRecordService(db).sync_all(paths)
+    readiness = check_plan_archive_execution_readiness(db)
+    if not readiness["ok"]:
+        errors = list(record_sync.get("errors") or [])
+        errors.append(
+            "Plan Archive execution DB is not ready: missing_tables="
+            + ",".join(readiness["missing_tables"])
+        )
+        return {
+            "updated": 0,
+            "checked": 0,
+            "created": record_sync.get("created", 0),
+            "record_updated": record_sync.get("updated", 0),
+            "missing": record_sync.get("missing", 0),
+            "errors": errors,
+        }
     result = PlanArchiveExecutionService(db).sync()
     result["created"] = record_sync.get("created", 0)
     result["record_updated"] = record_sync.get("updated", 0)

@@ -14,6 +14,11 @@ REQUIRED_BOOTSTRAP_TABLES = {
     "writing_batches",
     "llm_requests",
     "llm_worker_status",
+    "llm_request_profile_claims",
+    "llm_profile_assignments",
+    "llm_schedule_profile_policies",
+    "plan_archive_execution_jobs",
+    "plan_archive_execution_attempts",
 }
 
 
