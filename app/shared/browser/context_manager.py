@@ -10,7 +10,7 @@ Proxy Support (2025-12-11):
 import os
 import asyncio
 from pathlib import Path
-from typing import Dict, Optional, TYPE_CHECKING
+from typing import Dict, Optional, Set, TYPE_CHECKING
 
 from playwright.async_api import async_playwright, BrowserContext
 
@@ -41,11 +41,48 @@ class ContextManager:
         # 계정별 브라우저 생성 Lock (동시 생성 방지)
         self._context_locks: Dict[int, asyncio.Lock] = {}
         self._locks_lock = asyncio.Lock()  # Lock 딕셔너리 접근용 Lock
+        self._popup_handler_registered: Set[int] = set()
 
     def set_proxy_manager(self, proxy_manager: Optional["ProxyManager"]):
         """프록시 매니저 설정 (런타임 변경용)"""
         self._proxy_manager = proxy_manager
         logger.info(f"[ContextManager] 프록시 매니저 {'설정됨' if proxy_manager else '해제됨'}")
+
+    def _register_popup_handler(self, service_account_id: int, context: BrowserContext):
+        """팝업/고아 탭 자동 정리 핸들러를 계정별 context에 한 번만 등록한다."""
+        if service_account_id in self._popup_handler_registered:
+            return
+
+        async def _close_if_still_orphan(page):
+            await asyncio.sleep(0)
+            if hasattr(page, "_tab_id"):
+                return
+            try:
+                if page.is_closed():
+                    return
+            except Exception:
+                pass
+            try:
+                await page.close()
+                logger.debug(f"[ContextManager] 팝업/고아 탭 닫힘 (service_account_id={service_account_id})")
+            except Exception as e:
+                logger.debug(f"[ContextManager] 팝업 close 실패 (무시): {e}")
+
+        def _on_popup(page):
+            if hasattr(page, "_tab_id"):
+                return
+            asyncio.create_task(_close_if_still_orphan(page))
+
+        context.on("page", _on_popup)
+
+        try:
+            for page in context.pages:
+                if not hasattr(page, "_tab_id") and page.url == "about:blank":
+                    asyncio.create_task(page.close())
+        except Exception as e:
+            logger.debug(f"[ContextManager] 기존 고아 탭 정리 중 오류 (무시): {e}")
+
+        self._popup_handler_registered.add(service_account_id)
 
     def _get_proxy_config(self) -> Optional[Dict]:
         """Playwright용 프록시 설정 반환"""

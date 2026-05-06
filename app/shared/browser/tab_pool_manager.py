@@ -388,6 +388,10 @@ class TabPoolManager:
 
         return orphan_count
 
+    async def periodic_cleanup(self) -> int:
+        """주기적 고아/오래된 탭 정리를 단일 cleanup 경로로 실행한다."""
+        return await self.cleanup_old_tabs()
+
     async def _is_tab_closed(self, tab: Page) -> bool:
         """탭이 닫혔는지 확인합니다."""
         try:
