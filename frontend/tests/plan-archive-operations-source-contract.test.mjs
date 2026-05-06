@@ -6,6 +6,10 @@ const pageSource = readFileSync(
 	'frontend/src/routes/scheduler/plan-archive/+page.svelte',
 	'utf8'
 );
+const summaryPanelSource = readFileSync(
+	'frontend/src/routes/scheduler/plan-archive/PlanArchiveSummaryPanel.svelte',
+	'utf8'
+);
 const queueTableSource = readFileSync(
 	'frontend/src/routes/scheduler/plan-archive/PlanArchiveQueueTable.svelte',
 	'utf8'
@@ -113,6 +117,19 @@ test('page.svelte backs off polling after 3 consecutive failures', () => {
 	assert.match(pageSource, /pollFailCount >= 3/);
 });
 
+test('PlanArchiveSummaryPanel hides mutation buttons when schedule is null', () => {
+	assert.match(summaryPanelSource, /sched === null/);
+	assert.match(summaryPanelSource, /\{#if sched && enabled === true\}/);
+	assert.match(summaryPanelSource, /\{:else if sched && enabled === false\}/);
+});
+
+test('page.svelte distinguishes schedule missing from admin proxy route 404', () => {
+	assert.match(pageSource, /PlanRecordsRequestError/);
+	assert.match(pageSource, /SCHEDULE_NOT_FOUND_DETAIL/);
+	assert.match(pageSource, /admin API proxy 또는 admin route mismatch/);
+	assert.match(pageSource, /Plan Archive schedule seed 또는 DB 상태/);
+});
+
 // ─── target localStorage persistence (key lives in operationsState module)
 test('planArchiveOperationsState defines localStorage key plan-archive:selected-targets', () => {
 	assert.match(operationsStateSource, /plan-archive:selected-targets/);
@@ -135,4 +152,5 @@ test('plan-records.ts exports archiveScheduleApi with required wrappers', () => 
 	assert.match(apiSource, /queueCandidates/);
 	assert.match(apiSource, /previewCandidate/);
 	assert.match(apiSource, /archiveScheduleApi/);
+	assert.match(apiSource, /class PlanRecordsRequestError extends Error/);
 });
