@@ -8,6 +8,7 @@
 
 ## Quick Guardrails
 
+- 사용자는 평화주의자로 욕설을 사용하지 않는다. 만약 네가 욕설을 들었다면 아주 심각한 사항으로 똑같은 실수를 방지 하도록 각성 및 계획할 것
 - 환경: **Windows + PowerShell 기준** (bash 문법 사용 금지)
 - `.git` 보호: 삭제/강제 초기화/일괄 되돌리기 금지
 - 파괴적 git 금지: `git clean -fd`, `git reset --hard`, `git checkout .`, `git restore .`
