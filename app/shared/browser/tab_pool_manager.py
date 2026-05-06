@@ -392,6 +392,30 @@ class TabPoolManager:
         """주기적 고아/오래된 탭 정리를 단일 cleanup 경로로 실행한다."""
         return await self.cleanup_old_tabs()
 
+    def get_status(self) -> dict:
+        """탭 풀 상태 진단 정보를 반환한다."""
+        total_active = sum(len(pool) for pool in self.tab_pools.values())
+        in_use_count = sum(1 for value in self.tab_in_use.values() if value)
+        dead_waiter_count = sum(1 for event in self.tab_waiters.values() if event.is_set())
+        account_pool_sizes = {
+            account_id: len(pool)
+            for account_id, pool in self.tab_pools.items()
+        }
+        budgeted_pages = {}
+        for account_id, context in list(self.context_manager.browser_contexts.items()):
+            try:
+                budgeted_pages[account_id] = self._count_budgeted_pages(context)
+            except Exception:
+                pass
+        return {
+            "total_active_tabs": total_active,
+            "budgeted_pages": budgeted_pages,
+            "in_use_count": in_use_count,
+            "waiter_count": len(self.tab_waiters),
+            "dead_waiter_count": dead_waiter_count,
+            "account_pool_sizes": account_pool_sizes,
+        }
+
     async def _is_tab_closed(self, tab: Page) -> bool:
         """탭이 닫혔는지 확인합니다."""
         try:
