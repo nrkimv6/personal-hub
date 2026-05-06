@@ -141,11 +141,19 @@
 									<span class="rounded-full bg-green-100 px-1.5 text-xs text-green-700">DB반영 #{r.applied_request_id}</span>
 								{:else}—{/if}
 							</td>
-							<td class="px-2 py-1">
+							<td class="px-2 py-1 flex gap-1 flex-wrap">
 								<button
 									class="rounded border border-border px-1.5 py-0.5 text-xs hover:bg-muted"
 									onclick={() => openDetail(r.id)}
 								>상세</button>
+								{#if r.record_id}
+									<a
+										class="rounded border border-border px-1.5 py-0.5 text-xs hover:bg-muted"
+										href="/plans?id={r.record_id}"
+										target="_blank"
+										rel="noopener"
+									>record</a>
+								{/if}
 							</td>
 						</tr>
 					{/each}

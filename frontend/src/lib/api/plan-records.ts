@@ -881,11 +881,33 @@ export interface ArchiveLLMRequestRow {
 	is_applied_to_record: boolean;
 }
 
+export interface ArchiveRelatedRecord {
+	record_id: number;
+	category: string | null;
+	tags: string[] | null;
+	summary: string | null;
+	intent: string | null;
+	trigger: string | null;
+	scope: string[] | null;
+	analyzed_at: string | null;
+}
+
+export interface ArchiveAuditSnapshot {
+	event_id: number;
+	prior_summary: string | null;
+	prior_category: string | null;
+	prior_tags: string[] | null;
+	analyzed_at: string | null;
+	created_at: string | null;
+}
+
 export interface ArchiveLLMRequestDetail extends ArchiveLLMRequestRow {
 	prompt: string | null;
 	result: string | null;
 	raw_response: string | null;
 	cli_options: string | null;
+	related_record: ArchiveRelatedRecord | null;
+	audit_snapshots: ArchiveAuditSnapshot[];
 }
 
 export interface ArchiveLLMRequestListResponse {

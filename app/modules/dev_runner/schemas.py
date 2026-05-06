@@ -1213,12 +1213,36 @@ class ArchiveLLMRequestRow(BaseModel):
     is_applied_to_record: bool = False
 
 
+class ArchiveRelatedRecord(BaseModel):
+    """Snapshot of the current PlanRecord DB stored values for result comparison."""
+    record_id: int
+    category: Optional[str] = None
+    tags: Optional[List[str]] = None
+    summary: Optional[str] = None
+    intent: Optional[str] = None
+    trigger: Optional[str] = None
+    scope: Optional[List[str]] = None
+    analyzed_at: Optional[str] = None
+
+
+class ArchiveAuditSnapshot(BaseModel):
+    """One plan_archive_analysis_overwritten PlanEvent entry."""
+    event_id: int
+    prior_summary: Optional[str] = None
+    prior_category: Optional[str] = None
+    prior_tags: Optional[List[str]] = None
+    analyzed_at: Optional[str] = None
+    created_at: Optional[str] = None
+
+
 class ArchiveLLMRequestDetail(ArchiveLLMRequestRow):
     """Full LLMRequest detail including prompt, result, raw_response, cli_options."""
     prompt: Optional[str] = None
     result: Optional[str] = None
     raw_response: Optional[str] = None
     cli_options: Optional[str] = None
+    related_record: Optional[ArchiveRelatedRecord] = None
+    audit_snapshots: List[ArchiveAuditSnapshot] = Field(default_factory=list)
 
 
 class ArchiveLLMRequestListResponse(BaseModel):

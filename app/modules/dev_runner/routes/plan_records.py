@@ -400,6 +400,51 @@ def get_archive_llm_request_detail(request_id: int, db: Session = Depends(get_db
     except (ValueError, TypeError):
         pass
 
+    # related_record: current DB stored values from PlanRecord
+    from app.models.plan_record import PlanRecord as PlanRecordModel, PlanEvent as PlanEventModel
+    from app.modules.dev_runner.schemas import ArchiveRelatedRecord, ArchiveAuditSnapshot
+    import json as _json2
+
+    related_record = None
+    audit_snapshots = []
+    try:
+        caller_id_int = int(r.caller_id)
+        pr = db.query(PlanRecordModel).filter(PlanRecordModel.id == caller_id_int).first()
+        if pr:
+            related_record = ArchiveRelatedRecord(
+                record_id=pr.id,
+                category=pr.category,
+                tags=pr.tags if isinstance(pr.tags, list) else (_json2.loads(pr.tags) if pr.tags else None),
+                summary=pr.summary,
+                intent=pr.intent,
+                trigger=pr.trigger,
+                scope=_json2.loads(pr.scope) if pr.scope and isinstance(pr.scope, str) else pr.scope,
+                analyzed_at=pr.analyzed_at.isoformat() if hasattr(pr, "analyzed_at") and pr.analyzed_at else None,
+            )
+        # audit_snapshots: plan_archive_analysis_overwritten events
+        overwritten_events = (
+            db.query(PlanEventModel)
+            .filter(
+                PlanEventModel.plan_record_id == caller_id_int,
+                PlanEventModel.event_type == "plan_archive_analysis_overwritten",
+            )
+            .order_by(PlanEventModel.created_at.desc())
+            .limit(10)
+            .all()
+        )
+        for ev in overwritten_events:
+            d = _json2.loads(ev.detail) if isinstance(ev.detail, str) else (ev.detail or {})
+            audit_snapshots.append(ArchiveAuditSnapshot(
+                event_id=ev.id,
+                prior_summary=d.get("prior_summary"),
+                prior_category=d.get("prior_category"),
+                prior_tags=d.get("prior_tags"),
+                analyzed_at=d.get("analyzed_at"),
+                created_at=ev.created_at.isoformat() if ev.created_at else None,
+            ))
+    except (ValueError, TypeError):
+        pass
+
     return ArchiveLLMRequestDetail(
         id=r.id,
         status=r.status,
@@ -418,6 +463,8 @@ def get_archive_llm_request_detail(request_id: int, db: Session = Depends(get_db
         cli_options=r.cli_options,
         applied_request_id=applied_request_id,
         is_applied_to_record=is_applied,
+        related_record=related_record,
+        audit_snapshots=audit_snapshots,
     )
 
 
