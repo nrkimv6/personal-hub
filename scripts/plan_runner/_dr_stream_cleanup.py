@@ -23,7 +23,7 @@ from _dr_constants import (
     _LEGACY_ALL,
 )
 from _dr_merge_persistence import MergePersistence
-from _dr_merge_state import MergeCleanupAction, TERMINAL_STATUSES, should_enter_inline_merge
+from _dr_merge_state import MERGED, MergeCleanupAction, TERMINAL_STATUSES, should_enter_inline_merge
 from _dr_merge import _execute_merge_with_lock, _handle_post_merge_done, detect_merged_but_not_done, _pub_and_log
 from _dr_plan_paths import classify_plan_stage, read_plan_status
 from _dr_process_utils import _cleanup_process_state, _cleanup_runner_ownership_snapshot
@@ -704,7 +704,7 @@ def decide_cleanup_action(
     completed_for_flow: bool,
     has_worktree_commits: bool,
 ) -> MergeCleanupDecision:
-    if state.merge_status == "merged":
+    if state.merge_status == MERGED:
         return MergeCleanupDecision(
             MergeCleanupAction.FALLBACK_DONE,
             "merged_not_done_check",
@@ -823,21 +823,8 @@ def _determine_merge_requested(ctx: _StreamCleanupCtx) -> bool:
     return merge_requested
 
 
-def _update_workflow_and_execute_cleanup(
-    ctx: _StreamCleanupCtx, merge_requested: bool
-) -> None:
-    """Workflow 상태 업데이트(구역 D) 및 merge/fallback 실행(구역 E)"""
-    _detect_merged_but_not_done = _resolve_hook(
-        "detect_merged_but_not_done", _DEFAULT_DETECT_MERGED_BUT_NOT_DONE
-    )
-    _handle_post_merge_done_fn = _resolve_hook(
-        "_handle_post_merge_done", _DEFAULT_HANDLE_POST_MERGE_DONE
-    )
-    _cleanup_process_state_fn = _resolve_hook(
-        "_cleanup_process_state", _DEFAULT_CLEANUP_PROCESS_STATE
-    )
-
-    # 구역 D: Workflow 상태 업데이트
+def _update_workflow_status(ctx: _StreamCleanupCtx, merge_requested: bool) -> bool:
+    """Update workflow state and return the effective cleanup action flag."""
     if ctx.wf_manager and ctx.runner_id:
         try:
             wf = ctx.wf_manager.get_by_runner_id(ctx.runner_id)
@@ -908,7 +895,18 @@ def _update_workflow_and_execute_cleanup(
         except Exception as wf_err:
             logger.warning(f"[_stream_output] workflow update 실패 (무시): {wf_err}")
 
-    # 구역 E: merge 또는 fallback 실행
+    return merge_requested
+
+
+def _execute_cleanup_action(
+    ctx: _StreamCleanupCtx,
+    merge_requested: bool,
+    *,
+    detect_merged_but_not_done,
+    handle_post_merge_done_fn,
+    cleanup_process_state_fn,
+) -> None:
+    """Dispatch the cleanup action selected by decision/workflow evaluation."""
     if merge_requested:
         if _preserve_terminal_merge_state_if_needed(ctx, flag_present=True):
             merge_requested = False
@@ -921,7 +919,7 @@ def _update_workflow_and_execute_cleanup(
         _v2_detect = None
         if ctx.runner_id:
             try:
-                _v2_detect = _detect_merged_but_not_done(ctx.runner_id, ctx.redis_client)
+                _v2_detect = detect_merged_but_not_done(ctx.runner_id, ctx.redis_client)
             except Exception as _det_err:
                 logger.debug(f"[_stream_output] v2 detect 실패 (무시): {_det_err}")
         if _v2_detect:
@@ -933,7 +931,7 @@ def _update_workflow_and_execute_cleanup(
                 def _pub_fallback(msg: str) -> None:
                     _pub_and_log(ctx.runner_id, msg, ctx.redis_client, "MERGE-FALLBACK")
 
-                _done_result = _handle_post_merge_done_fn(
+                _done_result = handle_post_merge_done_fn(
                     _v2_detect["plan_file"], ctx.runner_id, _pub_fallback, ctx.redis_client
                 )
                 if ctx.wf_manager and ctx.runner_id:
@@ -962,4 +960,28 @@ def _update_workflow_and_execute_cleanup(
                     f"[_stream_output] v2 merge fallback 실패 (cleanup은 계속): "
                     f"runner_id={ctx.runner_id}, error={_fallback_err}"
                 )
-        _cleanup_process_state_fn(ctx.runner_id, ctx.redis_client)
+        cleanup_process_state_fn(ctx.runner_id, ctx.redis_client)
+
+
+def _update_workflow_and_execute_cleanup(
+    ctx: _StreamCleanupCtx, merge_requested: bool
+) -> None:
+    """Workflow 상태 업데이트(구역 D) 및 merge/fallback 실행(구역 E)"""
+    _detect_merged_but_not_done = _resolve_hook(
+        "detect_merged_but_not_done", _DEFAULT_DETECT_MERGED_BUT_NOT_DONE
+    )
+    _handle_post_merge_done_fn = _resolve_hook(
+        "_handle_post_merge_done", _DEFAULT_HANDLE_POST_MERGE_DONE
+    )
+    _cleanup_process_state_fn = _resolve_hook(
+        "_cleanup_process_state", _DEFAULT_CLEANUP_PROCESS_STATE
+    )
+
+    merge_requested = _update_workflow_status(ctx, merge_requested)
+    _execute_cleanup_action(
+        ctx,
+        merge_requested,
+        detect_merged_but_not_done=_detect_merged_but_not_done,
+        handle_post_merge_done_fn=_handle_post_merge_done_fn,
+        cleanup_process_state_fn=_cleanup_process_state_fn,
+    )
