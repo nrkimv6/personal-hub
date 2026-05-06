@@ -250,3 +250,35 @@ def test_execute_merge_with_lock_retry_merge_bypasses_existing_approval_required
     assert result["merge_status"] == "approval_required"
     assert result["action"] == "retry-merge"
     assert (f"{prefix}:merge_status", "queued") in fake.set_calls
+
+
+def test_stale_gate_block_preserves_existing_terminal_approval_required_R():
+    """CORRECT: stale gate BLOCK must not report error when approval_required is already terminal."""
+    _dr_merge, _dr_commands, merge_queue = _import_plan_runner_modules()
+
+    rid = "t-approval-stale-gate-001"
+    prefix = f"plan-runner:runners:{rid}"
+    fake = _FakeRedis(
+        {
+            f"{prefix}:merge_status": "approval_required",
+            f"{prefix}:merge_reason": "service_lock",
+            f"{prefix}:merge_message": "MERGE_PRECHECK_FAILED[service_lock]: blocked",
+        }
+    )
+    logs = []
+
+    with patch("plan_worktree_helpers.get_branch_divergence", return_value=(841, 1080)), \
+         patch("plan_worktree_helpers.classify_merge_risk", return_value="BLOCK"):
+        result, snapshot = _dr_merge._check_stale_merge_gate(  # noqa: SLF001
+            rid,
+            fake,
+            "impl/test",
+            logs.append,
+            action_name="inline-merge",
+        )
+
+    assert snapshot is None
+    assert result["merge_status"] == "approval_required"
+    assert result["reason"] == "service_lock"
+    assert fake.get(f"{prefix}:merge_status") == "approval_required"
+    assert (f"{prefix}:merge_status", "error") not in fake.set_calls

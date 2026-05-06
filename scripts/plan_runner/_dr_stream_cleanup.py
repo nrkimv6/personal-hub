@@ -22,6 +22,8 @@ from _dr_constants import (
     RUNNER_KEY_PREFIX,
     _LEGACY_ALL,
 )
+from _dr_merge_persistence import MergePersistence
+from _dr_merge_state import MergeCleanupAction, TERMINAL_STATUSES, should_enter_inline_merge
 from _dr_merge import _execute_merge_with_lock, _handle_post_merge_done, detect_merged_but_not_done, _pub_and_log
 from _dr_plan_paths import classify_plan_stage, read_plan_status
 from _dr_process_utils import _cleanup_process_state, _cleanup_runner_ownership_snapshot
@@ -36,12 +38,7 @@ _COMPLETED_EXIT_REASONS = {"completed"}  # 정상 완료로 처리되는 exit_re
 _DEFAULT_DETECT_MERGED_BUT_NOT_DONE = detect_merged_but_not_done
 _DEFAULT_HANDLE_POST_MERGE_DONE = _handle_post_merge_done
 _DEFAULT_CLEANUP_PROCESS_STATE = _cleanup_process_state
-_INLINE_MERGE_PRESERVE_STATUSES = {
-    "approval_required",
-    "conflict",
-    "precheck_failed",
-    "test_failed",
-}
+_INLINE_MERGE_PRESERVE_STATUSES = TERMINAL_STATUSES
 _ERROR_DETAIL_NOISE_PREFIXES = (
     "[NOISE]",
     ": heartbeat",
@@ -108,6 +105,13 @@ class _StreamCleanupCtx:
     wf_manager: Any = None
     suppressed_count: int = 0
     failure_message: Optional[str] = None
+
+
+@dataclass
+class MergeCleanupDecision:
+    action: MergeCleanupAction
+    reason: str
+    log_message: str = ""
 
 
 def _build_failure_error_message(
@@ -235,7 +239,7 @@ def _do_inline_merge(runner_id: str, redis_client: redis.Redis) -> None:
 
     # merge_requested 플래그 삭제 (중복 진입 방지)
     try:
-        redis_client.delete(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_requested")
+        MergePersistence(redis_client, runner_id).clear_request()
     except Exception:
         pass
 
@@ -649,9 +653,7 @@ def _get_merge_status(redis_client, runner_id: str) -> str:
     if not runner_id:
         return ""
     try:
-        return _decode_redis_text(
-            redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_status")
-        ).strip().lower()
+        return MergePersistence(redis_client, runner_id).read().merge_status
     except Exception:
         return ""
 
@@ -660,9 +662,7 @@ def _get_merge_reason(redis_client, runner_id: str) -> str:
     if not runner_id:
         return ""
     try:
-        return _decode_redis_text(
-            redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_reason")
-        ).strip()
+        return MergePersistence(redis_client, runner_id).read().merge_reason
     except Exception:
         return ""
 
@@ -681,7 +681,7 @@ def _preserve_terminal_merge_state_if_needed(ctx: _StreamCleanupCtx, *, flag_pre
 
     if flag_present:
         try:
-            ctx.redis_client.delete(f"{RUNNER_KEY_PREFIX}:{ctx.runner_id}:merge_requested")
+            MergePersistence(ctx.redis_client, ctx.runner_id).clear_request()
         except Exception:
             pass
 
@@ -696,22 +696,81 @@ def _preserve_terminal_merge_state_if_needed(ctx: _StreamCleanupCtx, *, flag_pre
     return True
 
 
+def decide_cleanup_action(
+    state,
+    exit_code: Optional[int],
+    exit_reason: str,
+    stop_stage: Optional[str],
+    completed_for_flow: bool,
+    has_worktree_commits: bool,
+) -> MergeCleanupDecision:
+    if state.merge_status in TERMINAL_STATUSES:
+        return MergeCleanupDecision(
+            MergeCleanupAction.BLOCKED_TERMINAL,
+            state.merge_status,
+            f"terminal merge_status={state.merge_status} blocks inline merge",
+        )
+    if stop_stage == "pre_review":
+        return MergeCleanupDecision(MergeCleanupAction.SKIP, "pre_review", "pre_review stop blocks inline merge")
+    if should_enter_inline_merge(state.merge_status, state.merge_requested, exit_code, stop_stage):
+        if exit_code == 0 and not completed_for_flow:
+            return MergeCleanupDecision(MergeCleanupAction.SKIP, "not_completed_for_flow")
+        if exit_code == 0 or has_worktree_commits:
+            return MergeCleanupDecision(MergeCleanupAction.INLINE_MERGE, "merge_requested")
+    if exit_code == 0 and completed_for_flow and has_worktree_commits:
+        return MergeCleanupDecision(MergeCleanupAction.INLINE_MERGE, "completed_with_commits")
+    return MergeCleanupDecision(MergeCleanupAction.SKIP, "no_merge_requested")
+
+
 def _determine_merge_requested(ctx: _StreamCleanupCtx) -> bool:
     """merge_requested 여부를 판정"""
     merge_requested = False
     flag = None
+    decision = MergeCleanupDecision(MergeCleanupAction.SKIP, "no_runner")
     if ctx.runner_id:
         try:
-            flag = ctx.redis_client.get(
-                f"{RUNNER_KEY_PREFIX}:{ctx.runner_id}:merge_requested"
+            persistence = MergePersistence(ctx.redis_client, ctx.runner_id)
+            state = persistence.read()
+            flag = "1" if state.merge_requested else None
+            if state.merge_status in _INLINE_MERGE_PRESERVE_STATUSES:
+                if _preserve_terminal_merge_state_if_needed(ctx, flag_present=state.merge_requested):
+                    decision = MergeCleanupDecision(
+                        MergeCleanupAction.BLOCKED_TERMINAL,
+                        state.merge_status,
+                        f"terminal merge_status={state.merge_status} blocks inline merge",
+                    )
+                    return False
+
+            has_commits = False
+            if state.merge_requested and ctx.exit_code != 0:
+                has_commits = _has_worktree_commits(ctx.runner_id, ctx.redis_client)
+            elif not state.merge_requested and ctx.exit_code == 0 and ctx.completed_for_flow:
+                has_commits = _has_worktree_commits(ctx.runner_id, ctx.redis_client)
+
+            decision = decide_cleanup_action(
+                state,
+                ctx.exit_code,
+                ctx.exit_reason,
+                ctx.stop_stage,
+                ctx.completed_for_flow,
+                has_commits,
             )
-            if _preserve_terminal_merge_state_if_needed(ctx, flag_present=bool(flag)):
+
+            if decision.action == MergeCleanupAction.BLOCKED_TERMINAL:
+                _preserve_terminal_merge_state_if_needed(ctx, flag_present=state.merge_requested)
                 return False
-            if flag:
+            if decision.action == MergeCleanupAction.INLINE_MERGE:
+                merge_requested = True
+                if not state.merge_requested and has_commits:
+                    _pub_and_log(
+                        ctx.runner_id,
+                        "[_stream_output] merge_requested 플래그 없음 + exit_code=0 + completed + 워크트리 커밋 있음 → merge",
+                        ctx.redis_client,
+                        "CLEANUP",
+                    )
+            elif state.merge_requested:
                 if ctx.exit_code == 0:
-                    if ctx.completed_for_flow:
-                        merge_requested = True
-                    else:
+                    if not ctx.completed_for_flow:
                         _pub_and_log(
                             ctx.runner_id,
                             f"[_stream_output] merge_requested 있지만 exit_reason={ctx.exit_reason}, stop_stage={ctx.stop_stage} → merge 스킵",
@@ -719,28 +778,10 @@ def _determine_merge_requested(ctx: _StreamCleanupCtx) -> bool:
                             "CLEANUP",
                         )
                 else:
-                    # exit_code != 0: worktree 커밋 유무로 merge 여부 결정
-                    if _has_worktree_commits(ctx.runner_id, ctx.redis_client):
-                        merge_requested = True
-                        logger.info(
-                            f"[_stream_output] exit_code={ctx.exit_code}이지만 worktree 커밋 존재 "
-                            f"(runner_id={ctx.runner_id}) — merge 시도"
-                        )
-                    else:
+                    if not has_commits:
                         logger.info(
                             f"[_stream_output] exit_code={ctx.exit_code}, worktree 커밋 없음 "
                             f"(runner_id={ctx.runner_id}) — merge 스킵"
-                        )
-            else:
-                # merge_requested 플래그 없음: exit_code=0 + completed 완료 시에도 워크트리 커밋 감지
-                if ctx.exit_code == 0 and ctx.completed_for_flow:
-                    if _has_worktree_commits(ctx.runner_id, ctx.redis_client):
-                        merge_requested = True
-                        _pub_and_log(
-                            ctx.runner_id,
-                            "[_stream_output] merge_requested 플래그 없음 + exit_code=0 + completed + 워크트리 커밋 있음 → merge",
-                            ctx.redis_client,
-                            "CLEANUP",
                         )
         except Exception as e:
             logger.warning(
@@ -750,14 +791,12 @@ def _determine_merge_requested(ctx: _StreamCleanupCtx) -> bool:
     if merge_requested and ctx.stop_stage == "pre_review":
         merge_requested = False
         try:
-            ctx.redis_client.delete(
-                f"{RUNNER_KEY_PREFIX}:{ctx.runner_id}:merge_requested"
-            )
+            MergePersistence(ctx.redis_client, ctx.runner_id).clear_request()
         except Exception:
             pass
         _pub_and_log(
             ctx.runner_id,
-            "[_stream_output] stop_stage=pre_review → inline merge 차단",
+            f"[_stream_output] stop_stage=pre_review → inline merge 차단 ({decision.reason})",
             ctx.redis_client,
             "CLEANUP",
         )
