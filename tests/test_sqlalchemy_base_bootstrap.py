@@ -29,6 +29,11 @@ def test_load_all_models_registers_split_tables():
         "llm_requests",
         "llm_worker_status",
         "writing_batches",
+        "llm_request_profile_claims",
+        "llm_profile_assignments",
+        "llm_schedule_profile_policies",
+        "plan_archive_execution_jobs",
+        "plan_archive_execution_attempts",
     }
 
     assert expected_tables.issubset(set(CoreBase.metadata.tables))
@@ -65,14 +70,28 @@ def test_selected_create_all_handles_notes_git_repos_and_llm_fk():
         CoreBase.metadata.tables["git_repos"],
         CoreBase.metadata.tables["git_operation_logs"],
         CoreBase.metadata.tables["writing_batches"],
+        CoreBase.metadata.tables["plan_records"],
+        CoreBase.metadata.tables["task_schedules"],
         CoreBase.metadata.tables["llm_requests"],
         CoreBase.metadata.tables["llm_worker_status"],
+        CoreBase.metadata.tables["llm_request_profile_claims"],
+        CoreBase.metadata.tables["llm_profile_assignments"],
+        CoreBase.metadata.tables["llm_schedule_profile_policies"],
+        CoreBase.metadata.tables["plan_archive_execution_jobs"],
+        CoreBase.metadata.tables["plan_archive_execution_attempts"],
     ]
 
     CoreBase.metadata.create_all(bind=engine, tables=tables)
 
     try:
         created = set(inspect(engine).get_table_names())
-        assert {"notes", "git_repos", "llm_requests", "writing_batches"}.issubset(created)
+        assert {
+            "notes",
+            "git_repos",
+            "llm_requests",
+            "writing_batches",
+            "llm_schedule_profile_policies",
+            "plan_archive_execution_jobs",
+        }.issubset(created)
     finally:
         engine.dispose()

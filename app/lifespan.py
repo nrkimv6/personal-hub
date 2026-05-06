@@ -10,7 +10,12 @@ import os
 import subprocess
 
 from app.config import settings, logger
-from app.database import check_schema_drift, init_extra_tables, sync_serial_sequences
+from app.database import (
+    check_schema_drift,
+    ensure_bootstrap_schema_ready,
+    init_extra_tables,
+    sync_serial_sequences,
+)
 
 
 async def cleanup_api_stale_resources():
@@ -82,6 +87,12 @@ async def lifespan(app: FastAPI):
 
     # 추가 테이블 초기화 (worker_status, booking_stats, booking_settings)
     try:
+        execution_readiness = ensure_bootstrap_schema_ready()
+        logger.info(
+            "Plan Archive execution DB readiness: ok=%s required=%s",
+            execution_readiness["ok"],
+            execution_readiness["required_tables"],
+        )
         init_extra_tables()
         check_schema_drift()
         synced = sync_serial_sequences()

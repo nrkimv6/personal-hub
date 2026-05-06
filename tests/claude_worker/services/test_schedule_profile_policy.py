@@ -118,6 +118,23 @@ def test_policy_missing_keeps_profile_router_decision(profile_file, db):
     assert decision.profile.name == "work"
 
 
+def test_policy_table_missing_logs_readiness_failure(profile_file, db, caplog):
+    from app.modules.claude_worker.services.profile_router import LLMProfileRouter
+
+    _save_profiles()
+    LLMScheduleProfilePolicy.__table__.drop(bind=db.get_bind())
+
+    decision = LLMProfileRouter(db).select_profile("claude", request=_request())
+
+    assert decision.profile is None
+    assert decision.reason == "profile_readiness_table_missing"
+    assert any(
+        "missing_table=llm_schedule_profile_policies" in record.getMessage()
+        and "caller_type=plan_archive_analyze" in record.getMessage()
+        for record in caplog.records
+    )
+
+
 def test_target_type_policy_disables_one_profile(profile_file, db):
     from app.modules.claude_worker.services.profile_router import LLMProfileRouter
 

@@ -22,6 +22,9 @@ from app.modules.claude_worker.models.llm_request import LLMRequest
 from app.modules.dev_runner.services.plan_archive_retrieval_readiness import (
     get_plan_archive_retrieval_readiness,
 )
+from app.modules.dev_runner.services.plan_archive_execution_readiness import (
+    check_plan_archive_execution_readiness,
+)
 
 logger = logging.getLogger(__name__)
 ARCHIVE_FILE_RETENTION_DAYS = 7
@@ -599,6 +602,7 @@ class PlanRecordService:
                 else None,
             } if schedule else None,
             "retrieval_db_readiness": get_plan_archive_retrieval_readiness(self.db),
+            "execution_db_readiness": check_plan_archive_execution_readiness(self.db),
         }
 
     def get_guide_status(self, include_history: bool = False) -> List[dict]:
