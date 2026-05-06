@@ -201,6 +201,24 @@ class TestBuildStatusPayload:
         assert payload["merge_reason"] == "service_lock"
         assert "MERGE_PRECHECK_FAILED" in (payload.get("merge_message") or "")
         assert payload["stop_stage"] == "post_review"
+        assert payload["display_state"] == "merged"
+        assert payload["display_label"] == "머지됨"
+
+    def test_build_status_payload_includes_display_state_for_approval_required(self, event_service, sync_redis):
+        """R: SSE payload도 backend display state와 stale badge policy를 포함한다."""
+        runner_id = "approval-display-01"
+        sync_redis.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:status", "stopped")
+        sync_redis.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_status", "approval_required")
+        sync_redis.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:branch_exists", "false")
+
+        payload = build_status_payload(event_service._sync, runner_id)
+
+        assert payload is not None
+        assert payload["display_state"] == "approval_required"
+        assert payload["display_label"] == "승인 필요"
+        assert payload["display_severity"] == "approval"
+        assert payload["display_secondary"] is None
+        assert payload["hide_stale_branch_badge"] is True
 
     def test_build_status_payload_plan_file_none_when_key_missing(self, event_service, sync_redis):
         """R: trigger="user" + plan_file 키 미설정 → payload["plan_file"] is None, != PLAN_FILE_ALL"""

@@ -773,6 +773,29 @@ class TestListRunners:
         assert data[0]["display_label"] == "머지 오류"
 
 
+class TestGetRunnerStatus:
+    async def test_get_runner_status_includes_display_fields(self, client, mock_executor_redis):
+        """R: 단일 runner API도 list/SSE와 같은 display 필드를 반환한다."""
+        fake_async = mock_executor_redis["async"]
+        rid = "single-display-001"
+        prefix = f"plan-runner:runners:{rid}"
+        await fake_async.set(f"{prefix}:status", "stopped")
+        await fake_async.set(f"{prefix}:plan_file", "docs/plan/test.md")
+        await fake_async.set(f"{prefix}:merge_status", "approval_required")
+        await fake_async.set(f"{prefix}:branch_exists", "false")
+
+        response = await client.get(f"/api/v1/dev-runner/runners/{rid}")
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["runner_id"] == rid
+        assert data["display_state"] == "approval_required"
+        assert data["display_label"] == "승인 필요"
+        assert data["display_severity"] == "approval"
+        assert data["display_secondary"] is None
+        assert data["hide_stale_branch_badge"] is True
+
+
 class TestMergeApprovalPayload:
     async def test_merge_retry_request_forwards_approve_service_lock(self, client):
         """R: POST /merge/{runner_id}/retry with approve_service_lock=true → command payload 포함"""
