@@ -334,6 +334,14 @@ def list_archive_llm_requests(
     total = q.count()
     items = q.order_by(LLMRequest.requested_at.desc()).offset((page - 1) * page_size).limit(page_size).all()
 
+    import json as _json_list
+
+    def _parse_cli_opt(r):
+        try:
+            return _json_list.loads(r.cli_options) if r.cli_options else {}
+        except Exception:
+            return {}
+
     return ArchiveLLMRequestListResponse(
         items=[
             ArchiveLLMRequestRow(
@@ -342,6 +350,8 @@ def list_archive_llm_requests(
                 provider=r.provider or "",
                 model=r.model or "",
                 record_id=r.caller_id,
+                candidate_key=_parse_cli_opt(r).get("candidate_key"),
+                source_schedule_run_id=_parse_cli_opt(r).get("source_schedule_run_id"),
                 failure_category=r.failure_category,
                 dedupe_key=r.dedupe_key,
                 requested_at=r.requested_at.isoformat() if r.requested_at else None,
@@ -1110,6 +1120,7 @@ def queue_archive_candidates(
                 trigger_source="api:archive-candidates/queue",
                 selected_targets=selected_targets,
                 requested_by="api",
+                candidate_key=key,
             )
         except Exception as exc:
             response.errors.append({"candidate_key": key, "error": str(exc)})

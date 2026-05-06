@@ -167,6 +167,8 @@ class PlanArchiveExecutionService:
         selected_profiles: list[dict[str, str]] | None = None,
         requested_by: str = "api",
         llm_service: LLMService | None = None,
+        candidate_key: str | None = None,
+        source_schedule_run_id: int | None = None,
     ) -> dict[str, Any]:
         # Normalize: selected_targets takes priority over legacy selected_profiles
         target_snapshot = _targets_to_snapshot(selected_targets, selected_profiles)
@@ -255,6 +257,10 @@ class PlanArchiveExecutionService:
                 "prompt_policy_id": policy_id,
                 "prompt_policy_version": policy_version,
             }
+            if candidate_key:
+                cli_options["candidate_key"] = candidate_key
+            if source_schedule_run_id:
+                cli_options["source_schedule_run_id"] = source_schedule_run_id
             candidate_profiles: list = []
             if target.get("engine") and target.get("profile_name"):
                 candidate_profiles = [{"engine": target["engine"], "profile_name": target["profile_name"]}]
@@ -319,6 +325,7 @@ class PlanArchiveExecutionService:
         include_temp_records: bool,
         max_backfill_per_run: int,
         trigger_source: str = "schedule:plan_archive_analyze",
+        source_schedule_run_id: int | None = None,
     ) -> dict[str, Any]:
         stats = {
             "queued": 0,
@@ -350,6 +357,7 @@ class PlanArchiveExecutionService:
                 record,
                 trigger_source=trigger_source,
                 requested_by="scheduler",
+                source_schedule_run_id=source_schedule_run_id,
             )
             key = result.get("status_key")
             if key in stats:
