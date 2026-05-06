@@ -73,7 +73,8 @@ def _targets_to_snapshot(
             elif engine and profile_name:
                 dk = f"profile:{engine}:{profile_name}"
             else:
-                dk = "profileless"
+                # Allow multiple profile-less targets (e.g. codex + cc-codex) without dedupe collision.
+                dk = f"profileless:{provider}:{model or 'default'}"
             result.append({
                 "provider": provider,
                 "model": model,
@@ -236,7 +237,7 @@ class PlanArchiveExecutionService:
             "engine": None,
             "profile_name": None,
             "label": None,
-            "dedupe_key": "profileless",
+            "dedupe_key": f"profileless:{default_provider}:{default_model or 'default'}",
         }]
 
         # contract: caller_id = str(record.id) for plan_archive_analyze
@@ -268,6 +269,11 @@ class PlanArchiveExecutionService:
                 candidate_profiles = legacy_profiles
             if candidate_profiles:
                 cli_options["candidate_profiles"] = candidate_profiles
+            # Preserve selection identity for observability (UI may render this without parsing raw cli_options).
+            if target.get("profile_key") is not None:
+                cli_options["profile_key"] = target.get("profile_key")
+            if target.get("label"):
+                cli_options["target_label"] = target.get("label")
 
             request = LLMRequest(
                 caller_type="plan_archive_analyze",

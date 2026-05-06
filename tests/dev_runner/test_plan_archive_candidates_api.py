@@ -197,7 +197,7 @@ def test_queue_archive_candidates_R_imports_file_only_and_queues_selected_target
         result = exec_svc.enqueue_record(
             record,
             trigger_source="test",
-            selected_targets=[{"provider": "claude", "model": "sonnet", "dedupe_key": "profileless"}],
+            selected_targets=[{"provider": "claude", "model": "sonnet", "dedupe_key": "profileless:claude:sonnet"}],
         )
     assert result["status_key"] == "queued"
     assert result.get("job_id") is not None

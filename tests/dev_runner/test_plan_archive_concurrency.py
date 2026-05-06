@@ -69,7 +69,7 @@ def test_concurrent_enqueue_same_record_target_only_one_succeeds(db):
     rec = _record(db)
     db.commit()
 
-    target = [{"provider": "claude", "model": "sonnet", "dedupe_key": "profileless"}]
+    target = [{"provider": "claude", "model": "sonnet", "dedupe_key": "profileless:claude:sonnet"}]
     fake = _fake_llm()
     with patch(
         "app.modules.dev_runner.services.plan_archive_execution_service.LLMService",
@@ -120,7 +120,7 @@ def test_different_targets_for_same_record_both_succeed(db):
 
     targets = [
         {"provider": "claude", "model": "sonnet", "engine": "claude", "profile_name": "work", "dedupe_key": "profile:claude:work"},
-        {"provider": "codex", "model": "gpt-5.5", "dedupe_key": "profileless"},
+        {"provider": "codex", "model": "gpt-5.5", "dedupe_key": "profileless:codex:gpt-5.5"},
     ]
     fake = _fake_llm()
     with patch(

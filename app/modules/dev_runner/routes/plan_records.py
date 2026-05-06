@@ -207,22 +207,50 @@ def get_archive_schedule_dashboard(db: Session = Depends(get_db)):
     recent_reqs = (
         req_q.order_by(LLMRequest.requested_at.desc()).limit(20).all()
     )
-    recent_request_rows = [
-        ArchiveLLMRequestRow(
-            id=r.id,
-            status=r.status,
-            provider=r.provider or "",
-            model=r.model or "",
-            record_id=r.caller_id,
-            failure_category=r.failure_category,
-            dedupe_key=r.dedupe_key,
-            requested_at=r.requested_at.isoformat() if r.requested_at else None,
-            processed_at=r.processed_at.isoformat() if r.processed_at else None,
-            error_message=r.error_message,
-            retry_count=r.retry_count or 0,
+    import json as _json_recent
+
+    def _parse_cli_opt_recent(r):
+        try:
+            return _json_recent.loads(r.cli_options) if r.cli_options else {}
+        except Exception:
+            return {}
+
+    def _extract_profile_fields(cli: dict) -> tuple[Optional[str], Optional[str], Optional[str], Optional[str]]:
+        profile_key = cli.get("profile_key") if isinstance(cli.get("profile_key"), str) else None
+        target_label = cli.get("target_label") if isinstance(cli.get("target_label"), str) else None
+        engine = None
+        profile_name = None
+        cps = cli.get("candidate_profiles")
+        if isinstance(cps, list) and cps:
+            first = cps[0] if isinstance(cps[0], dict) else None
+            if first:
+                engine = str(first.get("engine") or "").strip() or None
+                profile_name = str(first.get("profile_name") or "").strip() or None
+        return profile_key, engine, profile_name, target_label
+
+    recent_request_rows: list[ArchiveLLMRequestRow] = []
+    for r in recent_reqs:
+        cli = _parse_cli_opt_recent(r)
+        pk, eng, pn, tl = _extract_profile_fields(cli)
+        recent_request_rows.append(
+            ArchiveLLMRequestRow(
+                id=r.id,
+                status=r.status,
+                provider=r.provider or "",
+                model=r.model or "",
+                profile_key=pk,
+                engine=eng,
+                profile_name=pn,
+                target_label=tl,
+                record_id=r.caller_id,
+                failure_category=r.failure_category,
+                dedupe_key=r.dedupe_key,
+                requested_at=r.requested_at.isoformat() if r.requested_at else None,
+                processed_at=r.processed_at.isoformat() if r.processed_at else None,
+                error_message=r.error_message,
+                retry_count=r.retry_count or 0,
+            )
         )
-        for r in recent_reqs
-    ]
 
     # recent schedule runs N=20
     schedule = db.query(TaskSchedule).filter(
@@ -342,16 +370,23 @@ def list_archive_llm_requests(
         except Exception:
             return {}
 
-    return ArchiveLLMRequestListResponse(
-        items=[
+    rows: list[ArchiveLLMRequestRow] = []
+    for r in items:
+        cli = _parse_cli_opt(r)
+        pk, eng, pn, tl = _extract_profile_fields(cli)
+        rows.append(
             ArchiveLLMRequestRow(
                 id=r.id,
                 status=r.status,
                 provider=r.provider or "",
                 model=r.model or "",
+                profile_key=pk,
+                engine=eng,
+                profile_name=pn,
+                target_label=tl,
                 record_id=r.caller_id,
-                candidate_key=_parse_cli_opt(r).get("candidate_key"),
-                source_schedule_run_id=_parse_cli_opt(r).get("source_schedule_run_id"),
+                candidate_key=cli.get("candidate_key"),
+                source_schedule_run_id=cli.get("source_schedule_run_id"),
                 failure_category=r.failure_category,
                 dedupe_key=r.dedupe_key,
                 requested_at=r.requested_at.isoformat() if r.requested_at else None,
@@ -359,8 +394,10 @@ def list_archive_llm_requests(
                 error_message=r.error_message,
                 retry_count=r.retry_count or 0,
             )
-            for r in items
-        ],
+        )
+
+    return ArchiveLLMRequestListResponse(
+        items=rows,
         total=total,
         page=page,
         page_size=page_size,
@@ -409,6 +446,23 @@ def get_archive_llm_request_detail(request_id: int, db: Session = Depends(get_db
             is_applied = (applied_request_id == r.id)
     except (ValueError, TypeError):
         pass
+
+    # profile identity from cli_options (best-effort)
+    import json as _json_cli
+    try:
+        cli = _json_cli.loads(r.cli_options) if r.cli_options else {}
+    except Exception:
+        cli = {}
+    profile_key = cli.get("profile_key") if isinstance(cli.get("profile_key"), str) else None
+    target_label = cli.get("target_label") if isinstance(cli.get("target_label"), str) else None
+    engine = None
+    profile_name = None
+    cps = cli.get("candidate_profiles")
+    if isinstance(cps, list) and cps:
+        first = cps[0] if isinstance(cps[0], dict) else None
+        if first:
+            engine = str(first.get("engine") or "").strip() or None
+            profile_name = str(first.get("profile_name") or "").strip() or None
 
     # related_record: current DB stored values from PlanRecord
     from app.models.plan_record import PlanRecord as PlanRecordModel, PlanEvent as PlanEventModel
@@ -460,6 +514,10 @@ def get_archive_llm_request_detail(request_id: int, db: Session = Depends(get_db
         status=r.status,
         provider=r.provider or "",
         model=r.model or "",
+        profile_key=profile_key,
+        engine=engine,
+        profile_name=profile_name,
+        target_label=target_label,
         record_id=r.caller_id,
         failure_category=r.failure_category,
         dedupe_key=r.dedupe_key,
