@@ -46,6 +46,7 @@ export function getBulkQueueDisabledReason(
 }
 
 const STORAGE_KEY = 'plan-archive:selected-targets';
+export const PLAN_ARCHIVE_BLOCKED_PROVIDERS = new Set(['cc-codex']);
 
 export function targetKey(t: SelectedTarget): string {
 	if (t.profile_key) return `profile:${t.profile_key}`;
@@ -72,6 +73,7 @@ function normalizeTarget(raw: unknown): SelectedTarget | null {
 	const r = raw as Record<string, unknown>;
 	const provider = String(r.provider || '').trim();
 	if (!provider) return null;
+	if (PLAN_ARCHIVE_BLOCKED_PROVIDERS.has(provider)) return null;
 	const model = String(r.model || '').trim();
 	const profile_key = r.profile_key === undefined ? undefined : (r.profile_key as string | null);
 	const engine = r.engine === undefined ? undefined : (r.engine as string | null);
