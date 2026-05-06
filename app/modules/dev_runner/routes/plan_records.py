@@ -118,6 +118,20 @@ router_admin = APIRouter(prefix="/api/v1/plans", tags=["plan-records-admin"])
 _DEFAULT_PLANS_ARCHIVE_DIR = PROJECT_ROOT / ".worktrees" / "plans" / "docs" / "archive"
 
 
+def _extract_profile_fields(cli: dict) -> tuple[Optional[str], Optional[str], Optional[str], Optional[str]]:
+    profile_key = cli.get("profile_key") if isinstance(cli.get("profile_key"), str) else None
+    target_label = cli.get("target_label") if isinstance(cli.get("target_label"), str) else None
+    engine = None
+    profile_name = None
+    cps = cli.get("candidate_profiles")
+    if isinstance(cps, list) and cps:
+        first = cps[0] if isinstance(cps[0], dict) else None
+        if first:
+            engine = str(first.get("engine") or "").strip() or None
+            profile_name = str(first.get("profile_name") or "").strip() or None
+    return profile_key, engine, profile_name, target_label
+
+
 @router.get("/records/by-path")
 def get_record_by_path(file_path: str, include_claim: bool = False, db: Session = Depends(get_db)):
     """file_path로 레코드 get_or_create (메모 편집 시 진입점).
@@ -217,19 +231,6 @@ def get_archive_schedule_dashboard(db: Session = Depends(get_db)):
             return _json_recent.loads(r.cli_options) if r.cli_options else {}
         except Exception:
             return {}
-
-    def _extract_profile_fields(cli: dict) -> tuple[Optional[str], Optional[str], Optional[str], Optional[str]]:
-        profile_key = cli.get("profile_key") if isinstance(cli.get("profile_key"), str) else None
-        target_label = cli.get("target_label") if isinstance(cli.get("target_label"), str) else None
-        engine = None
-        profile_name = None
-        cps = cli.get("candidate_profiles")
-        if isinstance(cps, list) and cps:
-            first = cps[0] if isinstance(cps[0], dict) else None
-            if first:
-                engine = str(first.get("engine") or "").strip() or None
-                profile_name = str(first.get("profile_name") or "").strip() or None
-        return profile_key, engine, profile_name, target_label
 
     recent_request_rows: list[ArchiveLLMRequestRow] = []
     for r in recent_reqs:
