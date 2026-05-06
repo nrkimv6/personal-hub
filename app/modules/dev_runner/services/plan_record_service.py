@@ -103,6 +103,35 @@ class PlanRecordService:
     def __init__(self, db: Session):
         self.db = db
 
+    def _refresh_plan_body_relations(self, records: List[PlanRecord]) -> list[dict]:
+        """Refresh deterministic body relations for records with content.
+
+        This is best-effort because plan record sync/import should not fail just
+        because a referenced target plan is missing or a parser edge case appears.
+        """
+        if not records:
+            return []
+        try:
+            from app.modules.dev_runner.services.plan_archive_relation_service import (
+                PlanArchiveRelationService,
+            )
+        except Exception as exc:
+            logger.warning("plan body relation service unavailable: %s", exc)
+            return []
+
+        svc = PlanArchiveRelationService(self.db)
+        results: list[dict] = []
+        seen: set[int] = set()
+        for record in records:
+            if not record or not record.id or record.id in seen:
+                continue
+            seen.add(record.id)
+            try:
+                results.append(svc.refresh_relations_for_record(record.id).to_dict())
+            except Exception as exc:
+                logger.warning("plan body relation refresh skipped for record %s: %s", record.id, exc)
+        return results
+
     def get_or_create(self, file_path: str, title: Optional[str] = None, project: Optional[str] = None) -> PlanRecord:
         """filename_hash로 레코드 조회, 없으면 생성 + created 이벤트"""
         filename_hash = _compute_filename_hash(file_path)
@@ -186,6 +215,8 @@ class PlanRecordService:
             record.file_removed_at = None
             _schedule_file_delete_after(record, datetime.now())
         _add_event(self.db, record, "archived", {"archive_path": new_path})
+        if record.raw_content:
+            self._refresh_plan_body_relations([record])
         return record
 
     @staticmethod
@@ -375,6 +406,8 @@ class PlanRecordService:
             self.db.add(record)
             self.db.flush()
             _add_event(self.db, record, "ingested", {"source": "ingest_single", "created": True})
+        if record.raw_content:
+            self._refresh_plan_body_relations([record])
         return record
 
     def update_claude_session_id(self, record_id: int, session_id: str) -> None:
@@ -706,6 +739,7 @@ class PlanRecordService:
         """
         created = updated = skipped = 0
         errors: List[str] = []
+        relation_refresh_records: List[PlanRecord] = []
 
         archive_path = Path(archive_dir)
         if not archive_path.exists():
@@ -726,6 +760,8 @@ class PlanRecordService:
                 existing = self.db.query(PlanRecord).filter_by(filename_hash=filename_hash).first()
                 if existing:
                     changed, _normalized = self._apply_archive_metadata(existing, file_str, datetime.now())
+                    if existing.raw_content:
+                        relation_refresh_records.append(existing)
                     if changed:
                         updated += 1
                     else:
@@ -745,18 +781,27 @@ class PlanRecordService:
                     self.db.add(record)
                     self.db.flush()
                     _add_event(self.db, record, "created", {"file_path": file_str, "source": "bulk_import"})
+                    if record.raw_content:
+                        relation_refresh_records.append(record)
                     created += 1
             except Exception as e:
                 errors.append(f"{f}: {e}")
                 logger.warning(f"bulk_import_archived error for {f}: {e}")
 
+        relation_results = self._refresh_plan_body_relations(relation_refresh_records)
         try:
             self.db.commit()
         except Exception as e:
             self.db.rollback()
             errors.append(f"commit error: {e}")
 
-        return {"created": created, "updated": updated, "skipped": skipped, "errors": errors}
+        return {
+            "created": created,
+            "updated": updated,
+            "skipped": skipped,
+            "errors": errors,
+            "relation_refreshed": len(relation_results),
+        }
 
     def list_archive_candidates(
         self,
@@ -898,6 +943,7 @@ class PlanRecordService:
         """
         created = updated = missing = 0
         archive_created = archive_updated = archive_normalized = 0
+        relation_refresh_records: List[PlanRecord] = []
 
         # DB에 있는 모든 레코드의 hash → record 매핑
         all_records: Dict[str, PlanRecord] = {
@@ -933,7 +979,12 @@ class PlanRecordService:
                         archive_created += 1
                     else:
                         record = self.get_or_create(file_str)
+                        raw_content = self._read_raw_content(file_str)
+                        if raw_content:
+                            record.raw_content = raw_content
                     all_records[h] = record
+                    if record.raw_content:
+                        relation_refresh_records.append(record)
                     created += 1
                 else:
                     record = all_records[h]
@@ -957,6 +1008,11 @@ class PlanRecordService:
                         if normalized:
                             archive_normalized += 1
                             _add_event(self.db, record, "archived", {"archive_path": file_str, "source": "sync"})
+                    else:
+                        raw_content = self._read_raw_content(file_str)
+                        if raw_content and record.raw_content != raw_content:
+                            record.raw_content = raw_content
+                            updated_fields = True
                     if updated_fields:
                         record.updated_at = datetime.now()
                         updated += 1
@@ -968,6 +1024,8 @@ class PlanRecordService:
                         _add_event(self.db, record, "path_changed", {"from": old, "to": file_str})
                         if not updated_fields:
                             updated += 1
+                    if record.raw_content:
+                        relation_refresh_records.append(record)
 
         # DB에 있지만 스캔에서 발견 안 된 것 → missing
         for h, record in all_records.items():
@@ -975,6 +1033,7 @@ class PlanRecordService:
                 _add_event(self.db, record, "missing", {"file_path": record.file_path})
                 missing += 1
 
+        relation_results = self._refresh_plan_body_relations(relation_refresh_records)
         self.db.commit()
         return {
             "created": created,
@@ -983,6 +1042,7 @@ class PlanRecordService:
             "archive_created": archive_created,
             "archive_updated": archive_updated,
             "archive_normalized": archive_normalized,
+            "relation_refreshed": len(relation_results),
         }
 
     def get_active_claim(self, file_path: str) -> Optional[dict]:

@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { planRecordsApi, type PlanArchiveExecutionAttempt, type PlanEvent } from '$lib/api/plan-records';
+  import { planRecordsApi, type PlanArchiveExecutionAttempt, type PlanEvent, type PlanRecordRelationStatistics } from '$lib/api/plan-records';
 
   let events: PlanEvent[] = [];
   let loading = true;
@@ -14,6 +14,9 @@
   let executionHistoryError = '';
   let executionHistoryRecordId = '';
   let executionHistoryLimit = 25;
+  let relationStatistics: PlanRecordRelationStatistics | null = null;
+  let relationStatisticsLoading = false;
+  let relationStatisticsError = '';
 
   // 반복 뱃지용: filename_hash → recurrence_count 맵 (count >= 2인 것만)
   let recurrenceMap = new Map<string, number>();
@@ -103,6 +106,19 @@
     }
   }
 
+  async function loadRelationStatistics() {
+    relationStatisticsLoading = true;
+    relationStatisticsError = '';
+    try {
+      relationStatistics = await planRecordsApi.getRelationStatistics();
+    } catch (e) {
+      relationStatistics = null;
+      relationStatisticsError = e instanceof Error ? e.message : 'relation 통계 로드 실패';
+    } finally {
+      relationStatisticsLoading = false;
+    }
+  }
+
   function toggleMonth(group: MonthGroup) {
     group.collapsed = !group.collapsed;
     monthGroups = monthGroups; // trigger reactivity
@@ -155,6 +171,7 @@
   onMount(() => {
     loadEvents();
     loadExecutionHistory();
+    loadRelationStatistics();
   });
 </script>
 
@@ -174,8 +191,31 @@
     </select>
     <button
       class="px-3 py-1 text-xs rounded bg-muted hover:bg-secondary text-muted-foreground"
-      onclick={() => loadEvents()}
+      onclick={() => { loadEvents(); loadRelationStatistics(); }}
     >새로고침</button>
+  </div>
+
+  <div class="mb-4 rounded border border-border bg-background p-3 text-xs">
+    <div class="mb-2 flex items-center justify-between gap-2">
+      <h3 class="font-semibold text-foreground">Plan relation statistics</h3>
+      {#if relationStatisticsLoading}
+        <span class="text-muted-foreground">갱신 중...</span>
+      {/if}
+    </div>
+    {#if relationStatisticsError}
+      <p class="text-red-500">{relationStatisticsError}</p>
+    {:else if relationStatistics}
+      <div class="flex flex-wrap gap-2">
+        <span class="rounded bg-red-100 px-2 py-1 text-red-700 dark:bg-red-900 dark:text-red-200">
+          미해결 후속 {relationStatistics.unresolved_followup_count}
+        </span>
+        {#each Object.entries(relationStatistics.relation_counts ?? {}) as [type, count]}
+          <span class="rounded bg-muted px-2 py-1 text-muted-foreground">{type} {count}</span>
+        {/each}
+      </div>
+    {:else}
+      <p class="text-muted-foreground">relation 통계가 없습니다.</p>
+    {/if}
   </div>
 
   <div class="mb-4 rounded border border-border bg-background p-3 text-xs">

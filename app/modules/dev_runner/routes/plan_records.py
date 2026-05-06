@@ -79,6 +79,8 @@ from app.modules.dev_runner.schemas import (
     PlanArchiveDocPatchProposalResponse,
     PlanRecordsSyncResponse, ArchiveCandidateSummaryResponse,
     ArchiveAnalyzeRequest, ArchiveAnalyzeResponse,
+    PlanRecordRelationResponse,
+    PlanRecordRelationStatisticsResponse,
 )
 
 
@@ -644,6 +646,60 @@ def get_record_content(record_id: int, db: Session = Depends(get_db)):
     return {"id": record.id, "raw_content": record.raw_content}
 
 
+def _serialize_relation(relation, direction: str) -> dict:
+    def _plan(record) -> dict:
+        return {
+            "id": record.id,
+            "filename_hash": record.filename_hash,
+            "file_path": record.file_path,
+            "title": record.title,
+            "status": record.status,
+            "archived_at": record.archived_at,
+        }
+
+    return {
+        "id": relation.id,
+        "direction": direction,
+        "relation_type": relation.relation_type,
+        "score": relation.score,
+        "evidence": relation.evidence,
+        "source": _plan(relation.source_record),
+        "target": _plan(relation.target_record),
+        "created_at": relation.created_at,
+        "updated_at": relation.updated_at,
+    }
+
+
+@router.get("/records/{record_id}/relations", response_model=list[PlanRecordRelationResponse])
+def get_record_relations(
+    record_id: int,
+    direction: str = "both",
+    relation_type: Optional[str] = None,
+    db: Session = Depends(get_db),
+):
+    """Return incoming/outgoing plan relations for one record."""
+    from app.models.plan_record import PlanRecord, PlanRecordRelation
+
+    if direction not in {"outgoing", "incoming", "both"}:
+        raise HTTPException(status_code=400, detail="direction must be outgoing, incoming, or both")
+    record = db.query(PlanRecord).filter(PlanRecord.id == record_id).first()
+    if not record:
+        raise HTTPException(status_code=404, detail="Record not found")
+
+    payload: list[dict] = []
+    if direction in {"outgoing", "both"}:
+        query = db.query(PlanRecordRelation).filter(PlanRecordRelation.source_plan_record_id == record_id)
+        if relation_type:
+            query = query.filter(PlanRecordRelation.relation_type == relation_type)
+        payload.extend(_serialize_relation(row, "outgoing") for row in query.order_by(PlanRecordRelation.score.desc()).all())
+    if direction in {"incoming", "both"}:
+        query = db.query(PlanRecordRelation).filter(PlanRecordRelation.target_plan_record_id == record_id)
+        if relation_type:
+            query = query.filter(PlanRecordRelation.relation_type == relation_type)
+        payload.extend(_serialize_relation(row, "incoming") for row in query.order_by(PlanRecordRelation.score.desc()).all())
+    return payload
+
+
 @router.post("/records/{record_id}/analyze", response_model=PlanArchiveAnalyzeResponse)
 def analyze_record(record_id: int, req: PlanArchiveAnalyzeRequest, db: Session = Depends(get_db)):
     """Manual analyze for one archive record.
@@ -823,6 +879,58 @@ def get_recurrence_statistics(db: Session = Depends(get_db)):
         "by_category": by_category,
         "top_scopes": top_scopes,
         "total_recurrences": len(recurring),
+    }
+
+
+@router.get("/statistics/relations", response_model=PlanRecordRelationStatisticsResponse)
+def get_relation_statistics(db: Session = Depends(get_db)):
+    """Plan relation statistics, with unresolved followup cases separated."""
+    from sqlalchemy import func
+    from app.models.plan_record import PlanRecordRelation
+
+    relation_counts = {
+        relation_type: count
+        for relation_type, count in db.query(
+            PlanRecordRelation.relation_type,
+            func.count(PlanRecordRelation.id),
+        ).group_by(PlanRecordRelation.relation_type).all()
+    }
+
+    unresolved = (
+        db.query(PlanRecordRelation)
+        .filter(PlanRecordRelation.relation_type == "unresolved_followup")
+        .order_by(PlanRecordRelation.updated_at.desc())
+        .limit(10)
+        .all()
+    )
+
+    top_sources = [
+        {
+            "record_id": record_id,
+            "count": count,
+        }
+        for record_id, count in db.query(
+            PlanRecordRelation.source_plan_record_id,
+            func.count(PlanRecordRelation.id),
+        ).group_by(PlanRecordRelation.source_plan_record_id).order_by(func.count(PlanRecordRelation.id).desc()).limit(10).all()
+    ]
+    top_targets = [
+        {
+            "record_id": record_id,
+            "count": count,
+        }
+        for record_id, count in db.query(
+            PlanRecordRelation.target_plan_record_id,
+            func.count(PlanRecordRelation.id),
+        ).group_by(PlanRecordRelation.target_plan_record_id).order_by(func.count(PlanRecordRelation.id).desc()).limit(10).all()
+    ]
+
+    return {
+        "relation_counts": relation_counts,
+        "unresolved_followup_count": relation_counts.get("unresolved_followup", 0),
+        "recent_unresolved_followups": [_serialize_relation(row, "outgoing") for row in unresolved],
+        "top_sources": top_sources,
+        "top_targets": top_targets,
     }
 
 

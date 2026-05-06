@@ -17,7 +17,8 @@
     type PlanArchiveSelectedProfile,
     type SyncResult,
     type ArchiveCandidateSummary,
-    type ArchiveCandidate
+    type ArchiveCandidate,
+    type PlanRecordRelation
   } from '$lib/api/plan-records';
   import { devRunnerPlanApi } from '$lib/api/dev-runner';
   import { type ProviderInfo } from '$lib/api/system';
@@ -36,6 +37,8 @@
   let records: PlanRecord[] = $state([]);
   let loading = $state(true);
   let selectedRecord: PlanRecord | null = $state(null);
+  let selectedRelations: PlanRecordRelation[] = $state([]);
+  let selectedRelationsLoading = $state(false);
   let detailTab: 'content' | 'memo' | 'analyze' | 'history' = $state('content');
   let editingStatusId: number | null = $state(null);
 
@@ -97,6 +100,17 @@
       appliedRequestId = detail.applied_request_id ?? null;
     } catch {
       appliedRequestId = null;
+    }
+  }
+
+  async function loadSelectedRelations(recordId: number) {
+    selectedRelationsLoading = true;
+    try {
+      selectedRelations = await planRecordsApi.getRelations(recordId, { direction: 'both' });
+    } catch {
+      selectedRelations = [];
+    } finally {
+      selectedRelationsLoading = false;
     }
   }
 
@@ -720,10 +734,12 @@
     if (selectedRecord?.id === record.id) {
       selectedRecord = null;
       appliedRequestId = null;
+      selectedRelations = [];
     } else {
       selectedRecord = record;
       appliedRequestId = null;
       loadAppliedRequestId(record);
+      loadSelectedRelations(record.id);
     }
     detailTab = 'content';
     analyzeResult = null;
@@ -734,6 +750,23 @@
     if (selectedRecord) {
       void loadSelectedExecutionHistory(record.id);
     }
+  }
+
+  function relationLabel(type: string) {
+    const labels: Record<string, string> = {
+      predecessor: '선행',
+      successor: '후속',
+      unresolved_followup: '미해결 후속',
+      cause: '원인',
+      guard: '방어',
+      supersedes: '대체',
+      mentions: '언급'
+    };
+    return labels[type] ?? type;
+  }
+
+  function relationPeer(relation: PlanRecordRelation) {
+    return relation.direction === 'incoming' ? relation.source : relation.target;
   }
 
   async function runManualAnalyze(mode: 'preview' | 'apply') {
@@ -777,6 +810,7 @@
         const record = await planRecordsApi.byPath(focusPath);
         selectedRecord = record;
         detailTab = 'content';
+        loadSelectedRelations(record.id);
         if (!records.some((r) => r.id === record.id)) {
           records = [record, ...records];
         }
@@ -2046,6 +2080,33 @@
       <p class="text-xs text-muted-foreground">
         카테고리: <span class="font-medium">{getCategoryFromPath(selectedRecord.file_path)}</span>
       </p>
+      <div class="rounded border border-border p-2 text-xs">
+        <div class="mb-1 flex items-center justify-between">
+          <span class="font-semibold text-foreground">계획 관계</span>
+          {#if selectedRelations.some((relation) => relation.relation_type === 'unresolved_followup')}
+            <span class="rounded bg-red-100 px-1.5 py-0.5 text-red-700 dark:bg-red-900 dark:text-red-200">미해결 후속</span>
+          {/if}
+        </div>
+        {#if selectedRelationsLoading}
+          <p class="text-muted-foreground">불러오는 중...</p>
+        {:else if selectedRelations.length === 0}
+          <p class="text-muted-foreground">관계 없음</p>
+        {:else}
+          <div class="space-y-1">
+            {#each selectedRelations.slice(0, 5) as relation}
+              <div class="flex min-w-0 items-center gap-1">
+                <span class="shrink-0 rounded bg-muted px-1 py-0.5 text-muted-foreground">{relation.direction === 'incoming' ? 'in' : 'out'}</span>
+                <span class="shrink-0 rounded px-1 py-0.5 {relation.relation_type === 'unresolved_followup' ? 'bg-red-100 text-red-700 dark:bg-red-900 dark:text-red-200' : 'bg-blue-100 text-blue-700 dark:bg-blue-900 dark:text-blue-200'}">
+                  {relationLabel(relation.relation_type)}
+                </span>
+                <span class="truncate text-muted-foreground" title={relationPeer(relation).file_path}>
+                  {relationPeer(relation).title || relationPeer(relation).file_path.split(/[\\/]/).pop()}
+                </span>
+              </div>
+            {/each}
+          </div>
+        {/if}
+      </div>
       <!-- 탭 버튼 -->
       <div class="flex gap-1 border-b border-border pb-1">
         <button
