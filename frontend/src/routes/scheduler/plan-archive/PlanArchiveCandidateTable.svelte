@@ -30,7 +30,7 @@
 				skip: (pager.page - 1) * 50,
 				limit: 50,
 			});
-			candidates = (res as { candidates?: Record<string, unknown>[] }).candidates ?? [];
+			candidates = ((res as unknown) as { candidates?: Record<string, unknown>[] }).candidates ?? [];
 			// ArchiveCandidateSummary에는 total이 없을 수 있음
 		} catch (e) {
 			error = e instanceof Error ? e.message : '로드 실패';
