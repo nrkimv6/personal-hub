@@ -51,3 +51,11 @@ test("merge_status error takes precedence over completed lifecycle labels", () =
     assert.ok(statusFallback >= 0);
     assert.ok(statusError < statusFallback);
 });
+
+test("plan claim release uses the same DELETE endpoint through frontend api", () => {
+    const api = readSource("src/lib/api/dev-runner.ts");
+
+    assert.match(api, /releaseClaim:\s*\(encodedPath: string\)/);
+    assert.match(api, /`\/plans\/\$\{encodedPath\}\/claim`/);
+    assert.match(api, /method:\s*'DELETE'/);
+});

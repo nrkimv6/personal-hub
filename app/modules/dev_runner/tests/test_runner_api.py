@@ -734,6 +734,40 @@ class TestListRunners:
         assert data[0]["branch_exists"] is True
         assert await fake_async.get(f"{prefix}:branch_exists") == "true"
 
+    async def test_list_runners_preserves_completed_merge_error_with_post_merge_tasks(self, client, mock_executor_redis, tmp_path):
+        """T5-R: completed lifecycle과 merge error/post-merge 잔여는 HTTP 응답에서 함께 보존된다."""
+        fake_async = mock_executor_redis["async"]
+        plan = tmp_path / "blocked-plan.md"
+        plan.write_text(
+            "# blocked\n\n"
+            "### Phase 1\n\n"
+            "- [x] implementation done\n\n"
+            "### Phase Z\n\n"
+            "- [ ] archive remains\n",
+            encoding="utf-8",
+        )
+        rid = "completed-merge-error-001"
+        prefix = f"plan-runner:runners:{rid}"
+        await fake_async.zadd("plan-runner:recent_runners", {rid: 1})
+        await fake_async.set(f"{prefix}:status", "stopped")
+        await fake_async.set(f"{prefix}:trigger", "user")
+        await fake_async.set(f"{prefix}:plan_file", str(plan))
+        await fake_async.set(f"{prefix}:exit_reason", "completed")
+        await fake_async.set(f"{prefix}:merge_status", "error")
+        await fake_async.set(f"{prefix}:merge_reason", "stale_merge_blocked")
+        await fake_async.set(f"{prefix}:merge_message", "stale merge gate: risk=BLOCK")
+
+        response = await client.get("/api/v1/dev-runner/runners")
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data[0]["runner_id"] == rid
+        assert data[0]["running"] is False
+        assert data[0]["exit_reason"] == "completed"
+        assert data[0]["merge_status"] == "error"
+        assert data[0]["merge_reason"] == "stale_merge_blocked"
+        assert data[0]["remaining_post_merge_tasks"] == 1
+
 
 class TestMergeApprovalPayload:
     async def test_merge_retry_request_forwards_approve_service_lock(self, client):

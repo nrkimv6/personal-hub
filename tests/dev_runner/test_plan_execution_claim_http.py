@@ -1,4 +1,4 @@
-"""Phase T5: HTTP 통합 테스트 — plan 실행점유 claim 409 충돌 응답
+"""Phase T5: HTTP 통합 테스트 — plan 실행점유 claim HTTP 응답
 
 POST /api/v1/dev-runner/run 에서 live claim 충돌 시 409 + structured detail 검증.
 TestClient 기반 (실서버 불필요).
@@ -8,7 +8,9 @@ HTTPException(409, detail={...})를 직접 발생시킨다.
 실제 ClaimConflictError → HTTPException 변환 코드(executor_service.py)에서 생성하는
 동일한 구조의 detail dict를 사용해 HTTP 계층의 409 전달 여부를 검증한다.
 """
-from unittest.mock import AsyncMock, patch
+import base64
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from fastapi import HTTPException
@@ -88,3 +90,45 @@ class TestRunEndpointClaimConflict:
         resp_detail = resp.json().get("detail", {})
         for field in ("claim_id", "claim_state", "stale", "message"):
             assert field in resp_detail, f"detail에 '{field}' 누락: {resp_detail}"
+
+
+def _encode_path(path: str) -> str:
+    return base64.urlsafe_b64encode(path.encode("utf-8")).decode("ascii").rstrip("=")
+
+
+class TestPlanClaimReleaseEndpoint:
+    """DELETE /plans/{encoded_path}/claim — active/queued claim release HTTP 계약"""
+
+    def test_R_delete_claim_releases_queued_claim(self, client):
+        claim = SimpleNamespace(claim_id="claim-http-release-001")
+        mock_get = MagicMock(return_value=claim)
+        mock_release = MagicMock()
+
+        with patch(
+            "app.modules.dev_runner.services.plan_execution_claim_service.get_active_claim_for_plan",
+            mock_get,
+        ), patch(
+            "app.modules.dev_runner.services.plan_execution_claim_service.release_claim",
+            mock_release,
+        ):
+            resp = client.delete(
+                f"/api/v1/dev-runner/plans/{_encode_path('docs/plan/queued-claim.md')}/claim"
+            )
+
+        assert resp.status_code == 200
+        assert resp.json() == {"ok": True, "claim_id": "claim-http-release-001"}
+        mock_get.assert_called_once()
+        assert mock_get.call_args.args[1] == "docs/plan/queued-claim.md"
+        mock_release.assert_called_once_with(mock_get.call_args.args[0], claim.claim_id)
+
+    def test_B_delete_claim_returns_404_when_no_active_claim(self, client):
+        with patch(
+            "app.modules.dev_runner.services.plan_execution_claim_service.get_active_claim_for_plan",
+            return_value=None,
+        ):
+            resp = client.delete(
+                f"/api/v1/dev-runner/plans/{_encode_path('docs/plan/no-claim.md')}/claim"
+            )
+
+        assert resp.status_code == 404
+        assert resp.json()["detail"] == "active claim not found"
