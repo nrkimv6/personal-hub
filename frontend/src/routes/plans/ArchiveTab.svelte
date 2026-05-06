@@ -1,7 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { page } from '$app/stores';
-  import { llmApi } from '$lib/api';
   import {
     planRecordsApi,
     archiveApi,
@@ -9,13 +8,10 @@
     type ImportArchivedResult,
     type ArchivePreviewItem,
     type DuplicateItem,
-    type PlanArchiveExecutionAttempt,
-    type PlanArchiveHealth,
     type SyncResult,
     type PlanRecordRelation
   } from '$lib/api/plan-records';
   import { devRunnerPlanApi } from '$lib/api/dev-runner';
-  import { type ProviderInfo } from '$lib/api/system';
   import { createArchiveResidualState } from './archive-tab/planArchiveResidualState.svelte';
   import ArchiveRetrievalPanel from './archive-tab/ArchiveRetrievalPanel.svelte';
   import ArchiveRecordDetailPanel from './archive-tab/ArchiveRecordDetailPanel.svelte';
@@ -37,7 +33,7 @@
   let selectedRecord: PlanRecord | null = $state(null);
   let selectedRelations: PlanRecordRelation[] = $state([]);
   let selectedRelationsLoading = $state(false);
-  let detailTab: 'content' | 'memo' | 'analyze' | 'history' = $state('content');
+  let detailTab: 'content' | 'memo' = $state('content');
   let editingStatusId: number | null = $state(null);
 
   const EDITABLE_STATUSES = ['초안', '검토대기', '구현중', '보류'];
@@ -77,11 +73,6 @@
   let importResult: ImportArchivedResult | null = $state(null);
   let syncLoading = $state(false);
   let syncResult: SyncResult | null = $state(null);
-  let archiveHealth: PlanArchiveHealth | null = $state(null);
-  let archiveHealthError = $state('');
-
-  // ── 분석 요청 ─────────────────────────────────────────────
-  let providers: ProviderInfo[] = $state([]);
 
   async function loadSelectedRelations(recordId: number) {
     selectedRelationsLoading = true;
@@ -109,11 +100,6 @@
     }
   }
 
-  // LLM 처리 현황 (per-record 실행 이력)
-  let selectedExecutionHistory: PlanArchiveExecutionAttempt[] = $state([]);
-  let selectedExecutionHistoryLoading = $state(false);
-  let selectedExecutionHistoryError = $state('');
-
   async function runSync() {
     syncLoading = true;
     syncResult = null;
@@ -127,44 +113,6 @@
     } finally {
       syncLoading = false;
     }
-  }
-
-  async function loadArchiveHealth() {
-    archiveHealthError = '';
-    try {
-      archiveHealth = await planRecordsApi.getArchiveHealth();
-    } catch (e) {
-      archiveHealth = null;
-      archiveHealthError = e instanceof Error ? e.message : 'Archive health 로드 실패';
-    }
-  }
-
-  async function loadProviders() {
-    try {
-      providers = await llmApi.getProviders();
-    } catch {
-      providers = [];
-    }
-  }
-
-  async function loadSelectedExecutionHistory(recordId: number) {
-    selectedExecutionHistoryLoading = true;
-    selectedExecutionHistoryError = '';
-    try {
-      const result = await planRecordsApi.getArchiveExecutionHistory({ record_id: recordId, limit: 20 });
-      selectedExecutionHistory = result.items ?? [];
-    } catch (e) {
-      selectedExecutionHistory = [];
-      selectedExecutionHistoryError = e instanceof Error ? e.message : '실행 이력 로드 실패';
-    } finally {
-      selectedExecutionHistoryLoading = false;
-    }
-  }
-
-  function refreshSelectedExecutionHistory() {
-    const record = selectedRecord;
-    if (!record) return;
-    void loadSelectedExecutionHistory(record.id);
   }
 
   // ── 중복 감지 ─────────────────────────────────────────────
@@ -313,18 +261,6 @@
       loadSelectedRelations(record.id);
     }
     detailTab = 'content';
-    residual.resetForRecord();
-    selectedExecutionHistory = [];
-    selectedExecutionHistoryError = '';
-    if (selectedRecord) {
-      void loadSelectedExecutionHistory(record.id);
-    }
-  }
-
-  async function handleRecordSaved(recordId: number) {
-    await loadRecords();
-    const updated = records.find((r) => r.id === recordId);
-    if (updated) selectedRecord = updated;
   }
 
   // 외부 quick search 포커싱: file_path로 record get_or_create 후 자동 선택
@@ -364,24 +300,6 @@
     });
   }
 
-  function getExecutionStateClass(executionState: string | null | undefined) {
-    switch (executionState) {
-      case 'queued':
-      case 'pending':
-        return 'bg-yellow-100 text-yellow-700 dark:bg-yellow-900 dark:text-yellow-200';
-      case 'running':
-      case 'processing':
-        return 'bg-blue-100 text-blue-700 dark:bg-blue-900 dark:text-blue-200';
-      case 'failed':
-        return 'bg-red-100 text-red-700 dark:bg-red-900 dark:text-red-200';
-      case 'completed':
-      case 'success':
-        return 'bg-green-100 text-green-700 dark:bg-green-900 dark:text-green-200';
-      default:
-        return 'bg-muted text-muted-foreground';
-    }
-  }
-
   function getArchiveStateClass(archiveState: string | null | undefined) {
     switch (archiveState) {
       case 'ready':
@@ -397,27 +315,8 @@
     }
   }
 
-  function getAttemptStatus(attempt: PlanArchiveExecutionAttempt | null | undefined) {
-    return attempt?.status ?? attempt?.state ?? '-';
-  }
-
-  function getAttemptTime(attempt: PlanArchiveExecutionAttempt | null | undefined) {
-    return attempt?.completed_at ?? attempt?.started_at ?? attempt?.requested_at ?? null;
-  }
-
-  function getAttemptProfile(attempt: PlanArchiveExecutionAttempt | null | undefined) {
-    const engine = attempt?.engine;
-    const profile = attempt?.profile_name;
-    if (engine && profile) return `${engine}/${profile}`;
-    if (engine) return engine;
-    if (profile) return profile;
-    return '-';
-  }
-
   onMount(() => {
     loadRecords();
-    loadProviders();
-    loadArchiveHealth();
   });
 </script>
 
@@ -493,25 +392,6 @@
       onSync={runSync}
     />
 
-    {#if archiveHealth?.execution_db_readiness && !archiveHealth.execution_db_readiness.ok}
-      <div class="mb-3 rounded border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-800 dark:border-red-800 dark:bg-red-950 dark:text-red-200">
-        <div class="font-medium">Plan Archive execution readiness missing</div>
-        <div class="mt-1 text-red-700 dark:text-red-300">
-          누락 테이블: {archiveHealth.execution_db_readiness.missing_tables.join(', ') || 'unknown'}
-        </div>
-      </div>
-    {:else if archiveHealthError}
-      <div class="mb-3 rounded border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-200">
-        {archiveHealthError}
-      </div>
-    {/if}
-
-    <!-- schedule 운영 이전 링크 -->
-    <div class="mb-3 flex items-center gap-2 rounded border border-border bg-background px-3 py-2 text-xs">
-      <span class="text-muted-foreground">schedule 운영·LLM 요청 큐·실행 제어·후보 관리 →</span>
-      <a href="/scheduler/plan-archive" class="text-primary underline hover:no-underline">/scheduler/plan-archive</a>
-    </div>
-
     <ArchiveRetrievalPanel
       state={residual}
       {selectedRecord}
@@ -567,7 +447,6 @@
               <th class="pb-2 pr-4 font-medium">파일명</th>
               <th class="pb-2 pr-3 font-medium whitespace-nowrap">카테고리</th>
               <th class="pb-2 pr-3 font-medium whitespace-nowrap">Archive</th>
-              <th class="pb-2 pr-3 font-medium whitespace-nowrap">Execution</th>
               <th class="pb-2 pr-4 font-medium whitespace-nowrap">완료일</th>
               <th class="pb-2 pr-4 font-medium whitespace-nowrap">상태</th>
               <th class="pb-2 font-medium">메모</th>
@@ -607,18 +486,6 @@
                   <span class="inline-block rounded px-1.5 py-0.5 text-xs {getArchiveStateClass(record.archive_state)}">
                     {record.archive_state ?? '-'}
                   </span>
-                </td>
-                <td class="py-2 pr-3 text-xs">
-                  <span class="inline-block rounded px-1.5 py-0.5 {getExecutionStateClass(record.execution_state)}">
-                    {record.execution_state ?? getAttemptStatus(record.latest_attempt)}
-                  </span>
-                  {#if record.latest_attempt}
-                    <div class="mt-0.5 text-muted-foreground">
-                      {getAttemptProfile(record.latest_attempt)} · {formatDateTime(getAttemptTime(record.latest_attempt))}
-                    </div>
-                  {:else if record.next_available_at}
-                    <div class="mt-0.5 text-muted-foreground">next {formatDateTime(record.next_available_at)}</div>
-                  {/if}
                 </td>
                 <td class="py-2 pr-4 text-muted-foreground text-xs whitespace-nowrap">
                   {formatDate(record.archived_at)}
@@ -683,17 +550,9 @@
       record={selectedRecord}
       relations={selectedRelations}
       relationsLoading={selectedRelationsLoading}
-      executionHistory={selectedExecutionHistory}
-      executionHistoryLoading={selectedExecutionHistoryLoading}
-      executionHistoryError={selectedExecutionHistoryError}
       {detailTab}
-      {providers}
-      state={residual}
-      {showToast}
       onClose={() => { selectedRecord = null; }}
       onTabChange={(tab) => { detailTab = tab; }}
-      onRefreshHistory={refreshSelectedExecutionHistory}
-      onSaved={handleRecordSaved}
     />
   {/if}
 </div>
