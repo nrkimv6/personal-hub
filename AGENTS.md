@@ -18,6 +18,8 @@
   `D:\work\project\service\wtools\.claude\`에서 수정 후 동기화
 - `.claude/skills/` 또는 `.agents/skills/` 수정 시에는 다른 경로도 함께 갱신해 드리프트를 방지한다.
 - mirror surface(`.agents/`, `.agent/`, `.claude/`, `.gemini/`) 직접 수정·로컬 커밋 금지. wtools 원본 수정 후 원격 sync commit을 `git pull --ff-only`로만 수신한다.
+- backup/restore 브랜치를 main에 반영할 때 source branch에 mirror/skill 변경이 섞여 있는지 먼저 확인한다: `git diff --name-status <base> <source> -- .agents .agent .claude .gemini`. 사용자가 skill 제외를 지시했거나 mirror 변경이 범위 밖이면 병합 입력 단계에서 제외하고, merge 전후 `.agents/.agent/.claude/.gemini` diff가 비어 있지 않으면 완료 처리 금지.
+- root `main`이 `origin/main`과 diverge된 상태에서 plain `git pull` 금지. 특히 remote tip이 `chore: sync skills and agent files`면 local merge로 닫지 말고 ff-only receiver 정책 또는 wtools source-owner flow로 처리한다.
 - root worktree(`main`/non-main 공통)에서는 구현성 경로를 직접 수정·커밋하지 않는다. 현재 impl worktree 또는 대상 repo worktree로 reroute한다. root branch guard는 `scripts/git-hooks/root-branch-guard.ps1`이며, root checkout이 main 밖으로 이동하면 `.git/root-branch-guard.violation` sentinel을 남긴다.
 
 ## Receiver Mirror Scope
