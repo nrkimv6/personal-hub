@@ -16,6 +16,7 @@ from sqlalchemy.orm import sessionmaker
 from app.models.plan_record import PlanRecord, PlanEvent
 from app.modules.claude_worker.services.plan_analyze_handler import (
     save_plan_archive_result,
+    save_plan_archive_result_outcome,
     build_plan_analyze_prompt,
 )
 
@@ -89,6 +90,43 @@ def test_save_plan_archive_result_right(db, sample_record):
     assert (sample_record.file_delete_after - sample_record.llm_processed_at).days == 7
 
 
+def test_save_plan_archive_result_skips_filename_like_category(db):
+    """B: 파일명/path처럼 보이는 category는 DB category로 적용하지 않는다."""
+    record = PlanRecord(
+        filename_hash="filename_like_category_hash",
+        file_path="/docs/archive/common/2026-04-12_filename-category.md",
+        project="common",
+        category="common",
+        archived_at=datetime.now(),
+        status="archived",
+    )
+    db.add(record)
+    db.commit()
+    mock_request = MagicMock()
+    mock_request.id = 15501
+    mock_request.caller_id = "filename_like_category_hash"
+
+    outcome = save_plan_archive_result_outcome(
+        db,
+        mock_request,
+        {
+            "success": True,
+            "result": {
+                "category": "2026-04-12_fix-test-fix-engine-propagation-merge-precheck-unmocked.md",
+                "tags": ["test"],
+                "summary": "filename-like category rejected",
+            },
+        },
+    )
+
+    db.refresh(record)
+    assert outcome.saved is True
+    assert outcome.reason == "invalid_category_skipped"
+    assert record.category == "common"
+    assert record.tags == ["test"]
+    assert record.summary == "filename-like category rejected"
+
+
 def test_save_plan_archive_result_skips_stale_older_request(db):
     """R: 더 최신 completed 요청이 있으면 오래된 결과가 DB 값을 덮어쓰지 않는다."""
     record = PlanRecord(
@@ -109,14 +147,22 @@ def test_save_plan_archive_result_skips_stale_older_request(db):
     older_request.caller_id = "stale_guard_hash_001"
 
     with patch("app.modules.claude_worker.services.plan_analyze_handler._has_newer_plan_archive_result", return_value=True):
-        saved = save_plan_archive_result(
+        outcome = save_plan_archive_result_outcome(
             db,
             older_request,
             {"success": True, "result": {"category": "old", "summary": "오래된 결과"}},
         )
+        saved_bool = save_plan_archive_result(
+            db,
+            older_request,
+            {"success": True, "result": {"category": "old"}},
+        )
 
     db.refresh(record)
-    assert saved is False
+    assert outcome.saved is False
+    assert outcome.status == "stale_skipped"
+    assert outcome.reason == "newer_completed_result_exists"
+    assert saved_bool is False
     assert record.category == "latest"
     assert record.summary == "최신 결과"
 

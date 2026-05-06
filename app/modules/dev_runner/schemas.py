@@ -319,12 +319,34 @@ class PlanArchiveHealthResponse(BaseModel):
     file_retention_due: int = 0
     file_retention_scheduled: int = 0
     file_removed: int = 0
+    category_pollution_candidates: int = 0
     oldest_file_delete_after: Optional[str] = None
     latest_failed_request: Optional[PlanArchiveFailedRequestResponse] = None
     oldest_unprocessed_at: Optional[str] = None
     plan_archive_schedule: Optional[PlanArchiveScheduleSnapshot] = None
     retrieval_db_readiness: PlanArchiveDbReadinessResponse
     execution_db_readiness: PlanArchiveDbReadinessResponse
+
+
+class PlanArchiveCategoryRepairRequest(BaseModel):
+    apply: bool = False
+    limit: int = Field(default=100, ge=1, le=1000)
+
+
+class PlanArchiveCategoryRepairItem(BaseModel):
+    record_id: int
+    filename_hash: str
+    file_path: Optional[str] = None
+    old_category: Optional[str] = None
+    suggested_category: str
+    applied: bool = False
+
+
+class PlanArchiveCategoryRepairResponse(BaseModel):
+    apply: bool = False
+    matched: int = 0
+    repaired: int = 0
+    items: List[PlanArchiveCategoryRepairItem] = Field(default_factory=list)
 
 
 class PlanArchiveRetrievalQuery(BaseModel):
@@ -661,6 +683,8 @@ class PlanArchiveAnalyzeResponse(BaseModel):
     saved: bool = False
     record_after: Optional[dict] = None
     save_error: Optional[str] = None
+    save_outcome_status: Optional[str] = None
+    save_outcome_reason: Optional[str] = None
 
 
 class PlanArchiveSelectedProfile(BaseModel):
@@ -688,15 +712,15 @@ class PlanArchiveExecutionTarget(BaseModel):
     def dedupe_key(self) -> str:
         """중복 방지 키.
 
-        - profile-backed: 'profile:{profile_key}' 또는 'profile:{engine}:{profile_name}'
+        - profile-backed: 'profile:{profile_key}:{model|default}' 또는 'profile:{engine}:{profile_name}:{model|default}'
         - profile-less: 'profileless:{provider}:{model|default}'
         """
-        if self.profile_key:
-            return f"profile:{self.profile_key}"
-        if self.engine and self.profile_name:
-            return f"profile:{self.engine}:{self.profile_name}"
-        provider = (self.provider or "").strip() or "unknown"
         model = (self.model or "").strip() or "default"
+        if self.profile_key:
+            return f"profile:{self.profile_key}:{model}"
+        if self.engine and self.profile_name:
+            return f"profile:{self.engine}:{self.profile_name}:{model}"
+        provider = (self.provider or "").strip() or "unknown"
         return f"profileless:{provider}:{model}"
 
 
@@ -767,6 +791,18 @@ class PlanArchiveExecutionAttemptResponse(BaseModel):
     profile_name: Optional[str] = None
     provider: Optional[str] = None
     model: Optional[str] = None
+    requested_provider: Optional[str] = None
+    requested_model: Optional[str] = None
+    requested_engine: Optional[str] = None
+    requested_profile_name: Optional[str] = None
+    requested_profile_key: Optional[str] = None
+    target_label: Optional[str] = None
+    requested_target: Optional[dict] = None
+    effective_target: Optional[dict] = None
+    actual_target: Optional[dict] = None
+    effective_provider_model: Optional[dict] = None
+    actual_provider_model: Optional[dict] = None
+    assigned_profile: Optional[dict] = None
     retryable: bool = False
     error_message: Optional[str] = None
     requested_at: Optional[datetime] = None
@@ -782,6 +818,7 @@ class PlanArchiveExecutionHistoryItem(BaseModel):
     trigger_source: str
     status: str
     selected_profiles: List[dict] = Field(default_factory=list)
+    selected_targets: List[dict] = Field(default_factory=list)
     profile_count: int = 0
     latest_request_id: Optional[int] = None
     next_available_at: Optional[datetime] = None
@@ -1231,6 +1268,23 @@ class ArchiveLLMRequestRow(BaseModel):
     engine: Optional[str] = None
     profile_name: Optional[str] = None
     target_label: Optional[str] = None
+    requested_provider: Optional[str] = None
+    requested_model: Optional[str] = None
+    requested_engine: Optional[str] = None
+    requested_profile_name: Optional[str] = None
+    requested_profile_key: Optional[str] = None
+    effective_provider: Optional[str] = None
+    effective_model: Optional[str] = None
+    actual_provider: Optional[str] = None
+    actual_model: Optional[str] = None
+    actual_engine: Optional[str] = None
+    actual_profile_name: Optional[str] = None
+    requested_target: Optional[dict] = None
+    effective_target: Optional[dict] = None
+    actual_target: Optional[dict] = None
+    effective_provider_model: Optional[dict] = None
+    actual_provider_model: Optional[dict] = None
+    assigned_profile: Optional[dict] = None
     record_id: Optional[str] = None
     candidate_key: Optional[str] = None
     source_schedule_run_id: Optional[int] = None
@@ -1242,6 +1296,8 @@ class ArchiveLLMRequestRow(BaseModel):
     retry_count: int = 0
     applied_request_id: Optional[int] = None
     is_applied_to_record: bool = False
+    save_outcome_status: Optional[str] = None
+    save_outcome_reason: Optional[str] = None
 
 
 class ArchiveRelatedRecord(BaseModel):
@@ -1316,7 +1372,21 @@ class ArchiveExecutionAttemptRow(BaseModel):
     model: Optional[str] = None
     engine: Optional[str] = None
     profile_name: Optional[str] = None
+    requested_provider: Optional[str] = None
+    requested_model: Optional[str] = None
+    requested_engine: Optional[str] = None
+    requested_profile_name: Optional[str] = None
+    requested_profile_key: Optional[str] = None
+    target_label: Optional[str] = None
+    requested_target: Optional[dict] = None
+    effective_target: Optional[dict] = None
+    actual_target: Optional[dict] = None
+    effective_provider_model: Optional[dict] = None
+    actual_provider_model: Optional[dict] = None
+    assigned_profile: Optional[dict] = None
     error_message: Optional[str] = None
+    save_outcome_status: Optional[str] = None
+    save_outcome_reason: Optional[str] = None
     requested_at: Optional[str] = None
     finished_at: Optional[str] = None
 
@@ -1352,6 +1422,9 @@ __all__ = [
     'PlanRecordWithEventsResponse',
     'ImportArchivedResponse',
     'PlanArchiveHealthResponse',
+    'PlanArchiveCategoryRepairRequest',
+    'PlanArchiveCategoryRepairResponse',
+    'PlanArchiveCategoryRepairItem',
     'PlanArchiveDbReadinessResponse',
     'PlanArchiveRetrievalQuery',
     'PlanArchiveRetrievalResult',

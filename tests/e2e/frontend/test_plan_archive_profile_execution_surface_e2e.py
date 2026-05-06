@@ -48,8 +48,8 @@ def _record_payload(**overrides):
     return payload
 
 
-def _install_archive_execution_routes(page: Page) -> dict[str, int]:
-    calls = {"run": 0, "sync": 0}
+def _install_archive_execution_routes(page: Page) -> dict[str, object]:
+    calls: dict[str, object] = {"run": 0, "sync": 0, "run_payloads": []}
 
     def handle_api(route):
         url = route.request.url
@@ -86,7 +86,17 @@ def _install_archive_execution_routes(page: Page) -> dict[str, int]:
             )
             return
         if "/api/v1/llm/providers" in url:
-            _json_response(route, [{"key": "claude", "display_name": "Claude", "default_model": "claude-opus-4-5", "models": ["claude-opus-4-5"]}])
+            _json_response(
+                route,
+                [
+                    {
+                        "key": "claude",
+                        "display_name": "Claude",
+                        "default_model": "claude-opus-4-5",
+                        "models": ["claude-opus-4-5", "claude-sonnet-4-5"],
+                    }
+                ],
+            )
             return
         if "/api/v1/llm/schedule-profile-policies" in url:
             _json_response(
@@ -137,6 +147,7 @@ def _install_archive_execution_routes(page: Page) -> dict[str, int]:
             return
         if "/api/v1/plans/records/archive-executions/run" in url:
             calls["run"] += 1
+            calls["run_payloads"].append(route.request.post_data_json)
             _json_response(
                 route,
                 {
@@ -252,13 +263,17 @@ def test_archive_profile_execution_controls_and_capacity_state(
 ):
     _skip_admin_mode_if_public(system_mode)
     calls = _install_archive_execution_routes(page)
+    page.add_init_script("localStorage.clear()")
 
     page.goto(f"{frontend_url}/scheduler/plan-archive", wait_until="domcontentloaded")
 
     expect(page.get_by_text("Archive Schedule 현황")).to_be_visible()
     expect(page.get_by_text("분석 Target:")).to_be_visible()
     expect(page.get_by_text("target을 1개 이상 선택하세요")).to_be_visible()
-    page.get_by_role("button", name="전체").click()
+    page.get_by_role("button", name="0개 선택됨").click()
+    page.get_by_label("claude/work/claude-opus-4-5 model").select_option("claude-sonnet-4-5")
+    page.get_by_role("button", name="claude/work/claude-sonnet-4-5").click()
+    expect(page.locator('button[title="claude/work/claude-sonnet-4-5"]').first).to_be_visible()
     expect(page.get_by_role("button", name="Backlog 실행")).to_be_enabled()
     expect(page.get_by_text("quota 1")).to_be_visible()
 
@@ -269,3 +284,18 @@ def test_archive_profile_execution_controls_and_capacity_state(
     page.get_by_role("button", name="Backlog 실행").click()
     expect(page.get_by_text("큐잉 1건", exact=True)).to_be_visible()
     assert calls["run"] == 1
+    assert calls["run_payloads"] == [
+        {
+            "selected_targets": [
+                {
+                    "provider": "claude",
+                    "model": "claude-sonnet-4-5",
+                    "profile_key": "claude:work",
+                    "engine": "claude",
+                    "profile_name": "work",
+                    "label": "claude/work/claude-sonnet-4-5",
+                    "kind": "profile",
+                }
+            ]
+        }
+    ]

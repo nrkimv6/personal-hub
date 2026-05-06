@@ -58,6 +58,25 @@ def _install_archive_routes(page: Page) -> dict[str, int]:
         if "/api/v1/dev-runner/plans/paths" in url:
             _json_response(route, [])
             return
+        if "/api/v1/llm/providers" in url:
+            _json_response(
+                route,
+                [
+                    {
+                        "key": "codex",
+                        "display_name": "Codex",
+                        "default_model": "gpt-5.5",
+                        "models": ["gpt-5.5", "gpt-5.2"],
+                    },
+                    {
+                        "key": "claude",
+                        "display_name": "Claude",
+                        "default_model": "claude-opus-4-5",
+                        "models": ["claude-opus-4-5", "claude-sonnet-4-5"],
+                    },
+                ],
+            )
+            return
         if "/api/v1/plans/records/archive-health" in url:
             _json_response(
                 route,
@@ -87,6 +106,20 @@ def _install_archive_routes(page: Page) -> dict[str, int]:
                         ],
                         "missing_tables": [],
                     },
+                },
+            )
+            return
+        if "/api/v1/plans/records/31/reanalyze" in url:
+            payload = route.request.post_data_json
+            calls["reanalyze"] += 1
+            calls["reanalyze_payloads"].append(payload)
+            _json_response(
+                route,
+                {
+                    "queued": True,
+                    "request_id": 777,
+                    "provider": payload.get("provider"),
+                    "model": payload.get("model") or "default",
                 },
             )
             return
@@ -139,11 +172,11 @@ def test_archive_manual_analyze_surface_is_removed(
     _skip_admin_mode_if_public(system_mode)
     calls = _install_archive_routes(page)
 
-    page.goto(f"{frontend_url}/plans?tab=archive", wait_until="domcontentloaded")
+    page.goto(f"{frontend_url}/automation?tab=plans&subtab=archive", wait_until="domcontentloaded")
     expect(page.get_by_text("2026-05-05_manual-analyze.md")).to_be_visible()
     page.locator("tbody tr").filter(has_text="2026-05-05_manual-analyze.md").evaluate("el => el.click()")
     expect(page.get_by_role("button", name="내용")).to_be_visible()
-    expect(page.get_by_role("button", name="메모")).to_be_visible()
+    expect(page.get_by_role("button", name="메모", exact=True)).to_be_visible()
     expect(page.get_by_role("button", name="분석")).to_have_count(0)
     expect(page.get_by_text("Preview는 DB 저장 없음")).to_have_count(0)
     expect(page.get_by_role("button", name="DB 저장")).to_have_count(0)

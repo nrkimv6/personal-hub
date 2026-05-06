@@ -6,6 +6,8 @@ plan_records 테이블에 저장한다.
 """
 import json
 import logging
+import re
+from dataclasses import dataclass
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Optional, List
@@ -24,6 +26,36 @@ from app.modules.claude_worker.services.plan_archive_prompt_policy import (
 logger = logging.getLogger(__name__)
 
 
+_ARCHIVE_CATEGORY_FILENAME_RE = re.compile(r"^\d{4}-\d{2}-\d{2}[_-].+\.md$", re.IGNORECASE)
+
+
+def _is_invalid_plan_archive_category(value) -> bool:
+    if not isinstance(value, str):
+        return False
+    category = value.strip()
+    if not category:
+        return False
+    normalized = category.replace("\\", "/")
+    lower = normalized.lower()
+    return (
+        ".md" in lower
+        or "/" in normalized
+        or lower.startswith("docs/archive")
+        or lower.startswith("archive/")
+        or _ARCHIVE_CATEGORY_FILENAME_RE.match(category) is not None
+    )
+
+
+@dataclass(frozen=True)
+class SavePlanArchiveOutcome:
+    """Structured save result while preserving the legacy bool wrapper."""
+
+    saved: bool
+    status: str
+    reason: str | None = None
+    record_id: int | None = None
+
+
 def _has_newer_plan_archive_result(db: Session, request) -> bool:
     """동일 archive에 대해 더 최신 completed 요청이 있으면 오래된 저장을 막는다."""
     try:
@@ -31,7 +63,9 @@ def _has_newer_plan_archive_result(db: Session, request) -> bool:
         from sqlalchemy import and_
 
         raw_request_id = getattr(request, "id", None)
-        request_id = raw_request_id if isinstance(raw_request_id, int) else 0
+        if not isinstance(raw_request_id, int):
+            return False
+        request_id = raw_request_id
         caller_type = getattr(request, "caller_type", None)
         if not isinstance(caller_type, str) or not caller_type:
             caller_type = "plan_archive_analyze"
@@ -75,7 +109,7 @@ def _is_manual_reanalyze_request(request) -> bool:
     return source in {"manual_reanalyze", "manual:reanalyze"}
 
 
-def save_plan_archive_result(db: Session, request, result: dict) -> bool:
+def save_plan_archive_result_outcome(db: Session, request, result: dict) -> SavePlanArchiveOutcome:
     """plan_archive_analyze caller_type 결과 저장
 
     LLM 결과에서 category, tags, summary, superseded_by 추출 →
@@ -101,14 +135,23 @@ def save_plan_archive_result(db: Session, request, result: dict) -> bool:
         filename_hash = record.filename_hash if record else caller_id
         if not record:
             logger.error(f"save_plan_archive_result: record not found for caller_id={caller_id}")
-            return False
+            return SavePlanArchiveOutcome(
+                saved=False,
+                status="record_missing",
+                reason="record_not_found",
+            )
         if _has_newer_plan_archive_result(db, request):
             logger.warning(
                 "save_plan_archive_result: skipped stale request id=%s caller_id=%s",
                 getattr(request, "id", None),
                 caller_id,
             )
-            return False
+            return SavePlanArchiveOutcome(
+                saved=False,
+                status="stale_skipped",
+                reason="newer_completed_result_exists",
+                record_id=getattr(record, "id", None),
+            )
 
         llm_result = result.get("result") or {}
 
@@ -122,6 +165,15 @@ def save_plan_archive_result(db: Session, request, result: dict) -> bool:
         tags = llm_result.get("tags")
         summary = llm_result.get("summary")
         superseded_by = llm_result.get("superseded_by")
+        category_rejected = False
+        if _is_invalid_plan_archive_category(category):
+            category_rejected = True
+            logger.warning(
+                "save_plan_archive_result: rejected filename-like category request_id=%s category=%s",
+                getattr(request, "id", None),
+                category,
+            )
+            category = None
 
         prior_snapshot = None
         if _is_manual_reanalyze_request(request):
@@ -174,6 +226,7 @@ def save_plan_archive_result(db: Session, request, result: dict) -> bool:
         db.commit()
         logger.info(f"save_plan_archive_result: updated record id={record.id} category={category}")
 
+        relation_refresh_error = None
         try:
             from app.modules.dev_runner.services.plan_archive_relation_service import (
                 PlanArchiveRelationService,
@@ -182,6 +235,7 @@ def save_plan_archive_result(db: Session, request, result: dict) -> bool:
             PlanArchiveRelationService(db).refresh_relations_for_record(record.id)
             db.commit()
         except Exception as relation_error:
+            relation_refresh_error = relation_error
             db.rollback()
             logger.warning(
                 "save_plan_archive_result: relation refresh skipped for record %s: %s",
@@ -219,6 +273,7 @@ def save_plan_archive_result(db: Session, request, result: dict) -> bool:
                     "intent": record.intent,
                     "trigger": record.trigger,
                     "scope": record.scope,
+                    "category_rejected": category_rejected,
                 },
             )
             db.add(event)
@@ -227,14 +282,36 @@ def save_plan_archive_result(db: Session, request, result: dict) -> bool:
             db.rollback()
             logger.warning(f"save_plan_archive_result: event snapshot failed: {event_error}")
         
-        return True
+        return SavePlanArchiveOutcome(
+            saved=True,
+            status="saved",
+            reason=(
+                "relation_refresh_failed" if relation_refresh_error
+                else "invalid_category_skipped" if category_rejected
+                else None
+            ),
+            record_id=getattr(record, "id", None),
+        )
     except Exception as e:
         if is_connection_error(e):
             logger.warning("save_plan_archive_result connection error: %s", e)
+            status = "db_error"
+            reason = "connection_error"
         else:
             logger.error(f"save_plan_archive_result error: {e}", exc_info=True)
+            status = "error"
+            reason = type(e).__name__
         db.rollback()
-        return False
+        return SavePlanArchiveOutcome(
+            saved=False,
+            status=status,
+            reason=reason,
+        )
+
+
+def save_plan_archive_result(db: Session, request, result: dict) -> bool:
+    """Backward-compatible bool wrapper for legacy callers."""
+    return save_plan_archive_result_outcome(db, request, result).saved
 
 
 def build_devguide_staleness_report(db: Session) -> list:

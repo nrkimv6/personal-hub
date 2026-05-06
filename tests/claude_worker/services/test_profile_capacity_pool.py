@@ -1,4 +1,5 @@
 from datetime import datetime, timedelta
+import json
 
 import pytest
 from sqlalchemy import create_engine
@@ -177,3 +178,59 @@ def test_profile_router_skips_profile_at_capacity(profile_file, db):
 
     assert decision.profile is not None
     assert decision.profile.name == "open"
+
+
+def test_profile_router_candidate_profiles_limit_profile_not_request_model(profile_file, db):
+    from app.modules.claude_worker.services.profile_router import LLMProfileRouter
+    from app.modules.claude_worker.services.profile_store import save_profiles
+
+    save_profiles(
+        {
+            "selected": {"claude": "personal"},
+            "profiles": [
+                {
+                    "engine": "claude",
+                    "name": "personal",
+                    "config_dir": None,
+                    "extra_env": {},
+                    "priority": 100,
+                },
+                {
+                    "engine": "claude",
+                    "name": "work",
+                    "config_dir": None,
+                    "extra_env": {},
+                    "priority": 1,
+                },
+            ],
+        }
+    )
+    request = LLMRequest(
+        caller_type="plan_archive_analyze",
+        caller_id="archive",
+        prompt="p",
+        provider="claude",
+        model="claude-sonnet-4-5",
+        cli_options=json.dumps(
+            {
+                "candidate_profiles": [
+                    {
+                        "engine": "claude",
+                        "profile_name": "work",
+                        "model": "claude-opus-4-5",
+                    },
+                    {
+                        "engine": "gemini",
+                        "profile_name": "other",
+                        "model": "gemini-2.5-pro",
+                    },
+                ]
+            }
+        ),
+    )
+
+    decision = LLMProfileRouter(db).select_profile("claude", model=request.model, request=request)
+
+    assert decision.profile is not None
+    assert decision.profile.name == "work"
+    assert request.model == "claude-sonnet-4-5"
