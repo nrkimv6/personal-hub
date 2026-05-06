@@ -20,6 +20,7 @@ if "--json" in sys.argv:
 
 from app.core.config import settings  # noqa: E402
 from app.models.plan_record import PlanRecord  # noqa: E402
+from app.modules.claude_worker.models.llm_request import LLMRequest  # noqa: E402,F401
 from app.modules.dev_runner.services.plan_archive_relation_service import (  # noqa: E402
     PLAN_BODY_RELATION_TYPES,
     PlanArchiveRelationService,
