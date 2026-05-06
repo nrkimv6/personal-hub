@@ -66,3 +66,13 @@ def test_apply_upserts_relations(tmp_path):
     finally:
         session.close()
         engine.dispose()
+
+
+def test_run_uses_config_database_url_when_omitted(monkeypatch, tmp_path):
+    db_path = _seed(tmp_path)
+    monkeypatch.setattr(reindex.settings, "DATABASE_URL", f"sqlite:///{db_path}")
+
+    summary = reindex.run(apply=False, limit=1)
+
+    assert summary["dry_run"] is True
+    assert summary["record_count"] == 1

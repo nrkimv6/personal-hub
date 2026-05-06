@@ -55,7 +55,7 @@ def run(
     relation_types = None
     if relation_type:
         relation_types = [relation_type]
-    database_url = database_url or settings.database_url
+    database_url = database_url or settings.DATABASE_URL
     engine = _create_engine(database_url)
     Session = sessionmaker(bind=engine, autocommit=False, autoflush=False)
     session = Session()
