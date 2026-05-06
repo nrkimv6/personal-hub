@@ -131,6 +131,40 @@ def test_refresh_relations_preserves_existing_semantic_relation():
         engine.dispose()
 
 
+def test_refresh_relations_deduplicates_repeated_mentions_for_same_relation():
+    db, engine = _make_session()
+    try:
+        source = _record(
+            db,
+            "2026-05-06_fix-source.md",
+            raw_content="\n".join(
+                [
+                    "직접 선행: 2026-05-06_fix-target.md",
+                    "관련 계획: 2026-05-06_fix-target.md",
+                    "다시 언급: 2026-05-06_fix-target.md",
+                ]
+            ),
+        )
+        target = _record(db, "2026-05-06_fix-target.md")
+        db.commit()
+
+        result = PlanArchiveRelationService(db).refresh_relations_for_record(source.id)
+        db.commit()
+
+        assert result.created == 2
+        assert any(item["reason"] == "duplicate_body_relation" for item in result.skipped)
+        assert db.query(PlanRecordRelation).filter_by(source_plan_record_id=source.id).count() == 2
+        relation_types = {
+            row.relation_type
+            for row in db.query(PlanRecordRelation).filter_by(source_plan_record_id=source.id).all()
+        }
+        assert relation_types == {"mentions", "predecessor"}
+        assert target.id
+    finally:
+        db.close()
+        engine.dispose()
+
+
 def test_fixture_ingest_creates_predecessor_guard_unresolved_followup():
     db, engine = _make_session()
     try:

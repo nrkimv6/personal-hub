@@ -291,6 +291,16 @@ class PlanArchiveRelationService:
             classified, keywords = _classify_with_keywords(mention)
             for relation_type in sorted(classified & allowed_types):
                 key = (record.id, target.id, relation_type)
+                if key in seen_keys:
+                    result.skipped.append(
+                        {
+                            "filename": mention.filename,
+                            "line_number": mention.line_number,
+                            "relation_type": relation_type,
+                            "reason": "duplicate_body_relation",
+                        }
+                    )
+                    continue
                 seen_keys.add(key)
                 evidence = {
                     "generated_by": BODY_RELATION_GENERATOR,
