@@ -14,12 +14,12 @@ test('plan records API exposes archive execution history endpoint', () => {
 	assert.match(apiSource, /\/records\/archive-executions\/history/);
 });
 
-test('archive detail panel renders selected record execution history', () => {
-	assert.match(archiveTabSource, /selectedExecutionHistory/);
-	assert.match(archiveTabSource, /loadSelectedExecutionHistory/);
-	assert.match(archiveTabSource, /detailTab === 'history'/);
-	assert.match(archiveTabSource, /Archive execution/);
-	assert.match(archiveTabSource, /LLM request #/);
+test('archive tab does not render selected record execution history', () => {
+	assert.doesNotMatch(archiveTabSource, /selectedExecutionHistory/);
+	assert.doesNotMatch(archiveTabSource, /loadSelectedExecutionHistory/);
+	assert.doesNotMatch(archiveTabSource, /detailTab === 'history'/);
+	assert.doesNotMatch(archiveTabSource, /Archive execution/);
+	assert.doesNotMatch(archiveTabSource, /LLM request #/);
 });
 
 test('history tab renders compact archive execution history table', () => {

@@ -44,42 +44,8 @@ def _record_payload(**overrides):
     return payload
 
 
-def _analyze_payload(mode: str, *, saved: bool = False):
-    return {
-        "success": True,
-        "mode": mode,
-        "result": {
-            "category": "feature",
-            "tags": ["manual", "archive"],
-            "summary": "수동 분석 결과가 렌더링된다.",
-            "intent": "implementation",
-            "scope": ["plan_archive"],
-        },
-        "raw_response": '{"category":"feature"}',
-        "provider": "codex",
-        "model": "gpt-5.2",
-        "record_id": 31,
-        "filename_hash": "manual-analyze-31",
-        "file_path": r"D:\work\project\tools\monitor-page\.worktrees\plans\docs\archive\2026-05-05_manual-analyze.md",
-        "elapsed_ms": 123,
-        "prompt_preview": None,
-        "warnings": [],
-        "error": None,
-        "saved": saved,
-        "record_after": _record_payload(
-            category="feature",
-            tags=["manual", "archive"],
-            summary="수동 분석 결과가 렌더링된다.",
-            llm_processed_at="2026-05-05T02:00:00",
-        )
-        if saved
-        else None,
-        "save_error": None,
-    }
-
-
-def _install_archive_routes(page: Page) -> dict[str, object]:
-    calls: dict[str, object] = {"preview": 0, "apply": 0, "reanalyze": 0, "reanalyze_payloads": []}
+def _install_archive_routes(page: Page) -> dict[str, int]:
+    calls = {"analyze": 0}
 
     def handle_api(route):
         url = route.request.url
@@ -170,13 +136,8 @@ def _install_archive_routes(page: Page) -> dict[str, object]:
             _json_response(route, [_record_payload()])
             return
         if "/api/v1/plans/records/31/analyze" in url:
-            payload = route.request.post_data_json
-            if payload.get("mode") == "apply":
-                calls["apply"] += 1
-                _json_response(route, _analyze_payload("apply", saved=True))
-            else:
-                calls["preview"] += 1
-                _json_response(route, _analyze_payload("preview"))
+            calls["analyze"] += 1
+            _json_response(route, {"success": False, "error": "ArchiveTab must not call manual analyze"})
             return
         if "/api/v1/llm/requests" in url:
             _json_response(route, {"items": [], "total": 0, "page": 1, "page_size": 50, "pages": 1})
@@ -203,7 +164,7 @@ def _install_archive_routes(page: Page) -> dict[str, object]:
     return calls
 
 
-def test_archive_manual_analyze_preview_and_apply_surface(
+def test_archive_manual_analyze_surface_is_removed(
     page: Page,
     frontend_url: str,
     system_mode: str,
@@ -214,30 +175,10 @@ def test_archive_manual_analyze_preview_and_apply_surface(
     page.goto(f"{frontend_url}/plans?tab=archive", wait_until="domcontentloaded")
     expect(page.get_by_text("2026-05-05_manual-analyze.md")).to_be_visible()
     page.locator("tbody tr").filter(has_text="2026-05-05_manual-analyze.md").evaluate("el => el.click()")
-
-    page.locator("select").filter(has_text="provider 선택").select_option("claude")
-    page.get_by_placeholder("model (선택)").fill("claude-sonnet-4-5")
-    page.get_by_role("button", name="분석 요청").click()
-    expect(page.get_by_text("분석 요청 등록 (id=777, claude/claude-sonnet-4-5)")).to_be_visible()
-    assert calls["reanalyze"] == 1
-    assert calls["reanalyze_payloads"] == [
-        {"provider": "claude", "model": "claude-sonnet-4-5", "profile_key": None}
-    ]
-
-    page.get_by_role("button", name="분석", exact=True).click()
-
-    expect(page.get_by_text("Preview는 DB 저장 없음. Apply만 category/tags/summary를 저장합니다.")).to_be_visible()
-    expect(page.get_by_role("button", name="DB 저장")).to_be_disabled()
-
-    page.get_by_role("button", name="Preview").click()
-    expect(page.get_by_text("codex/gpt-5.2")).to_be_visible()
-    expect(page.get_by_text("수동 분석 결과가 렌더링된다.", exact=True)).to_be_visible()
-    expect(page.get_by_text("manual, archive")).to_be_visible()
-    expect(page.get_by_role("button", name="DB 저장")).to_be_enabled()
-    assert calls["preview"] == 1
-
-    page.get_by_role("button", name="DB 저장").click()
-    expect(page.get_by_text("현재 preview 결과를 DB에 저장합니다.")).to_be_visible()
-    page.get_by_role("button", name="확인").click()
-    expect(page.get_by_text("수동 분석 결과가 렌더링된다.", exact=True)).to_be_visible()
-    assert calls["apply"] == 1
+    expect(page.get_by_role("button", name="내용")).to_be_visible()
+    expect(page.get_by_role("button", name="메모")).to_be_visible()
+    expect(page.get_by_role("button", name="분석")).to_have_count(0)
+    expect(page.get_by_text("Preview는 DB 저장 없음")).to_have_count(0)
+    expect(page.get_by_role("button", name="DB 저장")).to_have_count(0)
+    expect(page.get_by_text("LLM 분석 요청")).to_have_count(0)
+    assert calls["analyze"] == 0

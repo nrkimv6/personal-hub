@@ -9,7 +9,7 @@ NSSM 서비스로 등록되어 실행된다:
 """
 import argparse
 import atexit
-import importlib.util
+import importlib
 import json
 import os
 import shutil
@@ -144,6 +144,7 @@ class ServiceRunner:
             self.log_dir,
         )
 
+        self._preflighted_api_app = None
         self._frontend_proc: subprocess.Popen | None = None
         self._cleaned_up = False
 
@@ -152,20 +153,37 @@ class ServiceRunner:
         return build_frontend_env(os.environ, public=public, api_port=api_port)
 
     def _preflight_api_import_contract(self):
-        missing_modules = []
-        for module_name in ("app.main", "app.lifespan"):
-            try:
-                spec = importlib.util.find_spec(module_name)
-            except ModuleNotFoundError:
-                spec = None
-            if spec is None:
-                missing_modules.append(module_name)
+        try:
+            module = importlib.import_module("app.main")
+            app = getattr(module, "app")
+        except Exception as exc:
+            details = {
+                "exception_type": type(exc).__name__,
+                "exception_module": type(exc).__module__,
+                "import_name": getattr(exc, "name", None),
+                "exception_message": str(exc),
+            }
+            self.log.error(
+                "API startup import preflight failed before frontend start: "
+                "exception_type=%s exception_module=%s import_name=%s message=%s",
+                details["exception_type"],
+                details["exception_module"],
+                details["import_name"],
+                details["exception_message"],
+                exc_info=True,
+                extra={f"api_preflight_{key}": value for key, value in details.items()},
+            )
+            raise RuntimeError(
+                "API startup import preflight failed before frontend start: "
+                f"{details['exception_type']}: {details['exception_message']}"
+            ) from exc
 
-        if missing_modules:
-            joined = ", ".join(missing_modules)
-            raise RuntimeError(f"API import preflight failed before frontend start: missing modules: {joined}")
-
-        self.log.info("API import preflight passed: app.main, app.lifespan")
+        self._preflighted_api_app = app
+        self.log.info(
+            "API startup import preflight passed before frontend start: module=app.main object=app",
+            extra={"api_preflight_module": "app.main", "api_preflight_object": "app"},
+        )
+        return app
 
     # ── 메인 실행 흐름 ──────────────────────────────────────────
     def run(self):
@@ -537,7 +555,11 @@ class ServiceRunner:
 
         t = time.time()
         self.log.info("Importing app.main...")
-        from app.main import app  # noqa: F811
+        app = getattr(self, "_preflighted_api_app", None)
+        if app is None:
+            module = importlib.import_module("app.main")
+            app = getattr(module, "app")
+            self._preflighted_api_app = app
         self.log.info(f"  app.main imported ({time.time() - t:.1f}s)")
 
         t = time.time()
