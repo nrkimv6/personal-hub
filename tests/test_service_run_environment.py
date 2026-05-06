@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import json
 import subprocess
 import sys
 from unittest.mock import MagicMock, patch
@@ -44,10 +45,70 @@ def test_service_runner_log_environment_reports_boot_paths():
 
     lines = _info_lines(logger)
     assert any("Script:" in line and str(Path(service_run.__file__).resolve()) in line for line in lines)
+    assert any("Entry script:" in line for line in lines)
+    assert any("Runner module:" in line and str(Path(service_run.__file__).resolve()) in line for line in lines)
     assert any("PROJECT_ROOT:" in line and str(service_run.PROJECT_ROOT) in line for line in lines)
     assert any("sys.path[0]:" in line and str(service_run.PROJECT_ROOT) in line for line in lines)
     assert any("Runtime fingerprint:" in line and "source=" in line and "files=1" in line for line in lines)
     assert any("CWD:" in line for line in lines)
+    assert any("scripts/services/__pycache__/service_run.cpython-" in line for line in lines)
+
+
+def test_service_runner_main_accepts_admin_and_public_modes_R(capsys):
+    assert service_run.main(["--admin", "--dry-run-bootstrap"]) == 0
+    admin = json.loads(capsys.readouterr().out)
+    assert admin["app_mode"] == "admin"
+    assert service_run.os.environ["APP_MODE"] == "admin"
+    assert service_run.os.environ["PYTHONIOENCODING"] == "utf-8"
+
+    assert service_run.main(["--dry-run-bootstrap"]) == 0
+    public = json.loads(capsys.readouterr().out)
+    assert public["app_mode"] == "public"
+    assert service_run.os.environ["APP_MODE"] == "public"
+    assert public["runner_module"] == str(Path(service_run.__file__).resolve())
+
+
+def test_service_install_uses_stable_stub_path_Co():
+    source = (service_run.PROJECT_ROOT / "scripts" / "services" / "service-install.ps1").read_text(encoding="utf-8")
+    assert '$ServiceScript = Join-Path $ProjectRoot "scripts\\service_run.py"' in source
+    assert '$ServiceScript = Join-Path $ScriptDir "service_run.py"' not in source
+    assert "Direct runner AppParameters detected" in source
+
+
+def test_service_run_filesystem_entrypoints_share_bootstrap_contract_T3():
+    root = Path(__file__).resolve().parents[1]
+    env = dict(service_run.os.environ)
+    env.pop("APP_MODE", None)
+    env.pop("MONITOR_SERVICE_RUN_ENTRY_SCRIPT", None)
+
+    stub_result = subprocess.run(
+        [sys.executable, str(root / "scripts" / "service_run.py"), "--admin", "--dry-run-bootstrap"],
+        cwd=str(root),
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        env=env,
+        check=True,
+    )
+    direct_result = subprocess.run(
+        [sys.executable, str(root / "scripts" / "services" / "service_run.py"), "--admin", "--dry-run-bootstrap"],
+        cwd=str(root),
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        env=env,
+        check=True,
+    )
+
+    stub = json.loads(stub_result.stdout)
+    direct = json.loads(direct_result.stdout)
+    assert stub["app_mode"] == direct["app_mode"] == "admin"
+    assert stub["project_root"] == direct["project_root"] == str(root)
+    assert stub["runner_module"] == direct["runner_module"] == str(root / "scripts" / "services" / "service_run.py")
+    assert stub["entry_script"] == str(root / "scripts" / "service_run.py")
+    assert direct["entry_script"] == str(root / "scripts" / "services" / "service_run.py")
 
 
 def test_service_run_project_root_resolves_to_repo_root():

@@ -75,7 +75,18 @@ if ($nodeProcs) { $AllTargets += @($nodeProcs) }
 
 # --- 3. Orphan python (monitor-page related, not services) ---
 Write-Host "[3] Scanning orphan python processes..." -ForegroundColor Cyan
-$ServicePatterns = @('service_run.py', 'app.worker.main', 'claude_worker', 'command-listener', 'watchdog', 'dev-runner-command')
+$ServicePatterns = @(
+    'scripts\service_run.py',
+    'scripts/service_run.py',
+    'scripts\services\service_run.py',
+    'scripts/services/service_run.py',
+    'service_run.py',
+    'app.worker.main',
+    'claude_worker',
+    'command-listener',
+    'watchdog',
+    'dev-runner-command'
+)
 $pythonProcs = Get-CimInstance Win32_Process | Where-Object {
     ($_.Name -like 'python*' -or $_.Name -like 'monitorpage-*') -and $_.CommandLine -like '*monitor-page*'
 } | ForEach-Object {

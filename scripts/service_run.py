@@ -1,24 +1,29 @@
-"""NSSM 호환 리다이렉트 스텁.
+"""Stable NSSM bootstrap for the Monitor Page service runner.
 
-scripts/ 재구성(2026-04-12) 이후 실제 파일은 scripts/services/service_run.py 에 위치.
-NSSM AppParameters 업데이트 전까지 이 스텁을 통해 실제 스크립트를 실행한다.
-
-업데이트 방법 (관리자 권한 PowerShell):
-    nssm set MonitorPage-Admin AppParameters "D:\\work\\project\\tools\\monitor-page\\scripts\\services\\service_run.py --admin"
-    nssm set MonitorPage-Public AppParameters "D:\\work\\project\\tools\\monitor-page\\scripts\\services\\service_run.py"
+NSSM should point at this low-churn file:
+    nssm set MonitorPage-Admin AppParameters "D:\\work\\project\\tools\\monitor-page\\scripts\\service_run.py --admin"
+    nssm set MonitorPage-Public AppParameters "D:\\work\\project\\tools\\monitor-page\\scripts\\service_run.py"
     nssm restart MonitorPage-Admin
     nssm restart MonitorPage-Public
 """
+
+from __future__ import annotations
+
 import os
 import sys
+from pathlib import Path
 
-_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-if _root not in sys.path:
-    sys.path.insert(0, _root)
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
 
-# Stub 단계에서 모드를 먼저 고정해 실제 서비스 러너 import 전에 APP_MODE가 결정되게 한다.
+# Set the mode before importing the heavier runner module so import-time config
+# readers see the same mode as direct scripts/services/service_run.py execution.
 os.environ["APP_MODE"] = "admin" if "--admin" in sys.argv[1:] else "public"
+os.environ["MONITOR_SERVICE_RUN_ENTRY_SCRIPT"] = str(Path(__file__).resolve())
 
-_real = os.path.join(_root, "scripts", "services", "service_run.py")
-with open(_real, encoding="utf-8") as _f:
-    exec(compile(_f.read(), _real, "exec"))  # noqa: S102
+from scripts.services.service_run import main
+
+
+if __name__ == "__main__":
+    raise SystemExit(main(sys.argv[1:]))
