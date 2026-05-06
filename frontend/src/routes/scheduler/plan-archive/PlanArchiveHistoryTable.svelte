@@ -32,6 +32,17 @@
 		return 'bg-muted';
 	}
 
+	function attemptDisplayStatus(a: ArchiveExecutionAttemptRow): string {
+		if (a.save_outcome_status === 'stale_skipped' || a.save_outcome_status === 'superseded') {
+			return a.save_outcome_status;
+		}
+		return a.status;
+	}
+
+	function attemptErrorText(a: ArchiveExecutionAttemptRow): string {
+		return a.error_message ?? a.save_outcome_reason ?? '—';
+	}
+
 	async function loadScheduleRuns() {
 		loadingSchedule = true;
 		errorSchedule = null;
@@ -175,10 +186,11 @@
 				</thead>
 				<tbody>
 					{#each attemptItems as a}
+						{@const displayStatus = attemptDisplayStatus(a)}
 						<tr class="border-b border-border/50 hover:bg-muted/30">
 							<td class="px-2 py-1">{a.id}</td>
 							<td class="px-2 py-1">
-								<span class="rounded-full px-1.5 py-0.5 {statusClass(a.status)}">{a.status}</span>
+								<span class="rounded-full px-1.5 py-0.5 {statusClass(displayStatus)}">{displayStatus}</span>
 							</td>
 							<td class="px-2 py-1" title={attemptTargetTitle(a)}>
 								<div class="flex flex-col gap-0.5">
@@ -190,7 +202,7 @@
 							</td>
 							<td class="px-2 py-1">{a.record_id ?? '—'}</td>
 							<td class="px-2 py-1 whitespace-nowrap">{a.requested_at?.slice(0, 16) ?? '—'}</td>
-							<td class="px-2 py-1">{a.error_message?.slice(0, 40) ?? '—'}</td>
+							<td class="px-2 py-1">{attemptErrorText(a).slice(0, 40)}</td>
 						</tr>
 					{/each}
 				</tbody>
