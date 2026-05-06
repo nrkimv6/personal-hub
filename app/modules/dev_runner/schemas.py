@@ -1,7 +1,7 @@
 """Dev Runner Pydantic Schemas"""
 
 import json as _json
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 from datetime import date, datetime
 from typing import Literal, Optional, List
 
@@ -261,6 +261,21 @@ class PlanRecordResponse(BaseModel):
 class PlanRecordWithEventsResponse(PlanRecordResponse):
     """계획서 레코드 + 이벤트 목록"""
     events: List[PlanEventResponse] = []
+    applied_request_id: Optional[int] = None
+
+    @model_validator(mode="after")
+    def compute_applied_request_id(self) -> "PlanRecordWithEventsResponse":
+        """plan_archive_analysis_saved 이벤트에서 가장 최근 적용된 request_id 추출"""
+        saved_events = [
+            e for e in self.events
+            if e.event_type == "plan_archive_analysis_saved" and e.detail
+        ]
+        if saved_events:
+            latest = max(saved_events, key=lambda e: e.id)
+            rid = latest.detail.get("request_id")
+            if isinstance(rid, int):
+                self.applied_request_id = rid
+        return self
 
 
 class ArchiveCandidateRecordResponse(BaseModel):
@@ -316,6 +331,24 @@ class ArchiveCandidateSummaryResponse(BaseModel):
     duplicate_hash: int = 0
     llm_pending: int = 0
     candidates: List[ArchiveCandidateResponse]
+
+
+class ArchiveAnalyzeRequest(BaseModel):
+    """archive plan LLM 분석 큐잉 요청."""
+    provider: Optional[str] = None
+    model: Optional[str] = None
+    profile_key: Optional[str] = None
+
+
+class ArchiveAnalyzeResponse(BaseModel):
+    """archive plan LLM 분석 큐잉 응답."""
+    id: int
+    caller_type: str
+    caller_id: str
+    status: str
+    provider: str
+    model: str
+    profile_key: Optional[str] = None
 
 
 class MemoUpdateRequest(BaseModel):
@@ -565,6 +598,8 @@ __all__ = [
     'ArchiveCandidateRecordResponse',
     'ArchiveCandidateResponse',
     'ArchiveCandidateSummaryResponse',
+    'ArchiveAnalyzeRequest',
+    'ArchiveAnalyzeResponse',
     'MemoUpdateRequest',
     'RunRequest',
     'RunStatusResponse',

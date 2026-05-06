@@ -32,8 +32,10 @@ QUOTA_STATE_FILE: Path = _PROJECT_ROOT / "data" / "llm_quota_state.json"
 
 # ─── Provider 정책 ────────────────────────────────────────────────────────────
 
-# claude_worker가 실제 CLI 실행 가능한 provider (openai는 실행 경로 없음 — O-2)
-SUPPORTED_EXECUTION_PROVIDERS: set[str] = {"claude", "gemini"}
+# claude_worker가 실제 CLI 실행 가능한 provider.
+# - openai: 실행 경로 미구현 (O-2)
+# - codex/cc-codex: profile 불필요, provider_registry에서 enabled=True로 관리
+SUPPORTED_EXECUTION_PROVIDERS: set[str] = {"claude", "gemini", "codex", "cc-codex"}
 
 # ─── CALLER_TYPE → step 매핑 (1-G) ───────────────────────────────────────────
 CALLER_TYPE_TO_STEP: dict[str, str] = {

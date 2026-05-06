@@ -94,7 +94,7 @@ _REGISTRY: dict[str, ProviderMeta] = {
     "codex": ProviderMeta(
         key="codex",
         display_name="Codex",
-        default_model="gpt-5.1-codex-mini",
+        default_model="gpt-5.5",
         supports_chat=False,
         supports_quota_pause=False,
         enabled=True,

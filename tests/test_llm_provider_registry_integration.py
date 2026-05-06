@@ -57,6 +57,25 @@ def test_integration_provider_registry_list_enabled_excludes_disabled():
     assert openai not in enabled
 
 
+def test_integration_provider_registry_codex_gpt55_visible():
+    """Codex provider는 profile 없이 선택할 수 있는 gpt-5.5 target을 노출한다."""
+    codex = provider_registry.get_provider("codex")
+    assert codex is not None
+    assert codex.default_model == "gpt-5.5"
+    assert "gpt-5.5" in codex.models
+
+
+def test_codex_executor_preserves_requested_model_on_unavailable_cli():
+    """Codex 실행 실패 응답에도 요청 model이 남아 UI에서 원인을 볼 수 있다."""
+    from app.modules.claude_worker.services.executors.codex_executor import CodexExecutor
+
+    result = CodexExecutor().execute("prompt", model="gpt-5.5")
+
+    assert result["success"] is False
+    assert result["model"] == "gpt-5.5"
+    assert "gpt-5.5" in result["error"]
+
+
 # ─── LLMRequestCreate pydantic 검증 ────────────────────────────────────────────
 
 def test_integration_pydantic_accepts_codex_provider(test_db_session):

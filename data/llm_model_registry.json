@@ -17,6 +17,7 @@
     ],
     "plan_expand": [
       {"provider": "claude", "model": "claude-opus-4-6"},
+      {"provider": "codex", "model": "gpt-5.5"},
       {"provider": "gemini", "model": "gemini-3.1-pro", "oneshot": true}
     ],
     "plan_verify": [

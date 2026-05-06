@@ -40,6 +40,7 @@ export interface PlanRecord {
 	created_at: string;
 	updated_at: string;
 	events?: PlanEvent[];
+	applied_request_id?: number | null;
 }
 
 export interface SyncResult {
@@ -85,6 +86,22 @@ export interface ArchiveCandidateSummary {
 	duplicate_hash: number;
 	llm_pending: number;
 	candidates: ArchiveCandidate[];
+}
+
+export interface ArchiveAnalyzeRequest {
+	provider?: string | null;
+	model?: string | null;
+	profile_key?: string | null;
+}
+
+export interface ArchiveAnalyzeResponse {
+	id: number;
+	caller_type: string;
+	caller_id: string;
+	status: string;
+	provider: string;
+	model: string;
+	profile_key: string | null;
 }
 
 // ============================================================
@@ -189,6 +206,15 @@ export const planRecordsApi = {
 	},
 
 	/**
+	 * archived record를 plan_archive_analyze LLM 큐에 등록
+	 */
+	queueArchiveAnalyze: (recordId: number, data: ArchiveAnalyzeRequest) =>
+		planRecordsRequest<ArchiveAnalyzeResponse>(`/records/archive-analyze/${recordId}`, {
+			method: 'POST',
+			body: JSON.stringify(data)
+		}),
+
+	/**
 	 * archived plan 일괄 DB 이관
 	 */
 	importArchived: (archiveDir?: string) =>
@@ -226,6 +252,19 @@ export const planRecordsApi = {
 		}>('/statistics/recurrence'),
 
 	/**
+	 * archive record LLM 재분석 요청 큐 등록
+	 * profile_key 없는 provider(codex 등) 허용
+	 */
+	reanalyze: (recordId: number, payload: { provider: string; model?: string; profile_key?: string | null }) =>
+		planRecordsRequest<{ queued: boolean; request_id: number; provider: string; model: string }>(
+			`/records/${recordId}/reanalyze`,
+			{
+				method: 'POST',
+				body: JSON.stringify({ provider: payload.provider, model: payload.model ?? '', profile_key: payload.profile_key ?? null })
+			}
+		),
+
+	/**
 	 * 레코드 목록 (recurrence_count 필터용, listRecords alias)
 	 */
 	listRecords: (params?: { skip?: number; limit?: number }) => {
@@ -234,6 +273,23 @@ export const planRecordsApi = {
 		if (params?.limit != null) q.set('limit', String(params.limit));
 		const qs = q.toString();
 		return planRecordsRequest<PlanRecord[]>(`/records${qs ? '?' + qs : ''}`);
+	},
+
+	/**
+	 * LLM request caller_id(filename_hash)로 연결된 PlanRecord 조회 helper
+	 * candidate list에서 먼저 찾고 없으면 archived 목록 전체 검색
+	 */
+	findRecordByHash: async (
+		filename_hash: string,
+		hint_records?: PlanRecord[]
+	): Promise<PlanRecord | null> => {
+		if (hint_records) {
+			const found = hint_records.find(r => r.filename_hash === filename_hash);
+			if (found) return found;
+		}
+		// fallback: archived 목록 조회
+		const all = await planRecordsRequest<PlanRecord[]>('/records?status=archived&limit=500');
+		return all.find(r => r.filename_hash === filename_hash) ?? null;
 	}
 };
 

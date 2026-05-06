@@ -28,7 +28,12 @@ class CodexExecutor(LLMExecutorBase):
         if not binary:
             return {
                 "success": False,
-                "error": "codex CLI not found (B4 미구현). shutil.which('codex') → None",
+                "error": f"codex CLI not found for model={model or 'default'} (B4 미구현). shutil.which('codex') → None",
+                "model": model,
             }
         # TODO(B4): codex exec --json --model {model} {prompt} 패턴으로 실구현
-        return {"success": False, "error": "codex provider 실행 경로 미구현 (B4)"}
+        return {
+            "success": False,
+            "error": f"codex provider 실행 경로 미구현 (B4), model={model or 'default'}",
+            "model": model,
+        }

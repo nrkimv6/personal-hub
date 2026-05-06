@@ -213,6 +213,36 @@ class TestSyncEndpoint:
         assert data["file_only"] >= 1
         assert len(data["candidates"]) >= 1
 
+    def test_queue_archive_analyze_accepts_codex_without_profile(self, client, test_db_session):
+        """profile 없는 Codex target으로 archive 분석 요청을 큐잉할 수 있다."""
+        from datetime import datetime
+        from app.models.plan_record import PlanRecord
+
+        record = PlanRecord(
+            filename_hash="http_codex_archive_analyze_001",
+            file_path="/archive/common/2026-05-06_http-codex-archive-analyze.md",
+            project="common",
+            status="archived",
+            archived_at=datetime.now(),
+            raw_content="# Codex Archive Analyze\n",
+        )
+        test_db_session.add(record)
+        test_db_session.commit()
+        test_db_session.refresh(record)
+
+        resp = client.post(
+            f"/api/v1/plans/records/archive-analyze/{record.id}",
+            json={"provider": "codex", "model": "gpt-5.5"},
+        )
+
+        assert resp.status_code == 200, resp.text
+        data = resp.json()
+        assert data["caller_type"] == "plan_archive_analyze"
+        assert data["caller_id"] == record.filename_hash
+        assert data["provider"] == "codex"
+        assert data["model"] == "gpt-5.5"
+        assert data["profile_key"] is None
+
 
 # ========== /api/v1/plans/events ==========
 

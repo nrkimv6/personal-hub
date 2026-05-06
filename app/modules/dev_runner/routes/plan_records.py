@@ -27,6 +27,7 @@ from app.modules.dev_runner.schemas import (
     PlanRecordResponse, PlanRecordWithEventsResponse,
     PlanEventResponse, MemoUpdateRequest, ImportArchivedResponse,
     PlanRecordsSyncResponse, ArchiveCandidateSummaryResponse,
+    ArchiveAnalyzeRequest, ArchiveAnalyzeResponse,
 )
 
 
@@ -37,6 +38,13 @@ class IngestSingleRequest(BaseModel):
     raw_content: Optional[str] = None
     title: Optional[str] = None
     status: Optional[str] = None
+
+
+class ReanalyzeRequest(BaseModel):
+    """archive record LLM 재분석 요청."""
+    provider: str
+    model: str = ""
+    profile_key: Optional[str] = None
 
 logger = logging.getLogger(__name__)
 
@@ -100,6 +108,75 @@ def list_archive_candidates(
         include_temp=include_temp,
         skip=skip,
         limit=limit,
+    )
+
+
+@router.post("/records/archive-analyze/{record_id}", response_model=ArchiveAnalyzeResponse)
+def queue_archive_analyze(
+    record_id: int,
+    req: ArchiveAnalyzeRequest,
+    db: Session = Depends(get_db),
+):
+    """archived plan record를 plan_archive_analyze LLM 큐에 등록한다.
+
+    provider/model은 실행 target이고 profile_key는 optional context이다.
+    Codex처럼 profile 없는 provider는 profile_key 없이 큐잉 가능해야 한다.
+    """
+    import json
+    from pathlib import Path
+
+    from app.modules.claude_worker.services import provider_registry
+    from app.modules.claude_worker.services.llm_service import LLMService
+    from app.modules.claude_worker.services.plan_analyze_handler import build_plan_analyze_prompt
+
+    svc = PlanRecordService(db)
+    record = svc.get_record(record_id)
+    if not record:
+        raise HTTPException(status_code=404, detail="Record not found")
+    if record.archived_at is None:
+        raise HTTPException(status_code=400, detail="archive 분석은 archived_at이 있는 record만 큐잉할 수 있습니다")
+    if req.provider and not provider_registry.is_supported(req.provider):
+        raise HTTPException(status_code=400, detail=f"지원되지 않는 provider: {req.provider}")
+    if req.provider and not (req.model or "").strip():
+        raise HTTPException(status_code=400, detail="provider를 직접 지정할 때는 model도 함께 지정해야 합니다")
+
+    file_content = record.raw_content or ""
+    if not file_content and record.file_path:
+        try:
+            fp = Path(record.file_path)
+            if fp.exists():
+                file_content = fp.read_text(encoding="utf-8", errors="replace")
+        except Exception:
+            file_content = ""
+
+    prompt = build_plan_analyze_prompt(
+        file_content=file_content,
+        filename=Path(record.file_path).name if record.file_path else record.filename_hash,
+    )
+    cli_options = {
+        "source": "archive_tab",
+        "profile_key": req.profile_key,
+        "profile_optional": True,
+    }
+    llm_req = LLMService(db).enqueue(
+        caller_type="plan_archive_analyze",
+        caller_id=record.filename_hash,
+        prompt=prompt,
+        requested_by="archive_tab",
+        request_source="archive_tab_manual",
+        provider=req.provider,
+        model=req.model,
+        queue_name="utility",
+        cli_options=cli_options,
+    )
+    return ArchiveAnalyzeResponse(
+        id=llm_req.id,
+        caller_type=llm_req.caller_type,
+        caller_id=llm_req.caller_id,
+        status=llm_req.status,
+        provider=llm_req.provider,
+        model=llm_req.model,
+        profile_key=json.loads(llm_req.cli_options or "{}").get("profile_key"),
     )
 
 
@@ -196,6 +273,32 @@ def sync_records(db: Session = Depends(get_db)):
     paths = [{"path": r.path, "type": r.path_type} for r in registered]
     svc = PlanRecordService(db)
     return svc.sync_all(paths)
+
+
+@router.post("/records/{record_id}/reanalyze")
+def reanalyze_record(record_id: int, req: ReanalyzeRequest, db: Session = Depends(get_db)):
+    """archive record에 대해 LLM 재분석 요청을 큐에 등록한다.
+
+    profile_key 없는 provider(codex 등)도 허용한다.
+    이미 pending/processing 상태 요청이 있으면 기존 요청 id를 반환한다.
+    """
+    from app.modules.dev_runner.services.plan_archive_execution_service import PlanArchiveExecutionService
+    svc = PlanRecordService(db)
+    record = svc.get_record(record_id)
+    if not record:
+        raise HTTPException(status_code=404, detail="Record not found")
+    exec_svc = PlanArchiveExecutionService(db)
+    try:
+        llm_req, created = exec_svc.queue_analysis(
+            record=record,
+            provider=req.provider,
+            model=req.model,
+            profile_key=req.profile_key,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    db.commit()
+    return {"queued": created, "request_id": llm_req.id, "provider": llm_req.provider, "model": llm_req.model}
 
 
 @router.get("/records/{record_id}/chain", response_model=list[PlanRecordResponse])
