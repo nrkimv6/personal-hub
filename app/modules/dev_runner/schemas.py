@@ -318,12 +318,34 @@ class PlanArchiveHealthResponse(BaseModel):
     file_retention_due: int = 0
     file_retention_scheduled: int = 0
     file_removed: int = 0
+    category_pollution_candidates: int = 0
     oldest_file_delete_after: Optional[str] = None
     latest_failed_request: Optional[PlanArchiveFailedRequestResponse] = None
     oldest_unprocessed_at: Optional[str] = None
     plan_archive_schedule: Optional[PlanArchiveScheduleSnapshot] = None
     retrieval_db_readiness: PlanArchiveDbReadinessResponse
     execution_db_readiness: PlanArchiveDbReadinessResponse
+
+
+class PlanArchiveCategoryRepairRequest(BaseModel):
+    apply: bool = False
+    limit: int = Field(default=100, ge=1, le=1000)
+
+
+class PlanArchiveCategoryRepairItem(BaseModel):
+    record_id: int
+    filename_hash: str
+    file_path: Optional[str] = None
+    old_category: Optional[str] = None
+    suggested_category: str
+    applied: bool = False
+
+
+class PlanArchiveCategoryRepairResponse(BaseModel):
+    apply: bool = False
+    matched: int = 0
+    repaired: int = 0
+    items: List[PlanArchiveCategoryRepairItem] = Field(default_factory=list)
 
 
 class PlanArchiveRetrievalQuery(BaseModel):
@@ -1387,6 +1409,9 @@ __all__ = [
     'PlanRecordWithEventsResponse',
     'ImportArchivedResponse',
     'PlanArchiveHealthResponse',
+    'PlanArchiveCategoryRepairRequest',
+    'PlanArchiveCategoryRepairResponse',
+    'PlanArchiveCategoryRepairItem',
     'PlanArchiveDbReadinessResponse',
     'PlanArchiveRetrievalQuery',
     'PlanArchiveRetrievalResult',
