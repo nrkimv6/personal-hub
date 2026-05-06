@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import builtins
 from pathlib import Path
 import json
 import subprocess
 import sys
+import types
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -27,6 +29,13 @@ def _prepare_frontend_workspace(frontend_dir: Path, *, with_build: bool) -> None
 
     if with_build:
         (frontend_dir / "build").mkdir(parents=True, exist_ok=True)
+
+
+def _service_runner_for_preflight() -> service_run.ServiceRunner:
+    runner = object.__new__(service_run.ServiceRunner)
+    runner.log = MagicMock()
+    runner._preflighted_api_app = None
+    return runner
 
 
 def test_service_runner_log_environment_reports_boot_paths():
@@ -185,28 +194,214 @@ def test_service_runner_frontend_runtime_env_separates_admin_and_public_modes():
     assert "VITE_API_PORT" not in public_env
 
 
-def test_service_runner_api_import_preflight_requires_lifespan_before_frontend():
-    runner = object.__new__(service_run.ServiceRunner)
-    runner.log = MagicMock()
+@pytest.mark.parametrize("missing_name", ["missing_dependency_a", "missing_dependency_b"])
+def test_service_runner_preflight_any_import_error_stops_before_frontend_E(missing_name):
+    runner = _service_runner_for_preflight()
+    error = ModuleNotFoundError(f"No module named '{missing_name}'", name=missing_name)
 
-    def fake_find_spec(module_name: str):
-        if module_name == "app.lifespan":
-            return None
-        return object()
-
-    with patch("scripts.services.service_run.importlib.util.find_spec", side_effect=fake_find_spec):
-        with pytest.raises(RuntimeError, match="missing modules: app\\.lifespan"):
+    with patch("scripts.services.service_run.importlib.import_module", side_effect=error) as mock_import:
+        with pytest.raises(RuntimeError, match="API startup import preflight failed before frontend start"):
             runner._preflight_api_import_contract()
 
+    mock_import.assert_called_once_with("app.main")
+    runner.log.error.assert_called_once()
+    error_call = runner.log.error.call_args
+    assert "API startup import preflight failed before frontend start" in str(error_call.args[0])
+    assert "ModuleNotFoundError" in error_call.args
+    assert missing_name in error_call.args
+    assert error_call.kwargs["exc_info"] is True
+    assert error_call.kwargs["extra"]["api_preflight_import_name"] == missing_name
+    assert runner._preflighted_api_app is None
 
-def test_service_runner_api_import_preflight_logs_success():
-    runner = object.__new__(service_run.ServiceRunner)
-    runner.log = MagicMock()
 
-    with patch("scripts.services.service_run.importlib.util.find_spec", return_value=object()):
-        runner._preflight_api_import_contract()
+@pytest.mark.parametrize(
+    ("exception", "expected_type"),
+    [
+        (ImportError("cannot import app.main dependency", name="app.main"), "ImportError"),
+        (RuntimeError("startup hook exploded"), "RuntimeError"),
+    ],
+)
+def test_service_runner_preflight_app_main_import_exception_is_structured_E(exception, expected_type):
+    runner = _service_runner_for_preflight()
 
-    assert any("API import preflight passed" in str(call.args[0]) for call in runner.log.info.call_args_list)
+    with patch("scripts.services.service_run.importlib.import_module", side_effect=exception):
+        with pytest.raises(RuntimeError, match=expected_type):
+            runner._preflight_api_import_contract()
+
+    error_call = runner.log.error.call_args
+    assert "API startup import preflight failed before frontend start" in str(error_call.args[0])
+    assert expected_type in error_call.args
+    assert error_call.kwargs["extra"]["api_preflight_exception_type"] == expected_type
+    assert error_call.kwargs["extra"]["api_preflight_exception_message"] == str(exception)
+
+
+def test_service_runner_preflight_imports_main_before_frontend_O():
+    runner = _service_runner_for_preflight()
+    app = object()
+    module = types.SimpleNamespace(app=app)
+
+    with patch("scripts.services.service_run.importlib.import_module", return_value=module) as mock_import:
+        result = runner._preflight_api_import_contract()
+
+    assert result is app
+    assert runner._preflighted_api_app is app
+    mock_import.assert_called_once_with("app.main")
+    assert any(
+        "API startup import preflight passed before frontend start" in str(call.args[0])
+        for call in runner.log.info.call_args_list
+    )
+
+
+def test_service_runner_preflight_failure_does_not_start_frontend_T3(tmp_path):
+    runner = _service_runner_for_preflight()
+    runner.dev = True
+    runner.app_mode = "admin"
+    runner.api_port = 8001
+    runner.frontend_port = 6101
+    runner.pid_dir = tmp_path
+    runner._preflight_api_import_contract = MagicMock(side_effect=RuntimeError("missing dependency"))
+    runner.cleanup_before_start = MagicMock()
+    runner.start_frontend = MagicMock()
+    runner.run_api = MagicMock()
+    runner.cleanup = MagicMock()
+
+    with patch("scripts.services.service_run.bootstrap_service_environment"), patch("atexit.register"), patch(
+        "signal.signal"
+    ), patch("sys.exit", side_effect=SystemExit) as mock_exit:
+        with pytest.raises(SystemExit):
+            runner.run()
+
+    runner.cleanup_before_start.assert_called_once()
+    runner._preflight_api_import_contract.assert_called_once()
+    runner.start_frontend.assert_not_called()
+    runner.run_api.assert_not_called()
+    runner.cleanup.assert_called_once()
+    assert not (tmp_path / "frontend_admin.pid").exists()
+    mock_exit.assert_called_once_with(1)
+
+
+def test_service_runner_preflight_success_preserves_frontend_then_api_order_T3():
+    runner = _service_runner_for_preflight()
+    runner.dev = True
+    runner.app_mode = "admin"
+    runner.api_port = 8001
+    runner.frontend_port = 6101
+    events: list[str] = []
+    app = object()
+    frontend_proc = object()
+
+    def preflight():
+        events.append("preflight")
+        runner._preflighted_api_app = app
+        return app
+
+    def start_frontend():
+        events.append("start_frontend")
+        return frontend_proc
+
+    def run_api():
+        assert runner._preflighted_api_app is app
+        events.append("run_api")
+
+    runner.cleanup_before_start = MagicMock(side_effect=lambda: events.append("cleanup_before_start"))
+    runner._preflight_api_import_contract = MagicMock(side_effect=preflight)
+    runner.start_frontend = MagicMock(side_effect=start_frontend)
+    runner.run_api = MagicMock(side_effect=run_api)
+    runner.cleanup = MagicMock(side_effect=lambda: events.append("cleanup"))
+
+    with patch("scripts.services.service_run.bootstrap_service_environment"), patch("atexit.register"), patch(
+        "signal.signal"
+    ), patch("sys.exit", side_effect=SystemExit) as mock_exit:
+        with pytest.raises(SystemExit):
+            runner.run()
+
+    assert runner._frontend_proc is frontend_proc
+    assert events == ["cleanup_before_start", "preflight", "start_frontend", "run_api", "cleanup"]
+    mock_exit.assert_called_once_with(0)
+
+
+def test_service_runner_run_api_reuses_preflighted_app_without_reimport_T3(monkeypatch, tmp_path):
+    runner = _service_runner_for_preflight()
+    runner.dev = True
+    runner.api_port = 8001
+    runner.pid_suffix = "_admin"
+    runner.pid_dir = tmp_path
+    app = object()
+    runner._preflighted_api_app = app
+    runner.check_crash_loop = MagicMock(return_value=False)
+    captured: dict[str, object] = {}
+
+    config_module = types.ModuleType("app.config")
+    config_module.settings = types.SimpleNamespace(APP_MODE="admin")
+    server_state_module = types.ModuleType("app.core.server_state")
+    server_state_module.set_server = lambda server: captured.setdefault("server", server)
+    death_log_module = types.ModuleType("app.core.death_log")
+    death_log_module.read_recent_deaths = lambda window_minutes=1, exclude_causes=None: []
+    death_log_module.record_death = lambda **kwargs: captured.setdefault("death", kwargs)
+
+    class FakeConfig:
+        def __init__(self, config_app, **kwargs):
+            captured["config_app"] = config_app
+            captured["config_kwargs"] = kwargs
+
+    class FakeServer:
+        exit_code = 0
+
+        def __init__(self, config):
+            self.config = config
+            self.should_exit = True
+
+        def run(self):
+            captured["server_run"] = True
+
+    uvicorn_module = types.ModuleType("uvicorn")
+    uvicorn_module.Config = FakeConfig
+    uvicorn_module.Server = FakeServer
+
+    monkeypatch.setitem(sys.modules, "app.config", config_module)
+    monkeypatch.setitem(sys.modules, "app.core.server_state", server_state_module)
+    monkeypatch.setitem(sys.modules, "app.core.death_log", death_log_module)
+    monkeypatch.setitem(sys.modules, "uvicorn", uvicorn_module)
+
+    original_import = builtins.__import__
+
+    def guarded_import(name, *args, **kwargs):
+        if name == "app.main":
+            raise AssertionError("run_api re-imported app.main after preflight")
+        return original_import(name, *args, **kwargs)
+
+    with patch("scripts.services.service_run._log_mode_alignment", return_value=True), patch(
+        "scripts.services.service_run.write_pid_file"
+    ), patch("builtins.__import__", side_effect=guarded_import):
+        runner.run_api()
+
+    assert captured["config_app"] is app
+    assert captured["server_run"] is True
+
+
+def test_service_runner_install_hooks_idempotent_under_repeat_import_O(monkeypatch):
+    runner = _service_runner_for_preflight()
+    app = object()
+    counters = {"install_hooks": 0, "init_extra_tables": 0}
+    monkeypatch.delitem(sys.modules, "app.main", raising=False)
+
+    def fake_import_module(name: str):
+        assert name == "app.main"
+        cached = sys.modules.get("app.main")
+        if cached is not None:
+            return cached
+        counters["install_hooks"] += 1
+        counters["init_extra_tables"] += 1
+        module = types.ModuleType("app.main")
+        module.app = app
+        monkeypatch.setitem(sys.modules, "app.main", module)
+        return module
+
+    with patch("scripts.services.service_run.importlib.import_module", side_effect=fake_import_module):
+        assert runner._preflight_api_import_contract() is app
+        assert runner._preflight_api_import_contract() is app
+
+    assert counters == {"install_hooks": 1, "init_extra_tables": 1}
 
 
 def test_public_service_runner_cleanup_uses_public_pid_files_only(tmp_path):
