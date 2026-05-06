@@ -37,6 +37,16 @@ from app.modules.dev_runner.services.plan_archive_retrieval_service import (
 from app.modules.dev_runner.services.plan_archive_retrieval_readiness import (
     get_plan_archive_retrieval_readiness,
 )
+from app.modules.dev_runner.services.plan_archive_insight_service import (
+    PlanArchiveInsightBatchQuery,
+    PlanArchiveInsightService,
+)
+from app.modules.dev_runner.services.plan_archive_insight_review_service import (
+    PlanArchiveInsightReviewService,
+)
+from app.modules.dev_runner.services.plan_archive_doc_patch_service import (
+    PlanArchiveDocPatchService,
+)
 from app.modules.dev_runner.schemas import (
     PlanRecordResponse, PlanRecordWithEventsResponse,
     PlanEventResponse, MemoUpdateRequest, ImportArchivedResponse,
@@ -57,6 +67,16 @@ from app.modules.dev_runner.schemas import (
     PlanArchiveMetricsResponse,
     PlanArchiveRetrievalQuery,
     PlanArchiveRetrievalResult,
+    PlanArchiveInsightBatchRequest,
+    PlanArchiveInsightBatchResponse,
+    PlanArchiveInsightReportListResponse,
+    PlanArchiveInsightReportDetailResponse,
+    PlanArchiveInsightReviewUpdateRequest,
+    PlanArchiveInsightPromotePlanRequest,
+    PlanArchiveInsightPromotePlanResponse,
+    PlanArchiveDocPatchPreviewRequest,
+    PlanArchiveDocPatchApplyRequest,
+    PlanArchiveDocPatchProposalResponse,
 )
 
 
