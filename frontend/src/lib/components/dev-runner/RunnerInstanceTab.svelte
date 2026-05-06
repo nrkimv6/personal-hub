@@ -39,6 +39,9 @@
 		branchExists?: boolean | 'unknown';
 		branchMergedToMain?: boolean | 'unknown';
 		metadataCheckedAt?: string | null;
+		displayLabel?: string | null;
+		displaySecondary?: string | null;
+		hideStaleBranchBadge?: boolean;
 		onStop: () => void;
 		onClose: () => void;
 		onRestart?: () => void;
@@ -46,7 +49,7 @@
 		logRef?: (ref: LogViewerRef) => void;
 	}
 
-	let { runnerId, planFile, running, engine, startTime, worktreePath = null, branch = null, mergeStatus = null, mergeReason = null, mergeMessage = null, trigger = null, orphan = false, orphanAlive = false, redisMissing = false, logFileFound = false, exitReason = null, error = null, displayPlanName = null, remainingPostMergeTasks = null, mergeEvidenceMissing = null, executionCount = null, worktreeExists = 'unknown', branchExists = 'unknown', branchMergedToMain = 'unknown', metadataCheckedAt = 'unknown', onStop, onClose, onRestart, onBatchPlansChange, logRef }: Props = $props();
+	let { runnerId, planFile, running, engine, startTime, worktreePath = null, branch = null, mergeStatus = null, mergeReason = null, mergeMessage = null, trigger = null, orphan = false, orphanAlive = false, redisMissing = false, logFileFound = false, exitReason = null, error = null, displayPlanName = null, remainingPostMergeTasks = null, mergeEvidenceMissing = null, executionCount = null, worktreeExists = 'unknown', branchExists = 'unknown', branchMergedToMain = 'unknown', metadataCheckedAt = 'unknown', displayLabel = null, displaySecondary = null, hideStaleBranchBadge = false, onStop, onClose, onRestart, onBatchPlansChange, logRef }: Props = $props();
 
 	let logViewer:
 		| {
@@ -239,12 +242,8 @@
 	}
 
 	function staleBadgeLabel(): string | null {
-		if (mergeStatus === 'approval_required') return null;
-		if (worktreeExists === false) return '삭제된 worktree';
-		if (branchExists === false) return 'branch 없음';
-		if (branchMergedToMain === true) return 'main 반영됨';
-		if (!running && worktreeExists === 'unknown') return '과거 실행 기록';
-		return null;
+		if (hideStaleBranchBadge) return null;
+		return displaySecondary;
 	}
 
 	let needsPostMergeFollowup = $derived(
@@ -275,6 +274,7 @@
 
 	let exitDisplay = $derived(getExitReasonDisplay(exitReason));
 	function resolveHeaderStatus(runningValue: boolean, exitReasonValue: string | null, mergeStatusValue: string | null): string {
+		if (displayLabel) return displayLabel;
 		if (runningValue) return '실행중';
 		if (mergeStatusValue === 'merged') return '머지됨';
 		if (mergeStatusValue === 'test_failed') return '테스트 실패';

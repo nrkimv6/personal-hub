@@ -808,7 +808,15 @@ class PlanRecordService:
         registered_paths: List[dict],
         include_temp: bool = False,
         skip: int = 0,
-        limit: int = 200,
+        limit: int = 50,
+        state: Optional[str] = None,
+        q: Optional[str] = None,
+        eligible: Optional[bool] = None,
+        archived_after: Optional[datetime] = None,
+        archived_before: Optional[datetime] = None,
+        last_attempt_after: Optional[datetime] = None,
+        last_attempt_before: Optional[datetime] = None,
+        attempt_state: Optional[str] = None,
     ) -> dict:
         """archive 파일과 DB 레코드를 합쳐 실행/이관 후보를 반환."""
         archive_entries = [entry for entry in registered_paths if entry.get("type") == "archive"]
@@ -904,9 +912,96 @@ class PlanRecordService:
                 "record": record,
             })
 
-        candidate_items.sort(key=lambda item: (item["state"], item["file_path"]))
+        # attempt_state 필터를 위한 record_id → LLMRequest 최신 상태 조회
+        if attempt_state:
+            record_ids = [
+                item["record"].id for item in candidate_items
+                if item.get("record") is not None
+            ]
+            latest_req_by_record: Dict[int, str] = {}
+            if record_ids:
+                rows = (
+                    self.db.query(LLMRequest.caller_id, LLMRequest.status, LLMRequest.requested_at)
+                    .filter(
+                        LLMRequest.caller_type == "plan_archive_analyze",
+                        LLMRequest.caller_id.in_([str(rid) for rid in record_ids]),
+                        LLMRequest.deleted_at.is_(None),
+                    )
+                    .order_by(LLMRequest.requested_at.desc())
+                    .all()
+                )
+                seen: set = set()
+                for cid, st, _ in rows:
+                    if cid not in seen:
+                        seen.add(cid)
+                        latest_req_by_record[int(cid)] = st
+
+        # 각 item에 attempt 정보 추가
+        for item in candidate_items:
+            record = item.get("record")
+            item["attempt_count"] = 0
+            item["last_attempt_status"] = None
+            item["last_attempt_at"] = None
+            if record:
+                record_id = record.id
+                if attempt_state:
+                    item["last_attempt_status"] = latest_req_by_record.get(record_id)
+            needs_norm = record and (record.archived_at is None or record.status != "archived")
+            item["needs_archive_normalization"] = bool(needs_norm)
+
+        # 필터 적용
+        filtered = candidate_items
+        if state:
+            filtered = [i for i in filtered if i["state"] == state]
+        if q:
+            q_lower = q.lower()
+            filtered = [i for i in filtered if q_lower in i.get("file_path", "").lower()]
+        if eligible is not None:
+            filtered = [i for i in filtered if i["eligible_for_analysis"] == eligible]
+        if archived_after is not None:
+            filtered = [
+                i for i in filtered
+                if i.get("record") and i["record"].archived_at and i["record"].archived_at >= archived_after
+            ]
+        if archived_before is not None:
+            filtered = [
+                i for i in filtered
+                if i.get("record") and i["record"].archived_at and i["record"].archived_at <= archived_before
+            ]
+        if attempt_state:
+            if attempt_state == "never_attempted":
+                filtered = [
+                    i for i in filtered
+                    if not i.get("record") or i["record"].id not in latest_req_by_record
+                ]
+            elif attempt_state == "in_progress":
+                filtered = [
+                    i for i in filtered
+                    if i.get("last_attempt_status") in ("pending", "processing")
+                ]
+            elif attempt_state == "last_failed":
+                filtered = [i for i in filtered if i.get("last_attempt_status") == "failed"]
+            elif attempt_state == "last_succeeded":
+                filtered = [i for i in filtered if i.get("last_attempt_status") == "completed"]
+
+        # eligible_for_analysis DESC, file_only DESC, needs_archive_normalization DESC,
+        # archived_at ASC (None last), file_path ASC
+        def sort_key(item):
+            record = item.get("record")
+            archived_at = record.archived_at if record and record.archived_at else datetime.max
+            return (
+                not item["eligible_for_analysis"],   # eligible first
+                item["state"] != "file_only",         # file_only second
+                not item["needs_archive_normalization"],  # needs_norm third
+                archived_at,                          # oldest archived first
+                item.get("file_path", ""),
+            )
+
+        filtered.sort(key=sort_key)
+
+        # 카운트 집계
         summary = {
-            "total": len(candidate_items),
+            "total": len(filtered),
             "returned": 0,
             "file_only": 0,
             "db_only": 0,
@@ -917,17 +1012,16 @@ class PlanRecordService:
             "llm_pending": 0,
             "candidates": [],
         }
-        for item in candidate_items:
-            state = item["state"]
-            if state in summary:
-                summary[state] += 1
-            record = item.get("record")
-            if record and (record.archived_at is None or record.status != "archived"):
+        for item in filtered:
+            st = item["state"]
+            if st in summary:
+                summary[st] += 1
+            if item["needs_archive_normalization"]:
                 summary["needs_archive_normalization"] += 1
             if item["eligible_for_analysis"]:
                 summary["llm_pending"] += 1
 
-        page = candidate_items[skip:skip + limit]
+        page = filtered[skip:skip + limit]
         summary["returned"] = len(page)
         summary["candidates"] = page
         return summary
@@ -1045,6 +1139,164 @@ class PlanRecordService:
             "archive_normalized": archive_normalized,
             "relation_refreshed": len(relation_results),
         }
+
+    # ── archive candidate import ──────────────────────────────────────────────
+
+    MAX_IMPORT_BYTES = 10 * 1024 * 1024  # 10 MB
+
+    def resolve_archive_candidate_key(
+        self, candidate_key: str, registered_paths: List[dict]
+    ) -> dict:
+        """candidate_key 를 등록된 archive root 기준으로 검증하고 resolved_path 를 반환한다.
+
+        Returns:
+            {"resolved_path": str, "registered_root": str}
+        Raises:
+            ValueError: candidate_key 가 등록된 archive root 외부이거나 존재하지 않을 때
+        """
+        key_path = Path(candidate_key)
+        archive_roots = [
+            Path(entry["path"])
+            for entry in registered_paths
+            if entry.get("type") == "archive"
+        ]
+        if not archive_roots:
+            raise ValueError("등록된 archive root 가 없습니다.")
+
+        # absolute path인 경우 바로 검증, relative인 경우 각 root에서 탐색
+        if key_path.is_absolute():
+            resolved = key_path.resolve()
+            for root in archive_roots:
+                try:
+                    resolved.relative_to(root.resolve())
+                    if not resolved.exists():
+                        raise ValueError(f"파일이 존재하지 않습니다: {resolved}")
+                    return {"resolved_path": str(resolved), "registered_root": str(root)}
+                except ValueError:
+                    continue
+            raise ValueError(
+                f"candidate_key 가 등록된 archive root 밖을 가리킵니다: {candidate_key}"
+            )
+        else:
+            for root in archive_roots:
+                candidate = (root / key_path).resolve()
+                try:
+                    candidate.relative_to(root.resolve())
+                except ValueError:
+                    raise ValueError(
+                        f"candidate_key path traversal 감지: {candidate_key}"
+                    )
+                if candidate.exists() and candidate.is_file():
+                    return {"resolved_path": str(candidate), "registered_root": str(root)}
+            raise ValueError(
+                f"candidate_key 가 어떤 archive root 에서도 발견되지 않습니다: {candidate_key}"
+            )
+
+    def import_archive_candidate(
+        self, candidate_key: str, registered_paths: List[dict]
+    ) -> dict:
+        """file_only candidate 를 DB 로 import 한다.
+
+        Returns:
+            {
+                "record": PlanRecord,
+                "created": bool,
+                "not_queueable": str | None,   # 큐잉 불가 사유
+            }
+        """
+        # 1. 경로 검증
+        try:
+            resolved_info = self.resolve_archive_candidate_key(candidate_key, registered_paths)
+        except ValueError as exc:
+            return {"record": None, "created": False, "not_queueable": str(exc)}
+
+        resolved_path = resolved_info["resolved_path"]
+        path = Path(resolved_path)
+
+        # 2. plan 파일 패턴 검사
+        if not _is_plan_file(path):
+            return {
+                "record": None,
+                "created": False,
+                "not_queueable": f"plan 파일 패턴에 맞지 않습니다: {path.name}",
+            }
+
+        # 3. 파일 크기 / 인코딩 검사
+        try:
+            size_bytes = path.stat().st_size
+        except OSError as exc:
+            return {"record": None, "created": False, "not_queueable": f"파일 접근 오류: {exc}"}
+
+        if size_bytes > self.MAX_IMPORT_BYTES:
+            return {
+                "record": None,
+                "created": False,
+                "not_queueable": f"파일 크기 초과 (최대 10MB): {size_bytes} bytes",
+            }
+
+        try:
+            raw_content = path.read_bytes()
+        except OSError as exc:
+            return {"record": None, "created": False, "not_queueable": f"파일 읽기 오류: {exc}"}
+
+        # 이진 파일 감지: 앞 8KB에 null byte 존재 여부 확인
+        if b"\x00" in raw_content[:8192]:
+            return {
+                "record": None,
+                "created": False,
+                "not_queueable": "이진 파일은 import/queue 불가 (null byte 감지)",
+            }
+
+        try:
+            text_content = raw_content.decode("utf-8")
+        except UnicodeDecodeError:
+            return {
+                "record": None,
+                "created": False,
+                "not_queueable": "UTF-8 디코딩 실패 (이진/비UTF-8 파일)",
+            }
+
+        # 4. 중복 filename_hash 검사
+        filename_hash = _compute_filename_hash(resolved_path)
+        existing = self.db.query(PlanRecord).filter_by(filename_hash=filename_hash).first()
+        if existing:
+            return {"record": existing, "created": False, "not_queueable": None}
+
+        # 5. 동일 filename 을 가진 다른 hash record 검사 (duplicate hash 충돌)
+        filename_only = path.name
+        name_collision = (
+            self.db.query(PlanRecord)
+            .filter(PlanRecord.file_path.like(f"%{filename_only}"))
+            .filter(PlanRecord.filename_hash != filename_hash)
+            .first()
+        )
+        if name_collision:
+            return {
+                "record": None,
+                "created": False,
+                "not_queueable": (
+                    f"동일 파일명({filename_only})으로 hash 가 다른 record 가 이미 존재합니다 "
+                    f"(기존 record id={name_collision.id}). 수동 정리 후 재시도하세요."
+                ),
+            }
+
+        # 6. PlanRecord 생성
+        now = datetime.now()
+        record = PlanRecord(
+            filename_hash=filename_hash,
+            file_path=resolved_path,
+            title=self._extract_title_from_md(resolved_path),
+            project=self._detect_project_from_path(resolved_path),
+            category=self._detect_project_from_path(resolved_path),
+            status="archived",
+            archived_at=now,
+            raw_content=text_content,
+        )
+        self.db.add(record)
+        self.db.flush()
+        _add_event(self.db, record, "created", {"file_path": resolved_path, "source": "import_candidate"})
+        _add_event(self.db, record, "archived", {"archive_path": resolved_path, "source": "import_candidate"})
+        return {"record": record, "created": True, "not_queueable": None}
 
     def get_active_claim(self, file_path: str) -> Optional[dict]:
         """plan path로 PlanRecord를 확보한 뒤 active claim 요약을 반환한다.

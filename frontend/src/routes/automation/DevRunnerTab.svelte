@@ -236,6 +236,11 @@
 		branch_exists?: boolean | 'unknown';
 		branch_merged_to_main?: boolean | 'unknown';
 		metadata_checked_at?: string | null;
+		display_state?: string;
+		display_label?: string;
+		display_severity?: 'info' | 'warn' | 'error' | 'approval' | 'success' | 'muted';
+		display_secondary?: string | null;
+		hide_stale_branch_badge?: boolean;
 	}
 
 	interface RunnerSource {
@@ -269,6 +274,11 @@
 		branch_exists?: boolean | 'unknown';
 		branch_merged_to_main?: boolean | 'unknown';
 		metadata_checked_at?: string | null;
+		display_state?: string;
+		display_label?: string;
+		display_severity?: 'info' | 'warn' | 'error' | 'approval' | 'success' | 'muted';
+		display_secondary?: string | null;
+		hide_stale_branch_badge?: boolean;
 	}
 
 	function createRunnerTab(runner: RunnerSource): RunnerTab {
@@ -299,6 +309,11 @@
 			branch_exists: runner.branch_exists ?? 'unknown',
 			branch_merged_to_main: runner.branch_merged_to_main ?? 'unknown',
 			metadata_checked_at: runner.metadata_checked_at ?? 'unknown',
+			display_state: runner.display_state ?? 'stopped',
+			display_label: runner.display_label ?? '중지됨',
+			display_severity: runner.display_severity ?? 'muted',
+			display_secondary: runner.display_secondary ?? null,
+			hide_stale_branch_badge: runner.hide_stale_branch_badge ?? false,
 		};
 	}
 
@@ -417,6 +432,11 @@
 			branch_exists: runner.branch_exists ?? tab.branch_exists ?? 'unknown',
 			branch_merged_to_main: runner.branch_merged_to_main ?? tab.branch_merged_to_main ?? 'unknown',
 			metadata_checked_at: runner.metadata_checked_at ?? tab.metadata_checked_at ?? 'unknown',
+			display_state: runner.display_state ?? tab.display_state ?? 'stopped',
+			display_label: runner.display_label ?? tab.display_label ?? '중지됨',
+			display_severity: runner.display_severity ?? tab.display_severity ?? 'muted',
+			display_secondary: runner.display_secondary ?? tab.display_secondary ?? null,
+			hide_stale_branch_badge: runner.hide_stale_branch_badge ?? tab.hide_stale_branch_badge ?? false,
 		};
 	}
 
@@ -1174,6 +1194,9 @@
 										branchExists={tab.branch_exists}
 										branchMergedToMain={tab.branch_merged_to_main}
 										metadataCheckedAt={tab.metadata_checked_at}
+										displayLabel={tab.display_label}
+										displaySecondary={tab.display_secondary}
+										hideStaleBranchBadge={tab.hide_stale_branch_badge}
 										onStop={() => handleTabStop(tab.id)}
 										onClose={() => handleCloseTab(tab.id)}
 										onRestart={() => handleRestart(tab)}

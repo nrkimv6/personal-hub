@@ -85,27 +85,19 @@ def test_check_branch_exists_detects_checked_out_local_branch_in_git_repo(tmp_pa
     assert check_branch_exists("feature/checked-out", cwd=str(tmp_path)) is True
 
 
-def test_approval_required_branch_exists_false_is_corrected_from_worktree(monkeypatch, tmp_path):
-    from app.modules.dev_runner.services import executor_service as module
+def test_executor_delegates_branch_metadata_correction_to_read_model():
+    source = (ROOT / "app/modules/dev_runner/services/executor_service.py").read_text(encoding="utf-8")
 
-    monkeypatch.setattr(module, "check_branch_exists", lambda branch, cwd=None: branch == "impl/test" and cwd == str(tmp_path))
-
-    branch_exists, checked_at = module._approval_required_branch_exists_fallback(
-        "approval_required",
-        False,
-        "impl/test",
-        str(tmp_path),
-        "old",
-    )
-
-    assert branch_exists is True
-    assert checked_at != "old"
+    assert "_approval_required_branch_exists_fallback" not in source
+    assert "from app.modules.dev_runner.services.git_utils import check_branch_exists" not in source
+    assert "build_runner_read_model(" in source
 
 
 def test_approval_required_stale_branch_label_is_suppressed_in_ui():
     instance_source = (ROOT / "frontend/src/lib/components/dev-runner/RunnerInstanceTab.svelte").read_text(encoding="utf-8")
     status_source = (ROOT / "frontend/src/lib/components/dev-runner/RunStatusBar.svelte").read_text(encoding="utf-8")
 
-    assert "if (mergeStatus === 'approval_required') return null;" in instance_source
-    assert "mergeStatus !== 'approval_required' && branchExists === false" in instance_source
-    assert "if (runner.merge_status === 'approval_required') return null;" in status_source
+    assert "if (hideStaleBranchBadge) return null;" in instance_source
+    assert "return displaySecondary;" in instance_source
+    assert "if (runner.hide_stale_branch_badge) return null;" in status_source
+    assert "return runner.display_secondary ?? null;" in status_source

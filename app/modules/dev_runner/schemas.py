@@ -8,6 +8,7 @@ from typing import Any, Literal, Optional, List, Union
 SUPPORTED_RUN_ENGINES = {"claude", "gemini", "codex", "cc-codex"}
 
 RunnerMetadataState = Union[bool, Literal["unknown"]]
+RunnerDisplaySeverity = Literal["info", "warn", "error", "approval", "success", "muted"]
 
 
 # ========== 스키마 ==========
@@ -84,6 +85,11 @@ class RunStatusResponse(BaseModel):
     claim_state: Optional[str] = None
     claim_owner_runner_id: Optional[str] = None
     claim_message: Optional[str] = None
+    display_state: str = "stopped"
+    display_label: str = "중지됨"
+    display_severity: RunnerDisplaySeverity = "muted"
+    display_secondary: Optional[str] = None
+    hide_stale_branch_badge: bool = False
 
 
 class RunnerListItem(BaseModel):
@@ -116,6 +122,11 @@ class RunnerListItem(BaseModel):
     branch_exists: RunnerMetadataState = Field("unknown", description="plan-runner snapshot field; true/false or unknown when absent")
     branch_merged_to_main: RunnerMetadataState = Field("unknown", description="plan-runner snapshot field; true/false or unknown when absent")
     metadata_checked_at: str = Field("unknown", description="plan-runner snapshot check timestamp or unknown when absent")
+    display_state: str = "stopped"
+    display_label: str = "중지됨"
+    display_severity: RunnerDisplaySeverity = "muted"
+    display_secondary: Optional[str] = None
+    hide_stale_branch_badge: bool = False
 
 
 class PlanProgressResponse(BaseModel):
@@ -655,9 +666,70 @@ class PlanArchiveSelectedProfile(BaseModel):
     profile_name: str
 
 
+class PlanArchiveExecutionTarget(BaseModel):
+    """provider/model 기반 실행 대상. profile 없는 Codex/GPT도 지원."""
+    provider: str
+    model: str
+    profile_key: Optional[str] = None
+    engine: Optional[str] = None
+    profile_name: Optional[str] = None
+    label: Optional[str] = None
+
+    def dedupe_key(self) -> str:
+        """중복 방지 키. profile-backed: 'profile:{profile_key}', 나머지: 'profileless'."""
+        if self.profile_key:
+            return f"profile:{self.profile_key}"
+        if self.engine and self.profile_name:
+            return f"profile:{self.engine}:{self.profile_name}"
+        return "profileless"
+
+
 class PlanArchiveExecutionRunRequest(BaseModel):
     record_ids: List[int] = Field(default_factory=list)
     selected_profiles: List[PlanArchiveSelectedProfile] = Field(default_factory=list)
+    selected_targets: List[PlanArchiveExecutionTarget] = Field(default_factory=list)
+
+
+class PlanArchiveCandidateQueueRequest(BaseModel):
+    """archive 후보 큐잉 요청. file_only → import 후 큐잉, matched/db_only → 기존 record로 큐잉."""
+    candidate_keys: List[str] = Field(default_factory=list, description="파일 경로 기반 후보 키 목록")
+    record_ids: List[int] = Field(default_factory=list, description="기존 PlanRecord id 목록")
+    selected_targets: List[PlanArchiveExecutionTarget] = Field(default_factory=list)
+    import_file_only: bool = Field(True, description="file_only 후보를 DB로 import한 뒤 큐잉")
+
+
+class PlanArchiveCandidateQueueSkipItem(BaseModel):
+    candidate_key: Optional[str] = None
+    record_id: Optional[int] = None
+    reason: str
+
+
+class PlanArchiveCandidateQueueErrorItem(BaseModel):
+    candidate_key: Optional[str] = None
+    record_id: Optional[int] = None
+    error: str
+
+
+class PlanArchiveCandidateQueueResponse(BaseModel):
+    """archive 후보 큐잉 응답. 4구간 분류: queued / imported / skipped / errors."""
+    queued: int = 0
+    imported: int = 0
+    skipped: List[PlanArchiveCandidateQueueSkipItem] = Field(default_factory=list)
+    errors: List[PlanArchiveCandidateQueueErrorItem] = Field(default_factory=list)
+    job_ids: List[int] = Field(default_factory=list)
+    request_ids: List[int] = Field(default_factory=list)
+
+
+class PlanArchiveCandidatePreviewResponse(BaseModel):
+    """file_only candidate dry-run preview. DB write 없음."""
+    candidate_key: str
+    resolved_path: str
+    filename_hash: str
+    total_bytes: int
+    total_lines: int
+    is_binary: bool
+    raw_content_preview: str  # 앞 8KB
+    not_queueable: Optional[str] = None  # 큐잉 불가 사유 (있으면 preview만 가능)
 
 
 class PlanArchiveExecutionRunResponse(BaseModel):
@@ -837,10 +909,14 @@ class ArchiveCandidateResponse(BaseModel):
     reason: str
     eligible_for_import: bool
     eligible_for_analysis: bool
+    needs_archive_normalization: bool = False
     registered_path: Optional[str] = None
     duplicate_paths: List[str] = []
     file_mtime: Optional[datetime] = None
     file_size: Optional[int] = None
+    attempt_count: int = 0
+    last_attempt_status: Optional[str] = None
+    last_attempt_at: Optional[datetime] = None
     record: Optional[ArchiveCandidateRecordResponse] = None
 
 
@@ -1118,6 +1194,138 @@ class WorktreeListResponse(BaseModel):
     main_dirty: MainDirtyStatus = Field(default_factory=MainDirtyStatus)
 
 
+# ── Phase 4-A: dashboard / list endpoint schemas ─────────────────────────────
+
+class ArchiveQueueSummary(BaseModel):
+    """LLMRequest queue count summary (counts only, no full rows)."""
+    pending: int = 0
+    processing: int = 0
+    failed: int = 0
+    completed_24h: int = 0
+    recent_failures_by_category: dict = Field(default_factory=dict)
+
+
+class ArchiveLLMRequestRow(BaseModel):
+    """One LLMRequest row for archive queue list."""
+    id: int
+    status: str
+    provider: str = ""
+    model: str = ""
+    record_id: Optional[str] = None
+    candidate_key: Optional[str] = None
+    source_schedule_run_id: Optional[int] = None
+    failure_category: Optional[str] = None
+    dedupe_key: Optional[str] = None
+    requested_at: Optional[str] = None
+    processed_at: Optional[str] = None
+    error_message: Optional[str] = None
+    retry_count: int = 0
+    applied_request_id: Optional[int] = None
+    is_applied_to_record: bool = False
+
+
+class ArchiveRelatedRecord(BaseModel):
+    """Snapshot of the current PlanRecord DB stored values for result comparison."""
+    record_id: int
+    category: Optional[str] = None
+    tags: Optional[List[str]] = None
+    summary: Optional[str] = None
+    intent: Optional[str] = None
+    trigger: Optional[str] = None
+    scope: Optional[List[str]] = None
+    analyzed_at: Optional[str] = None
+
+
+class ArchiveAuditSnapshot(BaseModel):
+    """One plan_archive_analysis_overwritten PlanEvent entry."""
+    event_id: int
+    prior_summary: Optional[str] = None
+    prior_category: Optional[str] = None
+    prior_tags: Optional[List[str]] = None
+    analyzed_at: Optional[str] = None
+    created_at: Optional[str] = None
+
+
+class ArchiveLLMRequestDetail(ArchiveLLMRequestRow):
+    """Full LLMRequest detail including prompt, result, raw_response, cli_options."""
+    prompt: Optional[str] = None
+    result: Optional[str] = None
+    raw_response: Optional[str] = None
+    cli_options: Optional[str] = None
+    related_record: Optional[ArchiveRelatedRecord] = None
+    audit_snapshots: List[ArchiveAuditSnapshot] = Field(default_factory=list)
+
+
+class ArchiveLLMRequestListResponse(BaseModel):
+    items: List[ArchiveLLMRequestRow] = Field(default_factory=list)
+    total: int = 0
+    page: int = 1
+    page_size: int = 50
+    filters: dict = Field(default_factory=dict)
+
+
+class ArchiveScheduleRunRow(BaseModel):
+    """One TaskScheduleRun row for schedule history list."""
+    id: int
+    schedule_id: int
+    status: str
+    started_at: Optional[str] = None
+    finished_at: Optional[str] = None
+    error_message: Optional[str] = None
+    stop_reason: Optional[str] = None
+    retry_count: int = 0
+
+
+class ArchiveScheduleRunListResponse(BaseModel):
+    items: List[ArchiveScheduleRunRow] = Field(default_factory=list)
+    total: int = 0
+    page: int = 1
+    page_size: int = 50
+    filters: dict = Field(default_factory=dict)
+
+
+class ArchiveExecutionAttemptRow(BaseModel):
+    """One PlanArchiveExecutionAttempt row for execution attempt history list."""
+    id: int
+    job_id: int
+    llm_request_id: Optional[int] = None
+    record_id: Optional[int] = None
+    attempt_index: int = 1
+    status: str
+    provider: Optional[str] = None
+    model: Optional[str] = None
+    engine: Optional[str] = None
+    profile_name: Optional[str] = None
+    error_message: Optional[str] = None
+    requested_at: Optional[str] = None
+    finished_at: Optional[str] = None
+
+
+class ArchiveExecutionAttemptListResponse(BaseModel):
+    items: List[ArchiveExecutionAttemptRow] = Field(default_factory=list)
+    total: int = 0
+    page: int = 1
+    page_size: int = 50
+    filters: dict = Field(default_factory=dict)
+
+
+class ArchiveScheduleDashboardResponse(BaseModel):
+    """Archive schedule dashboard summary — all in one, full rows in separate endpoints."""
+    schedule: Optional[PlanArchiveScheduleSnapshot] = None
+    health: Optional[dict] = None
+    retrieval_readiness: Optional[PlanArchiveDbReadinessResponse] = None
+    queue_summary: ArchiveQueueSummary = Field(default_factory=ArchiveQueueSummary)
+    recent_requests: List[ArchiveLLMRequestRow] = Field(default_factory=list)
+    recent_schedule_runs: List[ArchiveScheduleRunRow] = Field(default_factory=list)
+    recent_execution_attempts: List[ArchiveExecutionAttemptRow] = Field(default_factory=list)
+
+
+class ArchiveSchedulePauseResumeResponse(BaseModel):
+    schedule_id: int
+    enabled: bool
+    action: str
+
+
 __all__ = [
     'PlanEventResponse',
     'PlanRecordResponse',
@@ -1157,6 +1365,13 @@ __all__ = [
     'ArchiveCandidateSummaryResponse',
     'ArchiveAnalyzeRequest',
     'ArchiveAnalyzeResponse',
+    'PlanArchiveCandidateQueueRequest',
+    'PlanArchiveCandidateQueueResponse',
+    'PlanArchiveCandidateQueueSkipItem',
+    'PlanArchiveCandidateQueueErrorItem',
+    'PlanArchiveCandidatePreviewResponse',
+    'PlanArchiveExecutionTarget',
+    'PlanArchiveExecutionRunRequest',
     'MemoUpdateRequest',
     'RunRequest',
     'RunStatusResponse',
@@ -1196,4 +1411,15 @@ __all__ = [
     'WorktreeCleanupResult',
     'WorktreeCleanupResponse',
     'WorktreeListResponse',
+    # Phase 4-A dashboard / list
+    'ArchiveQueueSummary',
+    'ArchiveLLMRequestRow',
+    'ArchiveLLMRequestDetail',
+    'ArchiveLLMRequestListResponse',
+    'ArchiveScheduleRunRow',
+    'ArchiveScheduleRunListResponse',
+    'ArchiveExecutionAttemptRow',
+    'ArchiveExecutionAttemptListResponse',
+    'ArchiveScheduleDashboardResponse',
+    'ArchiveSchedulePauseResumeResponse',
 ]

@@ -55,11 +55,15 @@ class PlanArchiveScheduler(ScheduleHandler):
     async def execute(self, spec: ScheduleExecutionSpec, claimed: ClaimedRun, ctx: WorkerContext) -> HandlerRunOutcome:
         loop = asyncio.get_event_loop()
         target_config = spec.target_config
+        import functools as _ft
         stats = await loop.run_in_executor(
             None,
-            self._enqueue_unprocessed_plans,
-            ctx.db_factory,
-            target_config,
+            _ft.partial(
+                self._enqueue_unprocessed_plans,
+                ctx.db_factory,
+                target_config,
+                claimed.run_id,
+            ),
         )
         count = stats["queued"]
         return HandlerRunOutcome(
@@ -79,15 +83,15 @@ class PlanArchiveScheduler(ScheduleHandler):
         return value if value > 0 else DEFAULT_MAX_BACKFILL_PER_RUN
 
     @classmethod
-    def _enqueue_unprocessed_plans(cls, db_factory, target_config: dict | None = None) -> dict:
+    def _enqueue_unprocessed_plans(cls, db_factory, target_config: dict | None = None, schedule_run_id: int | None = None) -> dict:
         db = db_factory()
         try:
-            return cls._enqueue_unprocessed_plans_in_session(db, target_config=target_config)
+            return cls._enqueue_unprocessed_plans_in_session(db, target_config=target_config, schedule_run_id=schedule_run_id)
         finally:
             db.close()
 
     @classmethod
-    def _enqueue_unprocessed_plans_in_session(cls, db: "Session", target_config: dict | None = None) -> dict:
+    def _enqueue_unprocessed_plans_in_session(cls, db: "Session", target_config: dict | None = None, schedule_run_id: int | None = None) -> dict:
         target_config = target_config or {}
         include_temp_records = target_config.get("include_temp_records") is True
         max_backfill_per_run = cls._get_max_backfill_per_run(target_config)
@@ -104,6 +108,7 @@ class PlanArchiveScheduler(ScheduleHandler):
                     include_temp_records=include_temp_records,
                     max_backfill_per_run=max_backfill_per_run,
                     trigger_source="schedule:plan_archive_analyze",
+                    source_schedule_run_id=schedule_run_id,
                 )
             )
             if stats["queued"] > 0 or stats["skipped_empty"] > 0 or stats["skipped_active_job"] > 0:

@@ -29,9 +29,10 @@ from app.modules.dev_runner.services.plan_path_resolver import is_archive_or_his
 from app.modules.dev_runner.services.settings_service import settings_service
 from app.modules.dev_runner.services.visibility import is_visible_runner
 from app.modules.dev_runner.services.log_file_resolver import LogFileResolver
-from app.modules.dev_runner.services.git_utils import check_branch_exists
 from app.modules.dev_runner.schemas import RunRequest, RunStatusResponse
 from app.modules.dev_runner.services.state import get_state
+from app.modules.dev_runner.services.runner_display_state import build_display_state
+from app.modules.dev_runner.services.runner_read_model import build_runner_read_model
 from app.modules.dev_runner.services.redis_connection import (
     RedisConnection,
     REDIS_HOST, REDIS_PORT, REDIS_DB,
@@ -102,31 +103,6 @@ def _coerce_runner_metadata_checked_at(*values: Any) -> str:
         if text and text.lower() != "unknown":
             return text
     return "unknown"
-
-
-def _approval_required_branch_exists_fallback(
-    merge_status: str | None,
-    branch_exists: bool | str,
-    branch: str | None,
-    worktree_path: str | None,
-    metadata_checked_at: str,
-) -> tuple[bool | str, str]:
-    """Correct stale branch_exists=false for approval_required runners only."""
-    if merge_status != "approval_required":
-        return branch_exists, metadata_checked_at
-    if branch_exists is not False or not branch or not worktree_path:
-        return branch_exists, metadata_checked_at
-
-    worktree = Path(str(worktree_path))
-    if not worktree.is_dir():
-        return branch_exists, metadata_checked_at
-
-    try:
-        if check_branch_exists(branch, cwd=str(worktree)):
-            return True, datetime.now().isoformat()
-    except Exception:
-        pass
-    return branch_exists, metadata_checked_at
 
 
 def _resolve_runner_plan_path(plan_file: str | None) -> Path | None:
@@ -908,6 +884,7 @@ class ExecutorService:
         data = await self._get_runner_fields(
             runner_id, "status", "pid", "plan_file", "start_time", "engine", "execution_count",
             "exit_reason", "error",
+            "worktree_path", "branch", "merge_status",
             "worktree_exists", "branch_exists", "branch_merged_to_main", "metadata_checked_at"
         )
         status = data["status"]
@@ -918,6 +895,9 @@ class ExecutorService:
         execution_count_raw = data["execution_count"]
         exit_reason = data["exit_reason"]
         error = data["error"]
+        worktree_path = data["worktree_path"]
+        branch = data["branch"]
+        merge_status = data["merge_status"]
         worktree_exists = _coerce_runner_metadata_state(data["worktree_exists"])
         branch_exists = _coerce_runner_metadata_state(data["branch_exists"])
         branch_merged_to_main = _coerce_runner_metadata_state(data["branch_merged_to_main"])
@@ -925,6 +905,21 @@ class ExecutorService:
         running = status == "running"
 
         running, pid_str = await self._correct_pid_state(runner_id, status, pid_str, caller="get_runner_status")
+        remaining_summary = _remaining_leaf_summary_for_plan(plan_file)
+        read_model = build_runner_read_model(
+            runner_id=runner_id,
+            running=running,
+            merge_status=merge_status,
+            exit_reason=exit_reason,
+            branch=branch,
+            worktree_path=worktree_path,
+            redis_branch_exists=branch_exists,
+            redis_worktree_exists=worktree_exists,
+            remaining_post_merge_tasks=remaining_summary["post_merge"],
+        )
+        display = build_display_state(read_model)
+        branch_exists = read_model.branch_exists
+        worktree_exists = read_model.worktree_exists
 
         current_cycle_str = await self.async_redis.get(self._runner_key(runner_id, "current_cycle"))
         current_cycle = int(current_cycle_str) if current_cycle_str is not None else None
@@ -956,6 +951,11 @@ class ExecutorService:
             branch_exists=branch_exists,
             branch_merged_to_main=branch_merged_to_main,
             metadata_checked_at=metadata_checked_at,
+            display_state=display.state,
+            display_label=display.label,
+            display_severity=display.severity,
+            display_secondary=display.secondary,
+            hide_stale_branch_badge=display.hide_stale_branch_badge,
         )
 
     async def get_all_runners(self) -> list:
@@ -1031,24 +1031,28 @@ class ExecutorService:
                         d["metadata_checked_at"],
                         recent_meta.get("metadata_checked_at"),
                     )
-                    branch_for_metadata = branch
                     if branch is None and worktree_path:
                         branch = f"runner/{rid}"
-                    corrected_branch_exists, corrected_checked_at = _approval_required_branch_exists_fallback(
-                        merge_status,
-                        branch_exists,
-                        branch_for_metadata,
-                        worktree_path,
-                        metadata_checked_at,
+                    read_model = build_runner_read_model(
+                        runner_id=rid,
+                        running=status == "running",
+                        merge_status=merge_status,
+                        exit_reason=exit_reason,
+                        branch=branch,
+                        worktree_path=worktree_path,
+                        redis_branch_exists=branch_exists,
+                        redis_worktree_exists=worktree_exists,
                     )
-                    if corrected_branch_exists != branch_exists:
-                        branch_exists = corrected_branch_exists
-                        metadata_checked_at = corrected_checked_at
+                    if read_model.branch_exists != branch_exists:
+                        branch_exists = read_model.branch_exists
+                        metadata_checked_at = datetime.now().isoformat()
                         try:
-                            await self.async_redis.set(self._runner_key(rid, "branch_exists"), "true")
+                            await self.async_redis.set(self._runner_key(rid, "branch_exists"), "true" if branch_exists is True else "false")
                             await self.async_redis.set(self._runner_key(rid, "metadata_checked_at"), metadata_checked_at)
                         except Exception as exc:
-                            logger.debug(f"[dev-runner] approval branch_exists 보정 Redis 기록 실패: runner={rid}, error={exc}")
+                            logger.debug(f"[dev-runner] branch_exists 보정 Redis 기록 실패: runner={rid}, error={exc}")
+                    if read_model.worktree_exists != worktree_exists:
+                        worktree_exists = read_model.worktree_exists
                     start_time = None
                     if start_time_str:
                         try:
@@ -1116,6 +1120,19 @@ class ExecutorService:
                         and not worktree_path
                         and merge_status not in {"merge_pending", "queued", "merging", "merged"}
                     )
+                    read_model = build_runner_read_model(
+                        runner_id=rid,
+                        running=running,
+                        merge_status=merge_status,
+                        exit_reason=exit_reason,
+                        branch=branch,
+                        worktree_path=worktree_path,
+                        redis_branch_exists=branch_exists,
+                        redis_worktree_exists=worktree_exists,
+                        remaining_post_merge_tasks=remaining_post_merge_tasks,
+                        merge_evidence_missing=merge_evidence_missing,
+                    )
+                    display = build_display_state(read_model)
                     result.append(RunnerListItem(
                         runner_id=rid,
                         running=running,
@@ -1145,6 +1162,11 @@ class ExecutorService:
                         branch_exists=branch_exists,
                         branch_merged_to_main=branch_merged_to_main,
                         metadata_checked_at=metadata_checked_at,
+                        display_state=display.state,
+                        display_label=display.label,
+                        display_severity=display.severity,
+                        display_secondary=display.secondary,
+                        hide_stale_branch_badge=display.hide_stale_branch_badge,
                     ))
                 return result
             finally:

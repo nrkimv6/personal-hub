@@ -15,6 +15,8 @@ from app.modules.dev_runner.services.event_routing import (
     MAX_RECENT_IN_SSE,
 )
 from app.modules.dev_runner.services.visibility import is_visible_runner
+from app.modules.dev_runner.services.runner_display_state import build_display_state
+from app.modules.dev_runner.services.runner_read_model import build_runner_read_model
 
 # 새 필드 추가 시 _status_values() defaults에 키를 추가하면 자동 동기화됨
 STATUS_FIELDS: tuple[str, ...] = (
@@ -81,6 +83,24 @@ def build_status_payload(sync_redis, runner_id: str) -> Optional[dict]:
         data["branch_exists"] = _coerce_metadata_state(data.get("branch_exists"))
         data["branch_merged_to_main"] = _coerce_metadata_state(data.get("branch_merged_to_main"))
         data["metadata_checked_at"] = _coerce_metadata_checked_at(data.get("metadata_checked_at"))
+        read_model = build_runner_read_model(
+            runner_id=runner_id,
+            running=data.get("status") == "running",
+            merge_status=_decode_text(data.get("merge_status")),
+            exit_reason=_decode_text(data.get("exit_reason")),
+            branch=_decode_text(data.get("branch")),
+            worktree_path=_decode_text(data.get("worktree_path")),
+            redis_branch_exists=data["branch_exists"],
+            redis_worktree_exists=data["worktree_exists"],
+        )
+        display = build_display_state(read_model)
+        data["branch_exists"] = read_model.branch_exists
+        data["worktree_exists"] = read_model.worktree_exists
+        data["display_state"] = display.state
+        data["display_label"] = display.label
+        data["display_severity"] = display.severity
+        data["display_secondary"] = display.secondary
+        data["hide_stale_branch_badge"] = display.hide_stale_branch_badge
         # plan_file이 None(Redis 키 미설정)이면 None 반환 — sentinel fallback 제거
         if not data.get("plan_file"):
             data["plan_file"] = None

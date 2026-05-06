@@ -14,6 +14,7 @@ from pydantic import ValidationError
 from app.modules.claude_worker.services.profile_store import LLMProfile
 from app.modules.dev_runner.schemas import RunRequest
 from app.modules.dev_runner.services.executor_service import executor_service
+from app.modules.dev_runner.services.event_payload import build_status_payload
 from app.modules.dev_runner.services.state import get_state
 
 RESULTS_KEY = "plan-runner:command_results"
@@ -725,7 +726,7 @@ class TestListRunners:
         await fake_async.set(f"{prefix}:branch_exists", "false")
         await fake_async.set(f"{prefix}:worktree_exists", "true")
 
-        with patch("app.modules.dev_runner.services.executor_service.check_branch_exists", return_value=True):
+        with patch("app.modules.dev_runner.services.runner_git_metadata.check_branch_exists", return_value=True):
             response = await client.get("/api/v1/dev-runner/runners")
 
         assert response.status_code == 200
@@ -733,6 +734,8 @@ class TestListRunners:
         assert data[0]["runner_id"] == rid
         assert data[0]["branch_exists"] is True
         assert await fake_async.get(f"{prefix}:branch_exists") == "true"
+        assert data[0]["display_state"] == "approval_required"
+        assert data[0]["hide_stale_branch_badge"] is True
 
     async def test_list_runners_preserves_completed_merge_error_with_post_merge_tasks(self, client, mock_executor_redis, tmp_path):
         """T5-R: completed lifecycle과 merge error/post-merge 잔여는 HTTP 응답에서 함께 보존된다."""
@@ -767,6 +770,64 @@ class TestListRunners:
         assert data[0]["merge_status"] == "error"
         assert data[0]["merge_reason"] == "stale_merge_blocked"
         assert data[0]["remaining_post_merge_tasks"] == 1
+        assert data[0]["display_state"] == "merge_error"
+        assert data[0]["display_label"] == "머지 오류"
+
+
+class TestGetRunnerStatus:
+    async def test_get_runner_status_includes_display_fields(self, client, mock_executor_redis):
+        """R: 단일 runner API도 list/SSE와 같은 display 필드를 반환한다."""
+        fake_async = mock_executor_redis["async"]
+        rid = "single-display-001"
+        prefix = f"plan-runner:runners:{rid}"
+        await fake_async.set(f"{prefix}:status", "stopped")
+        await fake_async.set(f"{prefix}:plan_file", "docs/plan/test.md")
+        await fake_async.set(f"{prefix}:merge_status", "approval_required")
+        await fake_async.set(f"{prefix}:branch_exists", "false")
+
+        response = await client.get(f"/api/v1/dev-runner/runners/{rid}")
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["runner_id"] == rid
+        assert data["display_state"] == "approval_required"
+        assert data["display_label"] == "승인 필요"
+        assert data["display_severity"] == "approval"
+        assert data["display_secondary"] is None
+        assert data["hide_stale_branch_badge"] is True
+
+    async def test_runner_list_and_sse_payload_display_fields_match(self, client, mock_executor_redis):
+        """R: list API와 SSE status payload는 같은 backend display policy를 공유한다."""
+        fake_async = mock_executor_redis["async"]
+        fake_sync = mock_executor_redis["sync"]
+        rid = "display-match-001"
+        prefix = f"plan-runner:runners:{rid}"
+        fields = {
+            "status": "stopped",
+            "trigger": "user",
+            "plan_file": "docs/plan/test.md",
+            "merge_status": "approval_required",
+            "branch_exists": "false",
+        }
+        await fake_async.sadd("plan-runner:active_runners", rid)
+        fake_sync.sadd("plan-runner:active_runners", rid)
+        for field, value in fields.items():
+            await fake_async.set(f"{prefix}:{field}", value)
+            fake_sync.set(f"{prefix}:{field}", value)
+
+        response = await client.get("/api/v1/dev-runner/runners")
+        assert response.status_code == 200
+        list_item = response.json()[0]
+        sse_payload = build_status_payload(fake_sync, rid)
+
+        for field in (
+            "display_state",
+            "display_label",
+            "display_severity",
+            "display_secondary",
+            "hide_stale_branch_badge",
+        ):
+            assert list_item[field] == sse_payload[field]
 
 
 class TestMergeApprovalPayload:
