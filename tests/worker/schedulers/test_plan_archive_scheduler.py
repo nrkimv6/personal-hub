@@ -65,6 +65,7 @@ def test_enqueue_unprocessed_plans_uses_db_first_content(session_factory):
         "app.modules.dev_runner.schedulers.plan_archive_schedule.build_plan_analyze_prompt",
         side_effect=lambda file_content, filename: f"{filename}:{file_content}",
     ):
-        count = PlanArchiveScheduler._enqueue_unprocessed_plans(session_factory)
+        stats = PlanArchiveScheduler._enqueue_unprocessed_plans(session_factory)
 
-    assert count == 1
+    assert stats["queued"] == 1
+    assert stats["remaining_real_unprocessed"] == 0

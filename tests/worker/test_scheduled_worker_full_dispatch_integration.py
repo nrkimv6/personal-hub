@@ -13,6 +13,7 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from app.models.base import Base
+from app.models.google_search import GoogleSavedSearch, GoogleSearchQueue
 from app.models.plan_record import PlanRecord
 from app.models.task_schedule import TaskSchedule, TaskScheduleRun
 from app.modules.claude_worker.models.llm_request import LLMRequest
@@ -90,7 +91,7 @@ def _create_schedule(
 async def test_full_dispatch_registry_contains_all_handlers(session_factory):
     worker = _build_worker(session_factory)
 
-    assert len(worker._handlers) == 14
+    assert len(worker._handlers) == 15
     assert [handler.target_type for handler in worker._handlers] == [
         TaskSchedule.TARGET_TYPE_INSTAGRAM_FEED,
         TaskSchedule.TARGET_TYPE_GOOGLE_SEARCH,
@@ -101,6 +102,7 @@ async def test_full_dispatch_registry_contains_all_handlers(session_factory):
         TaskSchedule.TARGET_TYPE_REPORT,
         TaskSchedule.TARGET_TYPE_PYTEST_RUN,
         TaskSchedule.TARGET_TYPE_PLAN_ARCHIVE_ANALYZE,
+        TaskSchedule.TARGET_TYPE_PLAN_ARCHIVE_INSIGHT_BATCH,
         TaskSchedule.TARGET_TYPE_DEVGUIDE_STALENESS,
         TaskSchedule.TARGET_TYPE_ARCHIVE_ROTATION,
         TaskSchedule.TARGET_TYPE_SCHEDULE_DATE_EXPIRE,
@@ -341,3 +343,57 @@ async def test_main_loop_iteration_uses_counts_only_complete_run_for_system_hand
         await _drain_running_tasks(worker)
 
     assert captured_kwargs == [{}]
+
+
+@pytest.mark.asyncio
+async def test_main_loop_iteration_google_search_dispatch_creates_queue_row(session_factory):
+    from app.modules.google_search.schedulers.search_schedule import GoogleSearchScheduler
+
+    now = datetime.now().replace(second=0, microsecond=0)
+    slot = now.strftime("%H:%M")
+    with session_factory() as db:
+        saved_search = GoogleSavedSearch(
+            name="scheduled google",
+            query="site:example.com scheduled",
+            date_filter="1w",
+            max_pages=1,
+            search_params=json.dumps({"lr": "lang_ko"}),
+        )
+        db.add(saved_search)
+        db.commit()
+        db.refresh(saved_search)
+        saved_search_id = saved_search.id
+
+        schedule = _create_schedule(
+            db,
+            name="google-search-full-dispatch",
+            target_type=TaskSchedule.TARGET_TYPE_GOOGLE_SEARCH,
+            target_config={
+                "saved_search_id": saved_search_id,
+                "daily_runs": 1,
+                "time_windows": [{"start": slot, "end": slot}],
+                "min_interval_hours": 0,
+            },
+        )
+        schedule_id = schedule.id
+
+    worker = _build_worker(session_factory)
+    worker._handlers = [GoogleSearchScheduler()]
+
+    with patch(
+        "app.modules.google_search.schedulers.search_schedule.enqueue_google_search",
+        AsyncMock(return_value=GoogleSearchQueue.STATUS_QUEUED),
+    ), patch("app.worker.scheduled_worker.SessionLocal", session_factory):
+        await worker._main_loop_iteration()
+        await _drain_running_tasks(worker)
+
+    with session_factory() as db:
+        run = db.query(TaskScheduleRun).one()
+        queue_item = db.query(GoogleSearchQueue).one()
+
+    assert run.status == TaskScheduleRun.STATUS_COMPLETED
+    assert run.stop_reason == TaskScheduleRun.STOP_REASON_SEARCH_QUEUED
+    assert queue_item.status == GoogleSearchQueue.STATUS_QUEUED
+    assert queue_item.schedule_id == schedule_id
+    assert queue_item.saved_search_id == saved_search_id
+    assert queue_item.search_params == json.dumps({"lr": "lang_ko"})

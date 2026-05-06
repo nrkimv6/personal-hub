@@ -36,7 +36,9 @@ class WorkerContext:
 class ClaimedRun:
     run: TaskScheduleRun
     task_name: str
+    schedule_id: int = 0
     config_snapshot_patch: dict | None = None
+    target_config_snapshot: dict | None = None
 
 
 @dataclass
@@ -95,6 +97,7 @@ def claim_pending_manual_run(
     db.commit()
     return ClaimedRun(
         run=manual_run,
+        schedule_id=schedule.id,
         task_name=f"{task_name_prefix}_{schedule.id}_run_{manual_run.id}",
     )
 
@@ -115,8 +118,10 @@ def start_claimed_run(
     )
     return ClaimedRun(
         run=run,
+        schedule_id=schedule.id,
         task_name=f"{task_name_prefix}_{schedule.id}_run_{run.id}",
         config_snapshot_patch=config_snapshot_patch,
+        target_config_snapshot=dict(config_snapshot or {}),
     )
 
 

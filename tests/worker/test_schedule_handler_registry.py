@@ -9,6 +9,7 @@ from app.models.task_schedule import TaskSchedule
 from app.modules.dev_runner.schedulers.archive_rotation_schedule import ArchiveRotationScheduler
 from app.modules.dev_runner.schedulers.auto_dev_runner_schedule import AutoDevRunnerScheduler
 from app.modules.dev_runner.schedulers.devguide_staleness_schedule import DevguideStalenessScheduler
+from app.modules.dev_runner.schedulers.plan_archive_insight_schedule import PlanArchiveInsightBatchScheduler
 from app.modules.dev_runner.schedulers.plan_archive_schedule import PlanArchiveScheduler
 from app.modules.dev_runner.schedulers.pytest_run_schedule import PytestRunScheduler
 from app.modules.dev_runner.schedulers.worktree_hygiene_schedule import WorktreeHygieneScheduler
@@ -37,6 +38,7 @@ def test_handler_registry_contains_all_expected_target_types():
         TaskSchedule.TARGET_TYPE_REPORT,
         TaskSchedule.TARGET_TYPE_PYTEST_RUN,
         TaskSchedule.TARGET_TYPE_PLAN_ARCHIVE_ANALYZE,
+        TaskSchedule.TARGET_TYPE_PLAN_ARCHIVE_INSIGHT_BATCH,
         TaskSchedule.TARGET_TYPE_DEVGUIDE_STALENESS,
         TaskSchedule.TARGET_TYPE_ARCHIVE_ROTATION,
         TaskSchedule.TARGET_TYPE_SCHEDULE_DATE_EXPIRE,
@@ -58,6 +60,7 @@ def test_handler_registry_uses_domain_scheduler_classes():
         ReportScheduler,
         PytestRunScheduler,
         PlanArchiveScheduler,
+        PlanArchiveInsightBatchScheduler,
         DevguideStalenessScheduler,
         ArchiveRotationScheduler,
         ScheduleDateExpireScheduler,

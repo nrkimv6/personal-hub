@@ -89,6 +89,7 @@ def test_claim_run_prefers_pending_manual_run_over_due_check():
 
     assert claimed is not None
     assert claimed.run is manual_run
+    assert claimed.schedule_id == 9
     assert claimed.task_name == "writing_source_9_run_21"
     assert manual_run.worker_id == "scheduled_worker"
     svc.start_run.assert_not_called()
@@ -117,7 +118,7 @@ async def test_schedule_claimed_run_skips_when_task_is_already_running():
     worker._is_task_running = MagicMock(return_value=True)
     handler = MagicMock(target_type="dummy")
     schedule = MagicMock(id=1)
-    claimed = ClaimedRun(run=MagicMock(id=2), task_name="dummy_1_run_2")
+    claimed = ClaimedRun(run=MagicMock(id=2), schedule_id=1, task_name="dummy_1_run_2")
 
     await worker._schedule_claimed_run(handler, schedule, claimed)
 
@@ -138,6 +139,7 @@ async def test_run_handler_completes_and_merges_config_snapshot():
     schedule = MagicMock(id=7)
     claimed = ClaimedRun(
         run=MagicMock(id=3),
+        schedule_id=7,
         task_name="dummy_7_run_3",
         config_snapshot_patch={"claimed": "yes"},
     )
@@ -168,6 +170,31 @@ async def test_run_handler_completes_and_merges_config_snapshot():
 
 
 @pytest.mark.asyncio
+async def test_run_handler_right_updates_schedule_by_claimed_schedule_id():
+    class DetachedSchedule:
+        @property
+        def id(self):
+            raise AssertionError("schedule.id must not be read after dispatch")
+
+    worker = ScheduledCrawlWorker(browser_manager=MagicMock(is_initialized=False))
+    handler = MagicMock()
+    handler.target_type = "dummy"
+    handler.execute.return_value = HandlerRunOutcome()
+    claimed = ClaimedRun(run=MagicMock(id=3), schedule_id=99, task_name="dummy_99_run_3")
+
+    db = MagicMock()
+    svc = MagicMock()
+
+    with patch("app.worker.scheduled_worker.SessionLocal", return_value=db), patch(
+        "app.worker.scheduled_worker.TaskScheduleService",
+        return_value=svc,
+    ):
+        await worker._run_handler(handler, DetachedSchedule(), claimed)
+
+    svc.update_schedule_after_run.assert_called_once_with(99)
+
+
+@pytest.mark.asyncio
 async def test_run_handler_records_fail_run_when_execute_raises():
     worker = ScheduledCrawlWorker(browser_manager=MagicMock(is_initialized=False))
     worker._log_worker_error = MagicMock()
@@ -175,7 +202,7 @@ async def test_run_handler_records_fail_run_when_execute_raises():
     handler.target_type = "dummy"
     handler.execute.side_effect = RuntimeError("boom")
     schedule = MagicMock(id=7)
-    claimed = ClaimedRun(run=MagicMock(id=3), task_name="dummy_7_run_3")
+    claimed = ClaimedRun(run=MagicMock(id=3), schedule_id=7, task_name="dummy_7_run_3")
 
     db = MagicMock()
     svc = MagicMock()

@@ -200,7 +200,7 @@ class ScheduledCrawlWorker(CrawlWorkerBase):
                         )
                         db.commit()
 
-                schedule_service.update_schedule_after_run(schedule.id)
+                schedule_service.update_schedule_after_run(claimed.schedule_id)
             finally:
                 db.close()
         except Exception as exc:

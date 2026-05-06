@@ -134,7 +134,12 @@ async def test_google_search_scheduler_pushes_to_real_redis_and_preserves_schedu
     ):
         outcome = await scheduler.execute(
             schedule,
-            ClaimedRun(run=Mock(id=101), task_name=f"google_schedule_{schedule_id}_run_101"),
+            ClaimedRun(
+                run=Mock(id=101),
+                task_name=f"google_schedule_{schedule_id}_run_101",
+                schedule_id=schedule_id,
+                target_config_snapshot={"saved_search_id": saved_search_id},
+            ),
             ctx,
         )
 

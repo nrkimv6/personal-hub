@@ -72,7 +72,7 @@ class GoogleSearchScheduler(ScheduleHandler):
         claimed: ClaimedRun,
         ctx: WorkerContext,
     ) -> HandlerRunOutcome:
-        config = schedule.get_target_config()
+        config = claimed.target_config_snapshot or {}
         saved_search_id = config.get("saved_search_id")
         if not saved_search_id:
             raise RuntimeError("saved_search_id 없음")
@@ -100,7 +100,7 @@ class GoogleSearchScheduler(ScheduleHandler):
                 service_account_id=saved_search.service_account_id,
                 search_params=saved_search.search_params,
                 saved_search_id=saved_search_id,
-                schedule_id=schedule.id,
+                schedule_id=claimed.schedule_id,
                 status=GoogleSearchQueue.STATUS_QUEUED,
             )
             db.add(queue_item)
@@ -113,7 +113,7 @@ class GoogleSearchScheduler(ScheduleHandler):
                 ctx.worker_name,
                 search_id,
                 saved_search.query,
-                schedule.id,
+                claimed.schedule_id,
                 "redis" if status == GoogleSearchQueue.STATUS_QUEUED else "sqlite",
                 status,
             )
