@@ -6,6 +6,7 @@ The archive-schedule and archive-candidates payloads below are mock payload only
 not live T5 endpoint evidence.
 """
 import json
+import os
 
 import pytest
 from playwright.sync_api import Page, expect
@@ -13,7 +14,7 @@ from playwright.sync_api import Page, expect
 
 pytestmark = [pytest.mark.e2e, pytest.mark.integration]
 
-ADMIN_URL = "http://localhost:6101"
+ADMIN_URL = os.environ.get("E2E_FRONTEND_URL", "http://localhost:6101")
 
 
 def _json_response(route, payload):

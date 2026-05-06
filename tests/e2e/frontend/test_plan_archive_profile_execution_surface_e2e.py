@@ -273,7 +273,7 @@ def test_archive_profile_execution_controls_and_capacity_state(
     page.get_by_role("button", name="0개 선택됨").click()
     page.get_by_label("claude/work/claude-opus-4-5 model").select_option("claude-sonnet-4-5")
     page.get_by_role("button", name="claude/work/claude-sonnet-4-5").click()
-    expect(page.get_by_title("claude/work/claude-sonnet-4-5")).to_be_visible()
+    expect(page.locator('button[title="claude/work/claude-sonnet-4-5"]').first).to_be_visible()
     expect(page.get_by_role("button", name="Backlog 실행")).to_be_enabled()
     expect(page.get_by_text("quota 1")).to_be_visible()
 
