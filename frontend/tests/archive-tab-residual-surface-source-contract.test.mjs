@@ -1,23 +1,20 @@
 /**
  * Phase T1: ArchiveTab 잔류 surface source-contract
  *
- * ArchiveTab이 candidate/execution/queue/result modal을 import하지 않고
- * ArchiveRetrievalPanel, ArchiveSyncPanel, ArchiveRecordDetailPanel과
- * planArchiveResidualState만 import하는지 검증한다.
+ * ArchiveTab이 candidate/execution/queue/result/retrieval surface를 import하지 않고
+ * ArchiveSyncPanel, ArchiveRecordDetailPanel만 import하는지 검증한다.
  *
- * 또한 redirect banner와 placeholder 안내가 존재하는지 확인한다.
+ * 또한 plan-archive redirect banner/placeholder 안내가 남지 않는지 확인한다.
  */
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import test from 'node:test';
 
 const archiveTabPath = 'src/routes/plans/ArchiveTab.svelte';
-const retrievalPanelPath = 'src/routes/plans/archive-tab/ArchiveRetrievalPanel.svelte';
 const detailPanelPath = 'src/routes/plans/archive-tab/ArchiveRecordDetailPanel.svelte';
 const syncPanelPath = 'src/routes/plans/archive-tab/ArchiveSyncPanel.svelte';
 
 const archiveTabSource = readFileSync(archiveTabPath, 'utf8');
-const retrievalPanelSource = readFileSync(retrievalPanelPath, 'utf8');
 const detailPanelSource = readFileSync(detailPanelPath, 'utf8');
 const syncPanelSource = readFileSync(syncPanelPath, 'utf8');
 
@@ -42,10 +39,10 @@ function formatSvelteCompileError(error) {
 
 // ── 1. ArchiveTab import 계약 ─────────────────────────────────────────────────
 
-test('ArchiveTab imports ArchiveRetrievalPanel', () => {
+test('ArchiveTab does not import ArchiveRetrievalPanel', () => {
 	assert.ok(
-		archiveTabSource.includes('./archive-tab/ArchiveRetrievalPanel.svelte'),
-		`${archiveTabPath}: must import ArchiveRetrievalPanel`,
+		!archiveTabSource.includes('./archive-tab/ArchiveRetrievalPanel.svelte'),
+		`${archiveTabPath}: must NOT import ArchiveRetrievalPanel`,
 	);
 });
 
@@ -63,10 +60,10 @@ test('ArchiveTab imports ArchiveSyncPanel', () => {
 	);
 });
 
-test('ArchiveTab imports planArchiveResidualState', () => {
+test('ArchiveTab does not import planArchiveResidualState', () => {
 	assert.ok(
-		archiveTabSource.includes('./archive-tab/planArchiveResidualState.svelte'),
-		`${archiveTabPath}: must import planArchiveResidualState`,
+		!archiveTabSource.includes('./archive-tab/planArchiveResidualState.svelte'),
+		`${archiveTabPath}: must NOT import planArchiveResidualState`,
 	);
 });
 
@@ -87,43 +84,27 @@ test('ArchiveTab does not import archive candidates or execution queue component
 	);
 });
 
-// ── 2. redirect banner / placeholder 안내 ──────────────────────────────────────
+// ── 2. redirect banner / placeholder 안내 제거 ────────────────────────────────
 
-test('ArchiveTab contains /scheduler/plan-archive redirect banner', () => {
+test('ArchiveTab does not contain /scheduler/plan-archive redirect banner', () => {
 	assert.ok(
-		archiveTabSource.includes('/scheduler/plan-archive'),
-		`${archiveTabPath}: must contain reference to /scheduler/plan-archive for redirect banner`,
+		!archiveTabSource.includes('/scheduler/plan-archive'),
+		`${archiveTabPath}: must NOT contain /scheduler/plan-archive redirect banner`,
 	);
 });
 
-test('ArchiveTab contains placeholder announcement text', () => {
-	const hasPlaceholder =
+test('ArchiveTab does not contain placeholder announcement text', () => {
+	const found =
 		archiveTabSource.includes('archive 파일/DB 관리') ||
 		archiveTabSource.includes('이 화면은') ||
 		archiveTabSource.includes('schedule 운영');
 	assert.ok(
-		hasPlaceholder,
-		`${archiveTabPath}: must contain placeholder announcement about archive management purpose`,
+		!found,
+		`${archiveTabPath}: must NOT contain placeholder announcement about moved plan-archive operations`,
 	);
 });
 
 // ── 3. 잔류 컴포넌트 Svelte parse ──────────────────────────────────────────────
-
-test(
-	'ArchiveRetrievalPanel Svelte markup parses cleanly',
-	{
-		skip: svelteCompile
-			? false
-			: `svelte/compiler unavailable: ${svelteCompilerLoadError?.code ?? svelteCompilerLoadError?.message ?? 'unknown'}`,
-	},
-	() => {
-		try {
-			svelteCompile(retrievalPanelSource, { filename: retrievalPanelPath, generate: false });
-		} catch (error) {
-			assert.fail(`${retrievalPanelPath}: must parse cleanly.\n${formatSvelteCompileError(error)}`);
-		}
-	},
-);
 
 test(
 	'ArchiveRecordDetailPanel Svelte markup parses cleanly',
@@ -158,30 +139,6 @@ test(
 );
 
 // ── 4. 잔류 surface affordance 존재 확인 ─────────────────────────────────────
-
-test('ArchiveRetrievalPanel contains retrieval/search affordance', () => {
-	const has =
-		retrievalPanelSource.includes('검색') ||
-		retrievalPanelSource.includes('retrieval') ||
-		retrievalPanelSource.includes('runRetrievalSearch');
-	assert.ok(has, `${retrievalPanelPath}: must contain retrieval search affordance`);
-});
-
-test('ArchiveRetrievalPanel contains metrics affordance', () => {
-	const has =
-		retrievalPanelSource.includes('metrics') ||
-		retrievalPanelSource.includes('메트릭') ||
-		retrievalPanelSource.includes('loadRetrievalMetrics');
-	assert.ok(has, `${retrievalPanelPath}: must contain metrics affordance`);
-});
-
-test('ArchiveRetrievalPanel contains archive index affordance', () => {
-	const has =
-		retrievalPanelSource.includes('index') ||
-		retrievalPanelSource.includes('인덱스') ||
-		retrievalPanelSource.includes('runArchiveIndex');
-	assert.ok(has, `${retrievalPanelPath}: must contain archive index affordance`);
-});
 
 test('ArchiveRecordDetailPanel does not contain manual reanalyze affordance', () => {
 	const forbidden = ['재분석', 'reanalyz', 'requestAnalysis', 'analyzeRecord'];
@@ -227,9 +184,9 @@ test('ArchiveSyncPanel contains 파일/DB 동기화 affordance', () => {
 	assert.ok(has, `${syncPanelPath}: must contain 파일/DB 동기화 affordance`);
 });
 
-test('ArchiveSyncPanel links to /scheduler/plan-archive for execution history', () => {
+test('ArchiveSyncPanel does not link to /scheduler/plan-archive', () => {
 	assert.ok(
-		syncPanelSource.includes('/scheduler/plan-archive'),
-		`${syncPanelPath}: must link to /scheduler/plan-archive for LLM queue execution history`,
+		!syncPanelSource.includes('/scheduler/plan-archive'),
+		`${syncPanelPath}: must NOT link to /scheduler/plan-archive`,
 	);
 });

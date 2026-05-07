@@ -1,6 +1,5 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { page } from '$app/stores';
   import {
     planRecordsApi,
     archiveApi,
@@ -12,8 +11,6 @@
     type PlanRecordRelation
   } from '$lib/api/plan-records';
   import { devRunnerPlanApi } from '$lib/api/dev-runner';
-  import { createArchiveResidualState } from './archive-tab/planArchiveResidualState.svelte';
-  import ArchiveRetrievalPanel from './archive-tab/ArchiveRetrievalPanel.svelte';
   import ArchiveRecordDetailPanel from './archive-tab/ArchiveRecordDetailPanel.svelte';
   import ArchiveSyncPanel from './archive-tab/ArchiveSyncPanel.svelte';
 
@@ -24,8 +21,6 @@
     focusPath?: string | null;
     onFocusConsumed?: (() => void) | null;
   } = $props();
-
-  const residual = createArchiveResidualState();
 
   // ── 목록 상태 ──────────────────────────────────────────────
   let records: PlanRecord[] = $state([]);
@@ -330,24 +325,6 @@
 <div class="flex gap-4 h-full">
   <!-- 목록 패널 -->
   <div class="flex-1 flex flex-col min-w-0">
-    <!-- legacy runner query 감지 banner (runner= 파라미터가 있는 경우에만 노출) -->
-    {#if $page.url.searchParams.has('runner')}
-      <div class="mb-2 rounded border border-orange-300 bg-orange-50 px-3 py-2 text-xs dark:border-orange-800 dark:bg-orange-950">
-        <span class="font-medium text-orange-800 dark:text-orange-200">이전 주소로 접근하셨습니다.</span>
-        <span class="text-orange-700 dark:text-orange-300"> schedule 운영·LLM 큐·후보 관리는 </span>
-        <a href="/scheduler/plan-archive" class="font-medium text-orange-800 underline hover:no-underline dark:text-orange-200">/scheduler/plan-archive</a>
-        <span class="text-orange-700 dark:text-orange-300">로 이동하세요. 이 화면은 자동 redirect되지 않습니다.</span>
-      </div>
-    {/if}
-
-    <!-- schedule 운영 안내 placeholder (query와 무관하게 항상 노출) -->
-    <div class="mb-3 rounded border border-amber-200 bg-amber-50 px-3 py-2 text-xs dark:border-amber-800 dark:bg-amber-950">
-      <span class="font-medium text-amber-800 dark:text-amber-200">이 화면은 archive 파일/DB 관리 전용입니다.</span>
-      <span class="text-amber-700 dark:text-amber-300"> schedule 운영(LLM 요청 큐·실행 제어·후보 관리)은 </span>
-      <a href="/scheduler/plan-archive" class="font-medium text-amber-800 underline hover:no-underline dark:text-amber-200">/scheduler/plan-archive</a>
-      <span class="text-amber-700 dark:text-amber-300">로 이동했습니다.</span>
-    </div>
-
     <!-- 헤더 -->
     <div class="flex items-center justify-between mb-3 gap-2 flex-wrap">
       <div class="flex items-center gap-2">
@@ -390,12 +367,6 @@
       {syncResult}
       onImport={runImportArchived}
       onSync={runSync}
-    />
-
-    <ArchiveRetrievalPanel
-      state={residual}
-      {selectedRecord}
-      {showToast}
     />
 
     <!-- 벌크 액션 바 -->
