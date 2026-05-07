@@ -8,7 +8,6 @@ not live T5 endpoint evidence.
 import json
 import os
 import re
-import time
 
 import pytest
 from playwright.sync_api import Page, expect
@@ -21,15 +20,6 @@ ADMIN_URL = os.environ.get("E2E_FRONTEND_URL", "http://localhost:6101")
 
 def _json_response(route, payload):
     route.fulfill(status=200, content_type="application/json", body=json.dumps(payload))
-
-
-def _wait_until(predicate, *, timeout: float = 5.0, interval: float = 0.05) -> None:
-    deadline = time.monotonic() + timeout
-    while time.monotonic() < deadline:
-        if predicate():
-            return
-        time.sleep(interval)
-    assert predicate()
 
 
 def _dashboard_payload(schedule=None):
@@ -514,7 +504,14 @@ def test_plan_archive_candidate_queue_posts_selected_targets_and_refreshes(page:
 
     page.get_by_role("button", name=re.compile(r"2개 선택됨")).click()
     expect(page.locator("#plan-archive-target-selector-popup")).to_have_count(0)
-    page.get_by_role("button", name="분석 큐").first.click()
+    with page.expect_response(
+        lambda res: (
+            res.request.method == "GET"
+            and "/api/v1/plans/records/archive-candidates" in res.url
+            and "/queue" not in res.url
+        )
+    ):
+        page.get_by_role("button", name="분석 큐").first.click()
 
     assert len(captured_payloads) == 2
     bulk_targets = captured_payloads[0]["selected_targets"]
@@ -526,7 +523,6 @@ def test_plan_archive_candidate_queue_posts_selected_targets_and_refreshes(page:
     ]
     assert captured_payloads[0]["candidate_keys"] == ["candidate-000"]
     assert captured_payloads[1]["candidate_keys"] == ["candidate-001"]
-    _wait_until(lambda: len(candidate_list_calls) >= 3)
     assert len(candidate_list_calls) >= 3
 
 
