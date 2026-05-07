@@ -22,7 +22,6 @@ interface LogStreamOptions {
 export class LogStream {
 	connected = $state<'connected' | 'disconnected'>('disconnected');
 	sseStarted = $state(false);
-	reconnectCount = $state(0);
 	consecutiveErrors = $state(0);
 	redisAvailable = $state(false);
 
@@ -35,6 +34,10 @@ export class LogStream {
 			this.connected = 'connected';
 			this.sseStarted = true;
 		}
+	}
+
+	get reconnectCount(): number {
+		return this.reconnectBackoff.attempts;
 	}
 
 	async start(): Promise<void> {
@@ -55,7 +58,6 @@ export class LogStream {
 
 	async reconnect(): Promise<void> {
 		this.reconnectBackoff.reset();
-		this.reconnectCount = 0;
 		if (this.options.shouldLoadRecentBeforeReconnect()) {
 			await this.options.loadRecent();
 		}
@@ -107,7 +109,6 @@ export class LogStream {
 			this.connected = 'connected';
 			this.sseStarted = true;
 			this.reconnectBackoff.reset();
-			this.reconnectCount = 0;
 			this.consecutiveErrors = 0;
 		};
 		this.eventSource.onmessage = (event) => {
@@ -143,9 +144,8 @@ export class LogStream {
 			this.close();
 
 			this.connected = 'disconnected';
-			this.reconnectCount = this.reconnectBackoff.attempts + 1;
 
-			if (!this.redisAvailable && this.reconnectCount > 5) {
+			if (!this.redisAvailable && this.reconnectBackoff.attempts >= 5) {
 				return;
 			}
 

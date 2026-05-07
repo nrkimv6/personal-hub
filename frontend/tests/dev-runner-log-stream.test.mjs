@@ -15,7 +15,8 @@ test("LogStream owns SSE connection state and EventSource lifecycle", () => {
   assert.match(source, /export class LogStream/);
   assert.match(source, /connected = \$state<'connected' \| 'disconnected'>/);
   assert.match(source, /sseStarted = \$state\(false\)/);
-  assert.match(source, /reconnectCount = \$state\(0\)/);
+  assert.match(source, /get reconnectCount\(\): number/);
+  assert.doesNotMatch(source, /reconnectCount = \$state\(0\)/);
   assert.match(source, /redisAvailable = \$state\(false\)/);
   assert.match(source, /private eventSource: EventSource \| null = null/);
   assert.match(source, /devRunnerLogApi\.connectMergeStream\(runnerId\)/);
