@@ -33,6 +33,17 @@ ALLOWED_WRITE_PATTERNS_FOR_ANONYMOUS = [
 # 항상 허용하는 메서드 (읽기 전용)
 ALWAYS_ALLOWED_METHODS = {"GET", "HEAD", "OPTIONS"}
 
+PUBLIC_SENSITIVE_READ_PREFIXES = (
+    "/api/v1/worker",
+    "/api/v1/llm/worker",
+    "/api/v1/system/process",
+    "/api/v1/system/orphan-cleanup",
+    "/api/v1/system/services",
+    "/api/v1/system/memory",
+    "/api/v1/system/death-log",
+    "/api/v1/system/boot-history",
+)
+
 
 class ProductionModeMiddleware(BaseHTTPMiddleware):
     """
@@ -50,6 +61,16 @@ class ProductionModeMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
         # 읽기 전용 메서드는 항상 허용
         if request.method in ALWAYS_ALLOWED_METHODS:
+            if self._is_public_sensitive_read(request):
+                return JSONResponse(
+                    status_code=403,
+                    content={
+                        "detail": "관리자 로그인이 필요합니다.",
+                        "mode": get_runtime_app_mode(settings_app_mode=settings.APP_MODE),
+                        "blocked_action": f"{request.method} {request.url.path}",
+                        "hint": "관리자로 로그인하세요.",
+                    },
+                )
             return await call_next(request)
 
         # 관리자 여부 확인 (localhost 포함)
@@ -125,3 +146,12 @@ class ProductionModeMiddleware(BaseHTTPMiddleware):
             if re.match(pattern, path):
                 return True
         return False
+
+    def _is_public_sensitive_read(self, request: Request) -> bool:
+        """Public 외부 요청에서 worker/process 운영 정보를 읽지 못하게 한다."""
+        if get_runtime_app_mode(settings_app_mode=settings.APP_MODE) != "public":
+            return False
+        if self._is_admin(request):
+            return False
+        path = request.url.path
+        return any(path.startswith(prefix) for prefix in PUBLIC_SENSITIVE_READ_PREFIXES)
