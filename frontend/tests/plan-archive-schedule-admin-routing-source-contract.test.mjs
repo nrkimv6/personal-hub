@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs';
 import test from 'node:test';
 
 const viteConfigSource = readFileSync('frontend/vite.config.ts', 'utf8');
-const apiSource = readFileSync('frontend/src/lib/api/plan-records.ts', 'utf8');
+const apiSource = readFileSync('frontend/src/lib/api/plan-archive-schedule.ts', 'utf8');
 
 test('admin frontend mode falls back to admin API port 8001 when VITE_API_PORT is absent', () => {
 	assert.match(viteConfigSource, /frontendMode === 'admin'\s*\?\s*'8001'\s*:\s*'8000'/);

@@ -1,7 +1,6 @@
 """
 T1: admin-only mutation endpoint 권한 테스트.
-Phase 3B: archive-candidates/queue, archive-candidates/preview 는 admin 전용.
-public app(:8000) 에서 호출 시 404/405 응답 확인.
+Plan Archive mutation endpoints must stay out of the public app.
 """
 import os
 import subprocess
@@ -32,6 +31,9 @@ def _get_admin_app():
 @pytest.mark.parametrize("method,path,body", [
     ("POST", "/api/v1/plans/records/archive-candidates/queue", {"candidate_keys": [], "record_ids": []}),
     ("POST", "/api/v1/plans/records/archive-candidates/preview", None),
+    ("POST", "/api/v1/plans/records/archive-category-repair", {"apply": False, "limit": 1}),
+    ("POST", "/api/v1/plans/records/archive-schedule/pause", None),
+    ("POST", "/api/v1/plans/records/archive-schedule/resume", None),
 ])
 def test_public_app_does_not_expose_mutation_endpoints(method, path, body):
     """public app 에서 mutation endpoint 호출 시 404/405 반환."""
@@ -45,6 +47,22 @@ def test_public_app_does_not_expose_mutation_endpoints(method, path, body):
     assert resp.status_code in (404, 405), (
         f"public app 의 {path} 가 {resp.status_code} 을 반환함 — 404/405 기대"
     )
+
+
+@pytest.mark.parametrize("path", [
+    "/api/v1/plans/records/archive-candidates/queue",
+    "/api/v1/plans/records/archive-candidates/preview",
+    "/api/v1/plans/records/archive-category-repair",
+    "/api/v1/plans/records/archive-schedule/pause",
+    "/api/v1/plans/records/archive-schedule/resume",
+])
+def test_admin_app_registers_mutation_endpoints(path):
+    """admin app keeps mutation routes registered after route module split."""
+    admin_app = _get_admin_app()
+    assert any(
+        route.path == path and "POST" in getattr(route, "methods", set())
+        for route in admin_app.routes
+    ), f"admin app did not register {path}"
 
 
 def test_admin_app_exposes_queue_endpoint():

@@ -7,6 +7,7 @@ not live T5 endpoint evidence.
 """
 import json
 import os
+import re
 
 import pytest
 from playwright.sync_api import Page, expect
@@ -63,7 +64,15 @@ def _dashboard_payload(schedule=None):
     }
 
 
-def _install_plan_archive_routes(page: Page, *, schedule=Ellipsis, on_resume=None) -> None:
+def _install_plan_archive_routes(
+    page: Page,
+    *,
+    schedule=Ellipsis,
+    on_resume=None,
+    on_run_backlog=None,
+    on_queue_candidates=None,
+    on_candidates_list=None,
+) -> None:
     # T3 mock contract: this file validates isolated UI rendering with mocked API payloads.
     def handle(route):
         url = route.request.url
@@ -89,6 +98,29 @@ def _install_plan_archive_routes(page: Page, *, schedule=Ellipsis, on_resume=Non
             return
         if "/api/v1/plans/records/archive-schedule/pause" in url and route.request.method == "POST":
             _json_response(route, {"schedule_id": 1, "enabled": False, "action": "pause"})
+            return
+        if "/api/v1/plans/records/archive-executions/run" in url and route.request.method == "POST":
+            payload = json.loads(route.request.post_data or "{}")
+            if on_run_backlog:
+                on_run_backlog(payload)
+            _json_response(route, {"queued": 2, "skipped": 0, "updated": 0, "request_ids": [9001, 9002]})
+            return
+        if "/api/v1/plans/records/archive-candidates/queue" in url and route.request.method == "POST":
+            payload = json.loads(route.request.post_data or "{}")
+            if on_queue_candidates:
+                on_queue_candidates(payload)
+            _json_response(
+                route,
+                {
+                    "queued": 1,
+                    "imported": 0,
+                    "skipped": 0,
+                    "errors": 0,
+                    "job_ids": [3001],
+                    "request_ids": [9003],
+                    "details": [],
+                },
+            )
             return
         if "/api/v1/plans/records/archive-llm-requests" in url:
             _json_response(route, {"items": [], "total": 0, "page": 1, "page_size": 50, "filters": {}})
@@ -212,13 +244,16 @@ def _install_plan_archive_routes(page: Page, *, schedule=Ellipsis, on_resume=Non
                 },
             )
             return
-        if "/api/v1/plans/archive-candidates" in url:
+        if "/api/v1/plans/records/archive-candidates" in url:
+            if on_candidates_list:
+                on_candidates_list()
             candidates = [
                 {
+                    "candidate_key": f"candidate-{i:03d}",
                     "filename_hash": f"hash-{i:03d}",
                     "file_path": f"docs/archive/2026-05-0{i % 6 + 1}_plan-{i:03d}.md",
                     "title": f"Plan {i:03d}",
-                    "status": "file_only" if i % 3 == 0 else "needs_analysis",
+                    "state": "file_only" if i % 3 == 0 else "matched",
                     "total_bytes": 1024 * (i + 1),
                     "total_lines": 40 + i,
                     "archived_at": "2026-05-05T01:00:00",
@@ -369,6 +404,7 @@ def test_plan_archive_page_renders_candidates_section(page: Page) -> None:
 
 
 def test_plan_archive_page_codex_provider_visible(page: Page) -> None:
+    page.add_init_script("localStorage.removeItem('plan-archive:selected-targets')")
     _install_plan_archive_routes(page)
     page.goto(f"{ADMIN_URL}/scheduler/plan-archive")
     page.wait_for_timeout(800)
@@ -380,6 +416,107 @@ def test_plan_archive_page_codex_provider_visible(page: Page) -> None:
         or "gpt-5.5" in body_text.lower()
         or "provider" in body_text.lower()
     ), f"provider/model info not visible; body: {body_text[:300]}"
+
+
+def test_plan_archive_target_picker_group_actions_and_chip_remove(page: Page) -> None:
+    page.add_init_script("localStorage.removeItem('plan-archive:selected-targets')")
+    _install_plan_archive_routes(page)
+
+    page.goto(f"{ADMIN_URL}/scheduler/plan-archive")
+    picker_button = page.get_by_role("button", name=re.compile(r"0개 선택됨"))
+    popup_id = picker_button.get_attribute("aria-controls")
+    assert popup_id == "plan-archive-target-selector-popup"
+
+    picker_button.click()
+    popup = page.locator(f"#{popup_id}")
+    expect(popup).to_be_visible()
+    expect(popup.get_by_text("cc-codex")).to_have_count(0)
+
+    page.get_by_role("button", name="claude target 모두 선택").click()
+    expect(page.get_by_role("button", name=re.compile(r"3개 선택됨"))).to_be_visible()
+    expect(page.get_by_role("button", name="target 제거: claude/personal/claude-opus-4-6")).to_be_visible()
+    expect(page.get_by_role("button", name="target 제거: claude/work/claude-opus-4-6")).to_be_visible()
+    expect(page.get_by_role("button", name="target 제거: claude/claude-opus-4-6")).to_be_visible()
+
+    page.get_by_role("button", name="target 제거: claude/personal/claude-opus-4-6").click()
+    expect(page.get_by_role("button", name=re.compile(r"2개 선택됨"))).to_be_visible()
+    expect(page.get_by_role("button", name="target 제거: claude/personal/claude-opus-4-6")).to_have_count(0)
+    expect(page.get_by_role("button", name="target 제거: claude/work/claude-opus-4-6")).to_be_visible()
+
+    page.get_by_role("button", name="claude target 모두 선택").click()
+    expect(page.get_by_role("button", name=re.compile(r"3개 선택됨"))).to_be_visible()
+    page.get_by_role("button", name="claude target 모두 해제").click()
+    expect(page.get_by_role("button", name=re.compile(r"0개 선택됨"))).to_be_visible()
+
+    page.get_by_role("button", name=re.compile(r"0개 선택됨")).click()
+    expect(popup).to_have_count(0)
+
+
+def test_plan_archive_run_backlog_posts_selected_targets(page: Page) -> None:
+    captured_payloads = []
+    page.add_init_script("localStorage.removeItem('plan-archive:selected-targets')")
+    _install_plan_archive_routes(page, on_run_backlog=captured_payloads.append)
+
+    page.goto(f"{ADMIN_URL}/scheduler/plan-archive")
+    backlog_button = page.get_by_role("button", name="Backlog 실행")
+    expect(backlog_button).to_be_disabled()
+    assert backlog_button.get_attribute("title") == "분석 target을 1개 이상 선택하세요"
+
+    page.get_by_role("button", name=re.compile(r"0개 선택됨")).click()
+    page.get_by_role("button", name="codex target 모두 선택").click()
+    expect(page.get_by_role("button", name=re.compile(r"1개 선택됨"))).to_be_visible()
+    backlog_button.click()
+
+    expect(page.get_by_text("큐잉 2건")).to_be_visible()
+    assert len(captured_payloads) == 1
+    selected_targets = captured_payloads[0]["selected_targets"]
+    assert selected_targets == [
+        {
+            "provider": "codex",
+            "model": "gpt-5.5",
+            "profile_key": None,
+            "engine": None,
+            "profile_name": None,
+            "label": "codex/gpt-5.5",
+            "kind": "engine",
+        }
+    ]
+
+
+def test_plan_archive_candidate_queue_posts_selected_targets_and_refreshes(page: Page) -> None:
+    captured_payloads = []
+    candidate_list_calls = []
+    page.add_init_script("localStorage.removeItem('plan-archive:selected-targets')")
+    _install_plan_archive_routes(
+        page,
+        on_queue_candidates=captured_payloads.append,
+        on_candidates_list=lambda: candidate_list_calls.append(True),
+    )
+
+    page.goto(f"{ADMIN_URL}/scheduler/plan-archive")
+    page.get_by_role("button", name=re.compile(r"0개 선택됨")).click()
+    page.get_by_role("button", name="gemini target 모두 선택").click()
+    expect(page.get_by_role("button", name=re.compile(r"2개 선택됨"))).to_be_visible()
+
+    page.locator("tbody input[type='checkbox']").first.check()
+    page.get_by_role("button", name=re.compile(r"선택 큐잉 \(1건\)")).click()
+    expect(page.get_by_text("큐잉 1건")).to_be_visible()
+
+    page.get_by_role("button", name=re.compile(r"2개 선택됨")).click()
+    expect(page.locator("#plan-archive-target-selector-popup")).to_have_count(0)
+    page.get_by_role("button", name="분석 큐").first.click()
+
+    assert len(captured_payloads) == 2
+    bulk_targets = captured_payloads[0]["selected_targets"]
+    individual_targets = captured_payloads[1]["selected_targets"]
+    assert bulk_targets == individual_targets
+    assert [(t["provider"], t["model"], t["profile_key"]) for t in bulk_targets] == [
+        ("gemini", "gemini-3.1-pro", None),
+        ("gemini", "gemini-3.1-pro", "gemini:default"),
+    ]
+    assert captured_payloads[0]["candidate_keys"] == ["candidate-000"]
+    assert captured_payloads[1]["candidate_keys"] == ["candidate-001"]
+    assert len(candidate_list_calls) >= 3
 
 
 def test_plan_archive_page_schedule_enabled_state_visible(page: Page) -> None:
