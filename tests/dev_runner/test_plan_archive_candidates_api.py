@@ -228,9 +228,12 @@ def test_queue_archive_candidates_R_route_uses_same_selected_targets_for_candida
         lambda: [SimpleNamespace(path=str(archive_dir), path_type="archive")],
     )
     selected_target = PlanArchiveExecutionTarget(
-        provider="codex",
-        model="gpt-5.5",
-        dedupe_key="profileless:codex:gpt-5.5",
+        provider="claude",
+        model="claude-opus-4-6",
+        profile_key="claude:work",
+        engine="claude",
+        profile_name="work",
+        label="claude/work/claude-opus-4-6",
     )
     req = PlanArchiveCandidateQueueRequest(
         candidate_keys=[str(f)],
@@ -256,8 +259,12 @@ def test_queue_archive_candidates_R_route_uses_same_selected_targets_for_candida
     assert response.queued == 2
     assert len(captured_targets) == 2
     assert captured_targets[0] == captured_targets[1]
-    assert captured_targets[0][0]["provider"] == "codex"
-    assert captured_targets[0][0]["model"] == "gpt-5.5"
+    assert captured_targets[0][0]["provider"] == "claude"
+    assert captured_targets[0][0]["model"] == "claude-opus-4-6"
+    assert captured_targets[0][0]["profile_key"] == "claude:work"
+    assert captured_targets[0][0]["engine"] == "claude"
+    assert captured_targets[0][0]["profile_name"] == "work"
+    assert captured_targets[0][0]["label"] == "claude/work/claude-opus-4-6"
 
 
 # ── E: unregistered candidate key ────────────────────────────────────────────

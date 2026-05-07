@@ -84,8 +84,14 @@ def test_archivetab_placeholder_text_removed(page: Page) -> None:
     page.goto(f"{ADMIN_URL}/automation?tab=plans&subtab=archive")
     page.wait_for_timeout(800)
     body_text = _wait_for_body_text(page)
-    assert "archive 파일/DB 관리 전용" not in body_text
-    assert "schedule 운영" not in body_text
+    for forbidden in (
+        "archive 파일/DB 관리 전용",
+        "schedule 운영",
+        "LLM 분석 요청",
+        "Execution History",
+        "candidate queue",
+    ):
+        assert forbidden not in body_text
     assert "plan-archive" not in body_text.lower()
 
 
@@ -94,8 +100,9 @@ def test_archivetab_redirect_banner_removed_on_runner_query(page: Page) -> None:
     page.goto(f"{ADMIN_URL}/automation?tab=plans&subtab=archive&runner=plan-archive-schedule")
     page.wait_for_timeout(800)
     body_text = _wait_for_body_text(page)
-    assert "plan-archive" not in body_text.lower()
-    assert "scheduler" not in body_text.lower()
+    body_text_lower = body_text.lower()
+    for forbidden in ("plan-archive", "scheduler", "llm 분석 요청", "execution history", "candidate queue"):
+        assert forbidden not in body_text_lower
     assert "이동" not in body_text
 
 

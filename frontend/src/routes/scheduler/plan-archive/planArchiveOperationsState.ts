@@ -9,6 +9,7 @@ export interface SelectedTarget {
 	engine?: string | null;
 	profile_name?: string | null;
 	label?: string | null;
+	dedupe_key?: string | null;
 	kind?: 'profile' | 'engine';
 }
 
@@ -156,6 +157,7 @@ function normalizeTarget(raw: unknown): SelectedTarget | null {
 	const engine = r.engine === undefined ? undefined : (r.engine as string | null);
 	const profile_name = r.profile_name === undefined ? undefined : (r.profile_name as string | null);
 	const label = r.label === undefined ? undefined : (r.label as string | null);
+	const dedupe_key = r.dedupe_key === undefined ? undefined : (r.dedupe_key as string | null);
 	const kind = r.kind === 'profile' || r.kind === 'engine' ? (r.kind as 'profile' | 'engine') : undefined;
 	return {
 		provider,
@@ -164,6 +166,7 @@ function normalizeTarget(raw: unknown): SelectedTarget | null {
 		engine: engine ?? null,
 		profile_name: profile_name ?? null,
 		label: label ?? null,
+		dedupe_key: dedupe_key ?? null,
 		kind,
 	};
 }

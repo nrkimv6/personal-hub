@@ -31,6 +31,8 @@ const operationsStateSource = readFileSync(
 	'utf8'
 );
 const apiSource = readFileSync('frontend/src/lib/api/plan-records.ts', 'utf8');
+const scheduleApiSource = readFileSync('frontend/src/lib/api/plan-archive-schedule.ts', 'utf8');
+const requestApiSource = readFileSync('frontend/src/lib/api/plan-records-request.ts', 'utf8');
 
 // ─── anti-regression: "2000건 중 8건" — list tables must NOT use dashboard summary
 test('PlanArchiveQueueTable uses pagination endpoint, not dashboard summary', () => {
@@ -142,15 +144,16 @@ test('PlanArchiveTargetSelector delegates localStorage to loadSavedTargets/saveT
 
 // ─── API source-contract: all required wrappers exported
 test('plan-records.ts exports archiveScheduleApi with required wrappers', () => {
-	assert.match(apiSource, /getDashboard/);
-	assert.match(apiSource, /listLLMRequests/);
-	assert.match(apiSource, /getLLMRequestDetail/);
-	assert.match(apiSource, /listScheduleRuns/);
-	assert.match(apiSource, /listExecutionAttempts/);
-	assert.match(apiSource, /pause\b/);
-	assert.match(apiSource, /resume\b/);
-	assert.match(apiSource, /queueCandidates/);
-	assert.match(apiSource, /previewCandidate/);
-	assert.match(apiSource, /archiveScheduleApi/);
-	assert.match(apiSource, /class PlanRecordsRequestError extends Error/);
+	assert.match(apiSource, /export \{ archiveScheduleApi \} from '\.\/plan-archive-schedule'/);
+	assert.match(scheduleApiSource, /getDashboard/);
+	assert.match(scheduleApiSource, /listLLMRequests/);
+	assert.match(scheduleApiSource, /getLLMRequestDetail/);
+	assert.match(scheduleApiSource, /listScheduleRuns/);
+	assert.match(scheduleApiSource, /listExecutionAttempts/);
+	assert.match(scheduleApiSource, /pause\b/);
+	assert.match(scheduleApiSource, /resume\b/);
+	assert.match(scheduleApiSource, /queueCandidates/);
+	assert.match(scheduleApiSource, /previewCandidate/);
+	assert.match(scheduleApiSource, /archiveScheduleApi/);
+	assert.match(requestApiSource, /class PlanRecordsRequestError extends Error/);
 });
