@@ -167,6 +167,7 @@
 | ✅ | `fix_pg_sequences.py` | PG serial sequence 동기화 (2026-04-11 plan 결과) |
 | ✅ | `import_urls_bulk.py` | URL 대량 import |
 | ✅ | `seed_auto_dev_runner_schedule.py` | auto_dev_runner 스케줄 레코드 insert-if-missing seed (cron 0 2 * * *) |
+| ✅ | `seed_nightly_repo_sync_schedule.py` | nightly_repo_sync 스케줄 레코드 insert-if-missing seed (cron 0 3 * * *) |
 
 ---
 

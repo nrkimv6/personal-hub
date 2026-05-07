@@ -59,6 +59,7 @@ class TaskSchedule(Base):
     TARGET_TYPE_SCHEDULE_DATE_EXPIRE = "schedule_date_expire"  # 과거 날짜 모니터링 스케줄 매일 disable
     TARGET_TYPE_AUTO_DEV_RUNNER = "auto_dev_runner"  # 야간 자동 plan 진행 + 일일 보고서
     TARGET_TYPE_WORKTREE_HYGIENE = "worktree_hygiene"  # worktree/residue hygiene deterministic report
+    TARGET_TYPE_NIGHTLY_REPO_SYNC = "nightly_repo_sync"  # nightly main/plans deterministic sync + report
 
     SCHEDULE_TYPE_CRON = "cron"
     SCHEDULE_TYPE_INTERVAL = "interval"
