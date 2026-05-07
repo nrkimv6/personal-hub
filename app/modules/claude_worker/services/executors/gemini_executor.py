@@ -9,15 +9,37 @@ from app.modules.claude_worker.services.profile_env import build_cli_env
 
 QUOTA_PAUSE_DEFAULT_MS = 6 * 60 * 60 * 1000  # 6시간
 GEMINI_INSTALL_HINT = "npm install -g @google/gemini-cli"
+GEMINI_BINARY_CANDIDATES = ("gemini.cmd", "gemini.exe", "gemini")
 
 
 def _resolve_gemini_binary(env: dict | None = None) -> str | None:
     path = env.get("PATH") if isinstance(env, dict) else None
-    for binary_name in ("gemini.cmd", "gemini.exe", "gemini"):
+    for binary_name in GEMINI_BINARY_CANDIDATES:
         found = shutil.which(binary_name, path=path)
         if found:
             return found
     return None
+
+
+def _path_head(env: dict | None, limit: int = 3) -> str:
+    path = env.get("PATH") if isinstance(env, dict) else None
+    if not path:
+        return "<empty>"
+    parts = [part for part in path.split(";") if part]
+    return ";".join(parts[:limit]) or "<empty>"
+
+
+def _gemini_not_found_result(env: dict | None = None) -> dict:
+    searched = ", ".join(GEMINI_BINARY_CANDIDATES)
+    return {
+        "success": False,
+        "error": (
+            "Gemini CLI not found. "
+            f"Searched: {searched}. PATH head: {_path_head(env)}. "
+            f"Install with: {GEMINI_INSTALL_HINT}"
+        ),
+        "error_code": "GEMINI_CLI_NOT_FOUND",
+    }
 
 
 def _build_gemini_command(*, binary: str, model: str, image_path: str | None) -> list[str]:
@@ -83,11 +105,7 @@ class GeminiExecutor(LLMExecutorBase):
             image_path = (cli_options or {}).get("image_path")
             binary = _resolve_gemini_binary(env)
             if not binary:
-                return {
-                    "success": False,
-                    "error": f"Gemini CLI not found. Install with: {GEMINI_INSTALL_HINT}",
-                    "error_code": "GEMINI_CLI_NOT_FOUND",
-                }
+                return _gemini_not_found_result(env)
             command = _build_gemini_command(binary=binary, model=model, image_path=image_path)
             result = subprocess.run(
                 command,
@@ -127,7 +145,11 @@ class GeminiExecutor(LLMExecutorBase):
                         "quota_retry_ms": retry_ms,
                     }
 
-                return {"success": False, "error": f"Gemini CLI error: {error_details}"}
+                return {
+                    "success": False,
+                    "error": f"Gemini CLI error: {error_details}",
+                    "error_code": "GEMINI_CLI_ERROR",
+                }
 
             raw_response = result.stdout.strip()
 
@@ -147,10 +169,6 @@ class GeminiExecutor(LLMExecutorBase):
         except subprocess.TimeoutExpired:
             return {"success": False, "error": f"Timeout ({timeout}s)"}
         except FileNotFoundError:
-            return {
-                "success": False,
-                "error": f"Gemini CLI not found. Install with: {GEMINI_INSTALL_HINT}",
-                "error_code": "GEMINI_CLI_NOT_FOUND",
-            }
+            return _gemini_not_found_result(env if "env" in locals() else None)
         except Exception as e:
             return {"success": False, "error": str(e)}

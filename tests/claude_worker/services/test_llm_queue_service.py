@@ -91,6 +91,23 @@ class TestMarkStateTransitions:
         assert req.status == "failed"
         assert req.retry_count == initial + 1
 
+    def test_mark_failed_R_classifies_gemini_runtime_errors(self, db, svc):
+        """R: Gemini CLI readiness/auth 오류는 failure_category에 분리 저장된다."""
+        missing = svc.enqueue("ct", "gemini-missing", "prompt")
+        auth = svc.enqueue("ct", "gemini-auth", "prompt")
+        generic = svc.enqueue("ct", "gemini-error", "prompt")
+
+        svc.mark_failed(missing.id, "Gemini CLI not found. Searched: gemini.cmd")
+        svc.mark_failed(auth.id, "Gemini CLI authentication required: please log in")
+        svc.mark_failed(generic.id, "Gemini CLI error: bad arg")
+
+        db.refresh(missing)
+        db.refresh(auth)
+        db.refresh(generic)
+        assert missing.failure_category == "gemini_cli_not_found"
+        assert auth.failure_category == "gemini_auth_required"
+        assert generic.failure_category == "gemini_cli_error"
+
     def test_mark_failed_R_handles_null_retry_count(self, db, svc):
         """R: legacy retry_count NULL row도 failed 전이가 가능하다."""
         req = svc.enqueue("ct", "ci3-null-retry", "prompt")

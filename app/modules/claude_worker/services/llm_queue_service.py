@@ -20,6 +20,9 @@ QUEUE_PRIORITY = ["system", "utility"]
 
 # failure_category 분류 키워드 맵 (순서 중요: 먼저 매칭되는 것 사용)
 _FAILURE_CATEGORY_PATTERNS: list[tuple[str, list[str]]] = [
+    ("gemini_cli_not_found", ["gemini_cli_not_found", "gemini cli not found"]),
+    ("gemini_auth_required", ["gemini_auth_required", "gemini cli authentication required"]),
+    ("gemini_cli_error", ["gemini_cli_error", "gemini cli error"]),
     ("quota", ["quota", "rate_limit", "rate limit", "overloaded", "resource_exhausted", "too many requests"]),
     ("timeout", ["timeout", "timed out", "deadline exceeded", "read timeout"]),
     ("parse", ["parse", "invalid json", "json decode", "unexpected token", "malformed"]),

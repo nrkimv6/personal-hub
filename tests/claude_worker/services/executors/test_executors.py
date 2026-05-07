@@ -184,7 +184,22 @@ class TestClaudeExecutor:
 
         assert result["success"] is False
         assert "Gemini CLI not found" in result["error"]
+        assert "Searched: gemini.cmd, gemini.exe, gemini" in result["error"]
+        assert "PATH head:" in result["error"]
         assert result["error_code"] == "GEMINI_CLI_NOT_FOUND"
+
+    @patch("subprocess.run")
+    def test_gemini_executor_E_nonzero_sets_cli_error_code(self, mock_run):
+        """E: 일반 Gemini CLI 실패는 auth/not-found와 구분되는 error_code를 반환한다."""
+        from app.modules.claude_worker.services.executors.gemini_executor import GeminiExecutor
+
+        mock_run.return_value = MagicMock(returncode=2, stdout="", stderr="bad arg")
+        executor = GeminiExecutor()
+        result = executor.execute("prompt")
+
+        assert result["success"] is False
+        assert result["error"] == "Gemini CLI error: bad arg"
+        assert result["error_code"] == "GEMINI_CLI_ERROR"
 
 
 class TestParseJsonResponse:

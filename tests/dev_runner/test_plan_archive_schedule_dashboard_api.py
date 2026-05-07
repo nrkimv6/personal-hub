@@ -121,7 +121,7 @@ def _add_schedule(db, enabled=True):
 def _add_llm_request(db, *, status="completed", failure_category=None, record_id=None,
                      requested_at=None, processed_at=None, retry_count=0,
                      dedupe_key=None, provider="claude", model="claude-3",
-                     prompt="test prompt"):
+                     prompt="test prompt", error_message=None):
     from app.modules.claude_worker.models.llm_request import LLMRequest
     req = LLMRequest(
         caller_type="plan_archive_analyze",
@@ -130,6 +130,7 @@ def _add_llm_request(db, *, status="completed", failure_category=None, record_id
         provider=provider,
         model=model,
         prompt=prompt,
+        error_message=error_message,
         failure_category=failure_category,
         dedupe_key=dedupe_key,
         retry_count=retry_count,
@@ -215,6 +216,27 @@ def test_archive_llm_requests_R_paginates_and_returns_stored_failure_category(
     categories = [r.get("failure_category") for r in data["items"]]
     assert "timeout" in categories
     assert "quota" in categories
+
+
+def test_archive_llm_requests_R_returns_gemini_error_code(public_client, db):
+    """list/detail endpoint가 Gemini failure_category를 운영 error_code로 내려준다."""
+    req = _add_llm_request(
+        db,
+        status="failed",
+        provider="gemini",
+        model="gemini-3.1-pro",
+        failure_category="gemini_auth_required",
+        error_message="Gemini CLI authentication required: please log in",
+    )
+
+    list_resp = public_client.get("/api/v1/plans/records/archive-llm-requests?page=1&page_size=10")
+    assert list_resp.status_code == 200
+    row = next(item for item in list_resp.json()["items"] if item["id"] == req.id)
+    assert row["error_code"] == "GEMINI_AUTH_REQUIRED"
+
+    detail_resp = public_client.get(f"/api/v1/plans/records/archive-llm-requests/{req.id}")
+    assert detail_resp.status_code == 200
+    assert detail_resp.json()["error_code"] == "GEMINI_AUTH_REQUIRED"
 
 
 def test_archive_llm_requests_R_filters_by_status(public_client, db):

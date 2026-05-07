@@ -1289,6 +1289,7 @@ class ArchiveLLMRequestRow(BaseModel):
     candidate_key: Optional[str] = None
     source_schedule_run_id: Optional[int] = None
     failure_category: Optional[str] = None
+    error_code: Optional[str] = None
     dedupe_key: Optional[str] = None
     requested_at: Optional[str] = None
     processed_at: Optional[str] = None
