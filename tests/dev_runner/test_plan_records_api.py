@@ -21,6 +21,7 @@ def test_db_engine(tmp_path_factory):
     from sqlalchemy import create_engine, event
     from app.models.base import Base
     from app.models.plan_record import PlanEvent, PlanRecord
+    from app.models.task_schedule import TaskSchedule, TaskScheduleRun
     from app.models.tracking_item import TrackingItem, TrackingItemPlanLink
     from app.modules.claude_worker.models.llm_request import LLMRequest
     from app.modules.writing.models.writing_batch import WritingBatch
@@ -46,6 +47,8 @@ def test_db_engine(tmp_path_factory):
             TrackingItemPlanLink.__table__,
             WritingBatch.__table__,
             LLMRequest.__table__,
+            TaskSchedule.__table__,
+            TaskScheduleRun.__table__,
         ],
     )
     try:
@@ -103,6 +106,15 @@ class TestPlanRecordsApiDbBootstrap:
         assert "tracking_item_plan_links" in tables
         assert "writing_batches" in tables
         assert "llm_requests" in tables
+        assert "task_schedules" in tables
+        assert "task_schedule_runs" in tables
+
+    def test_plan_records_bootstrap_B_keeps_retrieval_readiness_tables_missing(self, test_db_engine):
+        from sqlalchemy import inspect
+
+        tables = set(inspect(test_db_engine).get_table_names())
+
+        assert "plan_record_file_refs" not in tables
 
     def test_plan_records_bootstrap_right_supports_event_fk(self, test_db_session):
         from app.models.plan_record import PlanEvent, PlanRecord
