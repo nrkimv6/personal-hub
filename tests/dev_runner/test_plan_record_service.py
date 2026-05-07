@@ -22,13 +22,21 @@ from app.modules.dev_runner.services.plan_record_service import (
 
 
 def _create_plan_tables(eng):
-    """PlanRecord, PlanEvent 테이블만 생성 (전체 Base 사용 불가 — FK 해결 문제)"""
+    """PlanRecordService가 직접 읽고 쓰는 선택 테이블만 생성한다."""
     PlanRecord.__table__.create(bind=eng, checkfirst=True)
     PlanEvent.__table__.create(bind=eng, checkfirst=True)
     PlanRecordRelation.__table__.create(bind=eng, checkfirst=True)
     TaskSchedule.__table__.create(bind=eng, checkfirst=True)
     TaskScheduleRun.__table__.create(bind=eng, checkfirst=True)
     LLMRequest.__table__.create(bind=eng, checkfirst=True)
+
+
+def _clear_plan_archive_health_rows(session):
+    """Remove committed archive-health rows from the module-scoped SQLite engine."""
+    for model in (LLMRequest, TaskScheduleRun, TaskSchedule, PlanEvent, PlanRecordRelation, PlanRecord):
+        session.query(model).delete(synchronize_session=False)
+    session.commit()
+    session.expire_all()
 
 
 # ========== Fixtures ==========
@@ -545,6 +553,12 @@ class TestTempPytestPath:
 
 
 class TestPlanArchiveHealth:
+    @pytest.fixture(autouse=True)
+    def _isolate_health_rows(self, db):
+        _clear_plan_archive_health_rows(db)
+        yield
+        _clear_plan_archive_health_rows(db)
+
     def test_get_plan_archive_health_right_counts_real_and_temp_records(self, svc, db):
         """R: health는 real/temp archive와 active/failed request를 분리 집계한다."""
         real_processed = svc.ingest_single(
@@ -601,6 +615,37 @@ class TestPlanArchiveHealth:
         assert health["latest_failed_request"]["error_message"] == "boom"
         assert health["plan_archive_schedule"]["enabled"] is False
         assert health["plan_archive_schedule"]["last_success"] == "2026-05-04T02:11:00"
+
+    def test_get_plan_archive_health_B_ignores_preexisting_non_plan_archive_requests(self, svc, db):
+        """B: 다른 caller_type 또는 soft-deleted request는 health 큐 카운트에서 제외한다."""
+        db.add_all([
+            LLMRequest(caller_type="other", caller_id="outside", prompt="p", status="pending"),
+            LLMRequest(
+                caller_type="plan_archive_analyze",
+                caller_id="deleted",
+                prompt="p",
+                status="failed",
+                deleted_at=datetime(2026, 5, 5),
+            ),
+        ])
+        db.flush()
+
+        health = svc.get_plan_archive_health()
+
+        assert health["pending_or_processing_requests"] == 0
+        assert health["failed_requests"] == 0
+        assert health["latest_failed_request"] is None
+
+    def test_get_plan_archive_health_E_isolated_after_prior_llm_requests(self, svc, db):
+        """E: health class cleanup prevents committed requests from leaking into later tests."""
+        db.add(LLMRequest(caller_type="plan_archive_analyze", caller_id="previous", prompt="p", status="pending"))
+        db.commit()
+
+        _clear_plan_archive_health_rows(db)
+        health = svc.get_plan_archive_health()
+
+        assert health["pending_or_processing_requests"] == 0
+        assert health["failed_requests"] == 0
 
     def test_category_pollution_repair_dry_run_and_apply(self, svc, db):
         """R: filename/path-like category를 dry-run으로 찾고 apply=true에서 보정한다."""
