@@ -10,6 +10,10 @@ const logViewer = readFileSync(
   new URL("../src/lib/components/dev-runner/LogViewer.svelte", import.meta.url),
   "utf8",
 );
+const logStream = readFileSync(
+  new URL("../src/lib/dev-runner/log-stream.svelte.ts", import.meta.url),
+  "utf8",
+);
 
 test("createBackoff exposes exponential delay, cap, exhaustion, and reset contracts", () => {
   assert.match(source, /export function createBackoff/);
@@ -20,8 +24,8 @@ test("createBackoff exposes exponential delay, cap, exhaustion, and reset contra
 });
 
 test("LogViewer uses shared backoff for SSE and managed catch-up retry", () => {
-  assert.match(logViewer, /const sseReconnectBackoff = createBackoff\(\{ baseMs: 3000, maxMs: 60000 \}\)/);
+  assert.match(logStream, /private reconnectBackoff = createBackoff\(\{ baseMs: 3000, maxMs: 60000 \}\)/);
   assert.match(logViewer, /const recentRetryBackoff = createBackoff\(\{ baseMs: 600, maxMs: 60000, maxAttempts: 4 \}\)/);
-  assert.match(logViewer, /return sseReconnectBackoff\.nextDelay\(\) \?\? 60000/);
+  assert.match(logStream, /const delay = this\.reconnectBackoff\.nextDelay\(\) \?\? 60000/);
   assert.match(logViewer, /const delay = recentRetryBackoff\.nextDelay\(\)/);
 });

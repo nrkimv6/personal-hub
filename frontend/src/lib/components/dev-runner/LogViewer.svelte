@@ -10,6 +10,7 @@
 	} from '$lib/dev-runner/line-pipeline';
 	import { isStartOnlyRecentLog } from '$lib/dev-runner/log-recent-fallback.js';
 	import { getLogLineVariant } from '$lib/dev-runner/log-line-variant';
+	import { LogStream } from '$lib/dev-runner/log-stream.svelte';
 	import { FILTERABLE_TAGS, getTagStyle } from '$lib/dev-runner/log-tags';
 	import type { BatchPlanItem, ParsedLine, ResultSegment } from '$lib/dev-runner/log-types';
 	import { getExitReasonDisplay } from '$lib/utils/dev-runner-exit-reason';
@@ -50,14 +51,8 @@
 	let expandedNoiseIndices = $state<number[]>([]);
         let showNoiseIndicator = $state(false);
         let noiseTimer: ReturnType<typeof setTimeout> | null = null;
-	let connected = $state<'connected' | 'disconnected'>(mode === 'managed' ? 'connected' : 'disconnected');
 	let autoScroll = $state(true);
 	let logContainer: HTMLDivElement;
-	let eventSource: EventSource | null = null;
-	let sseStarted = $state(mode === 'managed');
-	let reconnectCount = $state(0);
-	let consecutiveErrors = $state(0);
-	let redisAvailable = $state(false);
 	let pendingStale = $state(false);
 	let exitBanner = $state<{ show: boolean; reason: string }>({ show: false, reason: 'completed' }); // runner 종료 배너
 	let failureBanner = $state<{ show: boolean; message: string } | null>(null); // FAILURE 태그 sticky 배너
@@ -75,6 +70,7 @@
 	let hiddenLogCount = $derived(lines.length - visibleLines.length);
 	let lineSequence = 0;
 	let loadedRecentLogIdentity = $state<string | null>(null);
+	let fromLine = 0;
 	let recentRetryTimer: ReturnType<typeof setTimeout> | null = null;
 	const recentRetryBackoff = createBackoff({ baseMs: 600, maxMs: 60000, maxAttempts: 4 });
 
@@ -82,7 +78,27 @@
 	let expandedLongLines = $state<Set<string>>(new Set());
 	let runMetaExpanded = $state(false);
 
-	const sseReconnectBackoff = createBackoff({ baseMs: 3000, maxMs: 60000 });
+	const stream = new LogStream({
+		runnerId: () => runnerId,
+		mode: () => mode,
+		running: () => running,
+		isMerging: () => isMerging,
+		getSinceLine: () => fromLine + lines.length,
+		shouldLoadRecentBeforeReconnect: () => lines.length <= 3,
+		loadRecent,
+		addLine,
+		clearNoiseTimer,
+		hasExitBanner: () => exitBanner.show,
+		clearExitBanner: () => {
+			if (exitBanner.show) exitBanner = { show: false, reason: 'completed' };
+		},
+		showCompleted: (reason) => {
+			exitBanner = { show: true, reason };
+		}
+	});
+	let connected = $derived(stream.connected);
+	let reconnectCount = $derived(stream.reconnectCount);
+	let redisAvailable = $derived(stream.redisAvailable);
 
 	const LINE_PATTERN = /^\s*\[?(\d{2}:\d{2}:\d{2})\]?\s*\[(\w+)\]\s*(.*)/;
 	const DIAG_PATTERN = /^\[(\w+)\]\s*(.*)/;
@@ -377,6 +393,12 @@
 		recentRetryTimer = null;
 	}
 
+	function clearNoiseTimer() {
+		if (!noiseTimer) return;
+		clearTimeout(noiseTimer);
+		noiseTimer = null;
+	}
+
 	function hasLoadedLogContent(): boolean {
 		return lines.some((line) => !HEADER_ONLY_TAGS.has(line.tag));
 	}
@@ -453,112 +475,8 @@
 		}
 	}
 
-	function getReconnectDelay() {
-		return sseReconnectBackoff.nextDelay() ?? 60000;
-	}
-
 	function manualReconnect() {
-		sseReconnectBackoff.reset();
-		reconnectCount = 0;
-		if (lines.length <= 3) {
-			void loadRecent();
-		}
-		connectSSE();
-	}
-
-	async function fetchStatus() {
-		try {
-			const statusRes = await fetch('/api/v1/dev-runner/status');
-			if (statusRes.ok) {
-				const data = await statusRes.json();
-				redisAvailable = data.redis_connected ?? false;
-			} else {
-				redisAvailable = false;
-			}
-		} catch {
-			// API 서버 오프라인
-		}
-	}
-
-	async function connectSSE() {
-		if (eventSource) eventSource.close();
-                        if (noiseTimer) clearTimeout(noiseTimer);
-
-		if (apiGate.state !== 'open') {
-			connected = 'disconnected';
-			redisAvailable = false;
-			return;
-		}
-
-		// SSE 연결 전 status API로 실행 상태 + Redis 상태 확인
-		await fetchStatus();
-
-		eventSource = isMerging
-			? devRunnerLogApi.connectMergeStream(runnerId)
-			: devRunnerLogApi.connectStream(runnerId, fromLine + lines.length);
-		eventSource.onopen = () => {
-			connected = 'connected';
-			sseStarted = true;
-			sseReconnectBackoff.reset();
-			reconnectCount = 0;
-			consecutiveErrors = 0;
-		};
-		eventSource.onmessage = (event) => {
-			// 메인 채널로 흘러오는 merge 종료 신호는 화면에 표시하지 않음
-			if (event.data === '__MERGE_COMPLETED__') return;
-			addLine(event.data, false);
-		};
-		// Redis 연결 끊김 이벤트 처리
-		eventSource.addEventListener('redis_disconnected', (event) => {
-			redisAvailable = false;
-			const data = (event as MessageEvent).data;
-			addLine(`[SSE] redis_disconnected: ${data || 'Redis not available'}`, false);
-		});
-		eventSource.addEventListener('fallback_mode', (event) => {
-			const data = (event as MessageEvent).data;
-			addLine(`[SSE] fallback_mode: ${data || 'file polling active'}`, false);
-		});
-		eventSource.addEventListener('stream_error', (event) => {
-			connected = 'disconnected';
-			const data = (event as MessageEvent).data;
-			addLine(`[SSE] stream_error: ${data || 'stream stopped'}`, false);
-		});
-		// Redis 재연결 시 connected 이벤트로 복구
-		eventSource.addEventListener('connected', () => {
-			redisAvailable = true;
-			// running 상태에서 connected 재수신 시 잘못된 exitBanner를 클리어한다.
-			// (skip-only 사이클이 FAILED sentinel을 publish한 경우 다음 사이클 시작 전 배너 제거)
-			// 진짜 종료 후 stale connected 이벤트로 배너가 사라지는 부작용 방지를 위해 running 조건 사용.
-			if (running && exitBanner.show) {
-				exitBanner = { show: false, reason: 'completed' };
-			}
-		});
-		// runner 종료 신호 — 배너 표시 후 재연결 중지
-		eventSource.addEventListener('completed', (event: MessageEvent) => {
-			exitBanner = { show: true, reason: (event as MessageEvent).data || 'completed' };
-			eventSource?.close();
-			eventSource = null;
-			connected = 'disconnected';
-		});
-		eventSource.onerror = async () => {
-			// completed 후 eventSource가 닫혀서 발생한 error면 재연결 중지
-			if (exitBanner.show) return;
-			consecutiveErrors++;
-			eventSource?.close();
-			eventSource = null;
-
-			connected = 'disconnected';
-			reconnectCount = sseReconnectBackoff.attempts + 1;
-
-			// Redis 미연결 시 재연결 시도 중단 (서버에서 pubsub 누수 가속 방지)
-			const maxRetries = 5;
-			if (!redisAvailable && reconnectCount > maxRetries) {
-				return; // 수동 새로고침 유도 (배너가 표시됨)
-			}
-
-			await fetchStatus();
-			setTimeout(connectSSE, getReconnectDelay());
-		};
+		void stream.reconnect();
 	}
 
 	async function loadFull() {
@@ -575,8 +493,6 @@
 			recordLogLoadError('full 로그 로드', error);
 		}
 	}
-
-	let fromLine = 0;
 
 	function extractLogIdentity(parsed: ParsedLine[]): string | null {
 		for (const line of parsed) {
@@ -703,21 +619,14 @@
 		await loadRecent();
 		// 초기 로드 후 스크롤을 맨 아래로 이동
 		requestAnimationFrame(() => scrollToBottom());
-		if (mode === 'standalone') {
-			connectSSE();
-		} else {
-			// managed 모드: SSE 미연결이므로 fetchStatus()로 redisAvailable 초기화
-			await fetchStatus();
+		await stream.start();
+		if (mode === 'managed') {
 			if (!hasLoadedLogContent()) scheduleManagedRecentRetry('managed mount');
 		}
 	});
 
 	onDestroy(() => {
-		if (mode === 'standalone' && eventSource) {
-			eventSource.close();
-                        if (noiseTimer) clearTimeout(noiseTimer);
-			eventSource = null;
-		}
+		stream.stop();
 		clearRecentRetryTimer();
 	});
 
@@ -747,8 +656,9 @@
 	$effect(() => {
 		const cur = isMerging;
 		if (mode === 'standalone' && prevMerging !== undefined && prevMerging !== cur) {
-			addLine(cur ? '[MERGE] 머지 로그 스트림으로 전환...' : '[MERGE] 러너 로그 스트림으로 복귀...', false);
-			connectSSE();
+			void stream.reconnectForModeSwitch(
+				cur ? '[MERGE] 머지 로그 스트림으로 전환...' : '[MERGE] 러너 로그 스트림으로 복귀...'
+			);
 		}
 		prevMerging = cur;
 	});
@@ -815,10 +725,7 @@
 	}
 
 	export function injectCompleted(reason: string = 'completed') {
-		exitBanner = { show: true, reason };
-		eventSource?.close();
-		eventSource = null;
-		connected = 'disconnected';
+		stream.complete(reason);
 	}
 
 	export function injectMergeCompleted(reason?: string, status?: string) {
