@@ -83,16 +83,17 @@ class TestClaudeExecutor:
 
         mock_run.return_value = MagicMock(returncode=0, stdout='{"ok": true}', stderr="")
         executor = GeminiExecutor()
-        executor.execute(
-            "한글 prompt",
-            model="gemini-2.5-pro",
-            cli_options={"image_path": "C:/tmp/image.png"},
-            parse_json=False,
-        )
+        with patch("shutil.which", return_value="/usr/bin/gemini"):
+            executor.execute(
+                "한글 prompt",
+                model="gemini-2.5-pro",
+                cli_options={"image_path": "C:/tmp/image.png"},
+                parse_json=False,
+            )
 
         mock_run.assert_called_once()
         args, kwargs = mock_run.call_args
-        assert args[0] == ["gemini", "--model", "gemini-2.5-pro", "@C:/tmp/image.png"]
+        assert args[0] == ["/usr/bin/gemini", "--model", "gemini-2.5-pro", "@C:/tmp/image.png"]
         assert kwargs["input"] == "한글 prompt"
         assert kwargs["encoding"] == "utf-8"
         assert kwargs["errors"] == "replace"
@@ -105,10 +106,31 @@ class TestClaudeExecutor:
 
         mock_run.return_value = MagicMock(returncode=0, stdout='{"ok": true}', stderr="")
         executor = GeminiExecutor()
-        executor.execute("prompt", cli_options={"image_path": "D:/img/sample.png"}, parse_json=False)
+        with patch("shutil.which", return_value="/usr/bin/gemini"):
+            executor.execute("prompt", cli_options={"image_path": "D:/img/sample.png"}, parse_json=False)
 
         args, _ = mock_run.call_args
-        assert args[0] == ["gemini", "@D:/img/sample.png"]
+        assert args[0] == ["/usr/bin/gemini", "@D:/img/sample.png"]
+
+    @patch("subprocess.run")
+    def test_gemini_executor_R_prefers_windows_cmd_shim(self, mock_run):
+        """R: Windows PATH에서는 extensionless shim 대신 gemini.cmd를 실행한다."""
+        from app.modules.claude_worker.services.executors.gemini_executor import GeminiExecutor
+
+        def fake_which(name, path=None):
+            if name == "gemini.cmd":
+                return "C:/Users/test/AppData/Roaming/npm/gemini.cmd"
+            if name == "gemini":
+                return "C:/Users/test/AppData/Roaming/npm/gemini"
+            return None
+
+        mock_run.return_value = MagicMock(returncode=0, stdout='{"ok": true}', stderr="")
+        executor = GeminiExecutor()
+        with patch("shutil.which", side_effect=fake_which):
+            executor.execute("prompt", parse_json=False)
+
+        args, _ = mock_run.call_args
+        assert args[0][0].endswith("gemini.cmd")
 
     @patch("subprocess.run")
     def test_gemini_executor_E_never_uses_type_pipe(self, mock_run):
@@ -157,10 +179,12 @@ class TestClaudeExecutor:
         from app.modules.claude_worker.services.executors.gemini_executor import GeminiExecutor
 
         executor = GeminiExecutor()
-        result = executor.execute("prompt")
+        with patch("shutil.which", return_value=None):
+            result = executor.execute("prompt")
 
         assert result["success"] is False
         assert "Gemini CLI not found" in result["error"]
+        assert result["error_code"] == "GEMINI_CLI_NOT_FOUND"
 
 
 class TestParseJsonResponse:

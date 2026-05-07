@@ -119,6 +119,30 @@ def test_run_archive_executions_R_queues_codex_gpt55_without_profile(db):
     assert not cli.get("candidate_profiles")
 
 
+def test_run_archive_executions_R_selected_target_does_not_inherit_legacy_profiles(db):
+    rec = _record(db)
+    db.commit()
+    fake = _fake_llm()
+    with patch(
+        "app.modules.dev_runner.services.plan_archive_execution_service.LLMService",
+        return_value=fake,
+    ):
+        result = PlanArchiveExecutionService(db).enqueue_record(
+            rec,
+            trigger_source="test",
+            selected_targets=[{"provider": "codex", "model": "gpt-5.5", "dedupe_key": "profileless:codex:gpt-5.5"}],
+            selected_profiles=[{"engine": "gemini", "profile_name": "default"}],
+        )
+
+    req = db.query(LLMRequest).filter_by(id=result["request_ids"][0]).first()
+    cli = json.loads(req.cli_options or "{}")
+    assert req.provider == "codex"
+    assert req.model == "gpt-5.5"
+    assert not cli.get("candidate_profiles")
+    assert cli["requested_target"]["provider"] == "codex"
+    assert cli["requested_target"]["engine"] is None
+
+
 # ── R: N requests per N targets per record ──────────────────────────────────
 
 def test_run_archive_executions_R_creates_N_requests_for_N_targets_per_record(db):

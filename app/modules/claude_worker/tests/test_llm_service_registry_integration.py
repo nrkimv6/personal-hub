@@ -268,7 +268,7 @@ class TestGeminiDispatchIntegration:
             result.stderr = ""
             return result
 
-        with patch("subprocess.run", side_effect=capture_run):
+        with patch("shutil.which", return_value="gemini.cmd"), patch("subprocess.run", side_effect=capture_run):
             result = service.execute_gemini(
                 "한글 prompt",
                 model="gemini-2.5-pro",
@@ -278,7 +278,7 @@ class TestGeminiDispatchIntegration:
 
         assert result["success"] is True
         assert result["result"] == {"result": {"ok": True}}
-        assert captured["args"] == ["gemini", "--model", "gemini-2.5-pro", "@C:/tmp/from-service.png"]
+        assert captured["args"] == ["gemini.cmd", "--model", "gemini-2.5-pro", "@C:/tmp/from-service.png"]
         assert captured["kwargs"]["input"] == "한글 prompt"
         assert captured["kwargs"]["encoding"] == "utf-8"
         assert captured["kwargs"]["shell"] is False
@@ -297,7 +297,7 @@ class TestGeminiDispatchIntegration:
             result.stderr = ""
             return result
 
-        with patch("subprocess.run", side_effect=capture_run):
+        with patch("shutil.which", return_value="gemini.cmd"), patch("subprocess.run", side_effect=capture_run):
             result = service.execute_llm(
                 "dispatcher prompt",
                 provider="gemini",
@@ -308,6 +308,6 @@ class TestGeminiDispatchIntegration:
 
         assert result["success"] is True
         assert result["raw_response"] == '{"ok": true}'
-        assert captured["args"] == ["gemini", "--model", "gemini-2.0-flash", "@D:/fixtures/dispatcher.png"]
+        assert captured["args"] == ["gemini.cmd", "--model", "gemini-2.0-flash", "@D:/fixtures/dispatcher.png"]
         assert captured["kwargs"]["input"] == "dispatcher prompt"
         assert captured["kwargs"]["shell"] is False

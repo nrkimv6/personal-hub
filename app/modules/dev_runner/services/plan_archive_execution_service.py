@@ -353,8 +353,6 @@ class PlanArchiveExecutionService:
             candidate_profiles: list = []
             if target.get("engine") and target.get("profile_name"):
                 candidate_profiles = [{"engine": target["engine"], "profile_name": target["profile_name"]}]
-            elif legacy_profiles:
-                candidate_profiles = legacy_profiles
             if candidate_profiles:
                 cli_options["candidate_profiles"] = candidate_profiles
             # Preserve selection identity for observability (UI may render this without parsing raw cli_options).

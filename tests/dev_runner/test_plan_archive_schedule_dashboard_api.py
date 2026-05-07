@@ -329,6 +329,49 @@ def test_archive_llm_request_detail_R_returns_requested_effective_actual_target_
     assert data["save_outcome_reason"] == "newer_completed_result_exists"
 
 
+def test_archive_llm_request_detail_R_profileless_actual_target_does_not_inherit_requested_profile(
+    public_client, db
+):
+    from app.modules.claude_worker.models.llm_request import LLMRequest
+
+    cli_options = {
+        "requested_target": {
+            "provider": "codex",
+            "model": "gpt-5.5",
+            "profile_key": None,
+            "engine": None,
+            "profile_name": None,
+            "label": "codex/gpt-5.5",
+        },
+        "candidate_profiles": [{"engine": "gemini", "profile_name": "default"}],
+        "target_label": "gemini/default/gpt-5.5",
+    }
+    req = LLMRequest(
+        caller_type="plan_archive_analyze",
+        caller_id="42",
+        status="failed",
+        provider="codex",
+        model="gpt-5.5",
+        requested_at=datetime.utcnow(),
+        processed_at=datetime.utcnow(),
+        prompt="test prompt",
+        cli_options=json.dumps(cli_options),
+    )
+    db.add(req)
+    db.commit()
+    db.refresh(req)
+
+    resp = public_client.get(f"/api/v1/plans/records/archive-llm-requests/{req.id}")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["requested_target"]["provider"] == "codex"
+    assert data["actual_target"]["provider"] == "codex"
+    assert data["actual_target"]["model"] == "gpt-5.5"
+    assert data["actual_target"]["engine"] is None
+    assert data["actual_target"]["profile_name"] is None
+    assert data["assigned_profile"] is None
+
+
 def test_archive_llm_request_detail_returns_404_for_unknown_id(public_client, db):
     """존재하지 않는 request_id에 대해 404를 반환한다."""
     resp = public_client.get("/api/v1/plans/records/archive-llm-requests/9999999")
