@@ -109,6 +109,11 @@ function mergeAssignedProfile(
 	assigned: ProviderModelProfileReadback | null | undefined
 ): ProviderModelProfileReadback | null {
 	if (!base && !assigned) return null;
+	const baseProvider = base?.provider?.trim();
+	const assignedEngine = assigned?.engine?.trim();
+	if (baseProvider && assignedEngine && baseProvider !== assignedEngine) {
+		return base ?? null;
+	}
 	return {
 		...(base ?? {}),
 		engine: base?.engine ?? assigned?.engine ?? null,

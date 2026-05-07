@@ -206,13 +206,13 @@ def test_gemini_executor_uses_direct_stdin_with_profile_env(isolate_profiles):
         m.stderr = ""
         return m
 
-    with patch("subprocess.run", side_effect=capture_run):
+    with patch("shutil.which", return_value="gemini.cmd"), patch("subprocess.run", side_effect=capture_run):
         from app.modules.claude_worker.services.executors.gemini_executor import GeminiExecutor
 
         executor = GeminiExecutor()
         executor.execute("한글 prompt", parse_json=False)
 
-    assert captured["args"] == ["gemini"]
+    assert captured["args"] == ["gemini.cmd"]
     assert captured["kwargs"]["input"] == "한글 prompt"
     assert captured["kwargs"]["encoding"] == "utf-8"
     assert captured["kwargs"]["shell"] is False
@@ -232,7 +232,7 @@ def test_gemini_executor_keeps_image_path_arg_with_profile_env(isolate_profiles)
         m.stderr = ""
         return m
 
-    with patch("subprocess.run", side_effect=capture_run):
+    with patch("shutil.which", return_value="gemini.cmd"), patch("subprocess.run", side_effect=capture_run):
         from app.modules.claude_worker.services.executors.gemini_executor import GeminiExecutor
 
         executor = GeminiExecutor()
@@ -242,5 +242,5 @@ def test_gemini_executor_keeps_image_path_arg_with_profile_env(isolate_profiles)
             cli_options={"image_path": "C:/tmp/profile-image.png"},
         )
 
-    assert captured["args"] == ["gemini", "@C:/tmp/profile-image.png"]
+    assert captured["args"] == ["gemini.cmd", "@C:/tmp/profile-image.png"]
     assert captured["kwargs"]["input"] == "prompt"

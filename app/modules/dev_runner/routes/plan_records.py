@@ -191,14 +191,15 @@ def _archive_target_fields(
         "label": effective.get("label") or target_label,
         "target_label": effective.get("label") or target_label,
     }
+    has_actual_assignment = bool(actual_engine or actual_profile_name)
     actual_target = {
         "provider": provider,
         "model": model,
-        "profile_key": requested_profile_key,
-        "engine": actual_engine or requested_engine,
-        "profile_name": actual_profile_name or requested_profile_name,
-        "label": target_label,
-        "target_label": target_label,
+        "profile_key": requested_profile_key if has_actual_assignment else None,
+        "engine": actual_engine,
+        "profile_name": actual_profile_name,
+        "label": target_label if has_actual_assignment else None,
+        "target_label": target_label if has_actual_assignment else None,
     }
     assigned_profile = None
     if actual_engine or actual_profile_name:

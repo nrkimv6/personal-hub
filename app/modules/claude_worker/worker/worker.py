@@ -104,6 +104,62 @@ INSTAGRAM_NON_ENTITY_TAGS = {"리그램", "후기"}
 INSTAGRAM_MOJIBAKE_TEXT_KEYS = ("tag", "summary", "purchase_required", "organizer")
 INSTAGRAM_MOJIBAKE_LOCATION_KEYS = ("venue_name", "address")
 
+EXECUTOR_CLI_OPTION_KEYS_BY_PROVIDER = {
+    "claude": {"output_format", "json_schema", "allowed_tools", "cwd"},
+    "codex": {"cwd", "parse_json", "sandbox"},
+    "gemini": {"image_path"},
+    "cc-codex": set(),
+}
+
+
+def _executor_cli_options(provider: str | None, cli_options: dict | None) -> dict:
+    """Strip routing/read-back metadata before handing options to a provider CLI."""
+    if not isinstance(cli_options, dict):
+        return {}
+    allowed = EXECUTOR_CLI_OPTION_KEYS_BY_PROVIDER.get((provider or "").strip(), set())
+    return {key: value for key, value in cli_options.items() if key in allowed}
+
+
+def _profile_route_providers(provider: str, caller_type: str, cli_options: dict | None) -> list[str]:
+    route_providers = [provider]
+    if caller_type != "plan_archive_analyze" or not isinstance(cli_options, dict):
+        return route_providers
+    raw_candidates = cli_options.get("candidate_profiles")
+    if not isinstance(raw_candidates, list):
+        return route_providers
+    candidate_engines = [
+        str(item.get("engine") or "").strip()
+        for item in raw_candidates
+        if isinstance(item, dict)
+    ]
+    quota_providers = set(provider_registry.get_quota_providers())
+    matching_candidates = [
+        engine
+        for engine in dict.fromkeys(candidate_engines)
+        if engine == provider and engine in quota_providers
+    ]
+    return matching_candidates or route_providers
+
+
+def _worker_runtime_readiness_snapshot(env: dict | None = None) -> dict:
+    runtime_env = env or os.environ
+    try:
+        from app.modules.claude_worker.services.executors.gemini_executor import _resolve_gemini_binary
+
+        gemini_binary = _resolve_gemini_binary(runtime_env)
+    except Exception as exc:
+        gemini_binary = f"resolve_error:{type(exc).__name__}"
+    path_head = str(runtime_env.get("PATH") or "").split(os.pathsep)[:4]
+    return {
+        "pid": os.getpid(),
+        "session_name": runtime_env.get("SESSIONNAME"),
+        "username": runtime_env.get("USERNAME"),
+        "userprofile_present": bool(runtime_env.get("USERPROFILE")),
+        "app_mode": runtime_env.get("APP_MODE"),
+        "gemini_binary": gemini_binary,
+        "path_head": path_head,
+    }
+
 
 def _truncate_for_log(value, limit: int = 240) -> str:
     text = "" if value is None else str(value)
@@ -1436,6 +1492,10 @@ class LLMWorker:
     async def start(self):
         """워커 시작."""
         logger.info(f"LLM 워커 시작 (PID: {self.pid})")
+        logger.info(
+            "[WORKER-READINESS] %s",
+            json.dumps(_worker_runtime_readiness_snapshot(), ensure_ascii=False),
+        )
         self.start_time = datetime.now()
 
         # 워커 상태 등록
@@ -1862,20 +1922,7 @@ class LLMWorker:
                 from app.modules.claude_worker.services.profile_router import LLMProfileRouter
 
                 router = LLMProfileRouter(db)
-                route_providers = [provider]
-                if caller_type == "plan_archive_analyze" and isinstance(cli_options, dict):
-                    raw_candidates = cli_options.get("candidate_profiles")
-                    if isinstance(raw_candidates, list):
-                        candidate_engines = [
-                            str(item.get("engine") or "").strip()
-                            for item in raw_candidates
-                            if isinstance(item, dict)
-                        ]
-                        route_providers = [
-                            engine
-                            for engine in dict.fromkeys(candidate_engines)
-                            if engine in provider_registry.get_quota_providers()
-                        ] or route_providers
+                route_providers = _profile_route_providers(provider, caller_type, cli_options)
 
                 decision = None
                 for route_provider in route_providers:
@@ -1971,6 +2018,7 @@ class LLMWorker:
             parse_json = True
             if cli_options and "parse_json" in cli_options:
                 parse_json = bool(cli_options["parse_json"])
+            executor_cli_options = _executor_cli_options(provider, cli_options)
 
             result = await loop.run_in_executor(
                 None,
@@ -1981,7 +2029,7 @@ class LLMWorker:
                     timeout=3600,
                     parse_json=parse_json,
                     enable_tools=enable_tools,
-                    cli_options=cli_options,
+                    cli_options=executor_cli_options,
                     profile=selected_profile,
                 )
             )

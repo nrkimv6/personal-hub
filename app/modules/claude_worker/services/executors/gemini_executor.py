@@ -1,21 +1,47 @@
 """GeminiExecutor — Gemini CLI subprocess 실행 전담."""
 
 import subprocess
+import shutil
 
 from app.modules.claude_worker.services.executors.base import LLMExecutorBase
 from app.modules.claude_worker.services.executors.claude_executor import _parse_quota_retry_ms
 from app.modules.claude_worker.services.profile_env import build_cli_env
 
 QUOTA_PAUSE_DEFAULT_MS = 6 * 60 * 60 * 1000  # 6시간
+GEMINI_INSTALL_HINT = "npm install -g @google/gemini-cli"
 
 
-def _build_gemini_command(*, model: str, image_path: str | None) -> list[str]:
-    command = ["gemini"]
+def _resolve_gemini_binary(env: dict | None = None) -> str | None:
+    path = env.get("PATH") if isinstance(env, dict) else None
+    for binary_name in ("gemini.cmd", "gemini.exe", "gemini"):
+        found = shutil.which(binary_name, path=path)
+        if found:
+            return found
+    return None
+
+
+def _build_gemini_command(*, binary: str, model: str, image_path: str | None) -> list[str]:
+    command = [binary]
     if model:
         command.extend(["--model", model])
     if image_path:
         command.append(f"@{image_path}")
     return command
+
+
+def _is_auth_error(output: str) -> bool:
+    normalized = output.lower()
+    return any(
+        token in normalized
+        for token in (
+            "authentication",
+            "auth required",
+            "login required",
+            "not logged in",
+            "oauth",
+            "please log in",
+        )
+    )
 
 
 class GeminiExecutor(LLMExecutorBase):
@@ -55,7 +81,14 @@ class GeminiExecutor(LLMExecutorBase):
             env = build_cli_env("gemini", profile=profile)
 
             image_path = (cli_options or {}).get("image_path")
-            command = _build_gemini_command(model=model, image_path=image_path)
+            binary = _resolve_gemini_binary(env)
+            if not binary:
+                return {
+                    "success": False,
+                    "error": f"Gemini CLI not found. Install with: {GEMINI_INSTALL_HINT}",
+                    "error_code": "GEMINI_CLI_NOT_FOUND",
+                }
+            command = _build_gemini_command(binary=binary, model=model, image_path=image_path)
             result = subprocess.run(
                 command,
                 input=prompt,
@@ -76,6 +109,13 @@ class GeminiExecutor(LLMExecutorBase):
                     error_details = f"returncode={result.returncode}"
 
                 combined_output = (result.stderr or "") + (result.stdout or "")
+                if _is_auth_error(combined_output):
+                    return {
+                        "success": False,
+                        "error": f"Gemini CLI authentication required: {error_details}",
+                        "error_code": "GEMINI_AUTH_REQUIRED",
+                    }
+
                 quota_keywords = ["TerminalQuotaError", "exhausted your capacity"]
                 if any(kw in combined_output for kw in quota_keywords):
                     retry_ms = _parse_quota_retry_ms(combined_output)
@@ -109,7 +149,8 @@ class GeminiExecutor(LLMExecutorBase):
         except FileNotFoundError:
             return {
                 "success": False,
-                "error": "Gemini CLI not found. Install with: npm install -g @google/generative-ai-cli",
+                "error": f"Gemini CLI not found. Install with: {GEMINI_INSTALL_HINT}",
+                "error_code": "GEMINI_CLI_NOT_FOUND",
             }
         except Exception as e:
             return {"success": False, "error": str(e)}

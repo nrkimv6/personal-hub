@@ -49,6 +49,88 @@ class _FakeService:
         return None
 
 
+def test_executor_cli_options_R_strips_plan_archive_metadata_for_codex():
+    from app.modules.claude_worker.worker import worker as worker_mod
+
+    cli_options = {
+        "parse_json": True,
+        "cwd": "D:/work/project/tools/monitor-page",
+        "sandbox": "workspace-write",
+        "candidate_profiles": [{"engine": "gemini", "profile_name": "default"}],
+        "plan_archive_execution_job_id": 41,
+        "prompt_policy_id": "plan_archive.codex.default",
+        "target_label": "gemini/default/gpt-5.5",
+    }
+
+    assert worker_mod._executor_cli_options("codex", cli_options) == {
+        "parse_json": True,
+        "cwd": "D:/work/project/tools/monitor-page",
+        "sandbox": "workspace-write",
+    }
+
+
+def test_executor_cli_options_R_keeps_only_gemini_image_path():
+    from app.modules.claude_worker.worker import worker as worker_mod
+
+    cli_options = {
+        "parse_json": True,
+        "image_path": "D:/fixtures/sample.png",
+        "candidate_profiles": [{"engine": "gemini", "profile_name": "default"}],
+        "requested_target": {"provider": "gemini", "model": "gemini-3.1-pro"},
+    }
+
+    assert worker_mod._executor_cli_options("gemini", cli_options) == {
+        "image_path": "D:/fixtures/sample.png",
+    }
+
+
+def test_profile_route_providers_R_ignores_mismatched_legacy_candidate_profiles(monkeypatch):
+    from app.modules.claude_worker.worker import worker as worker_mod
+
+    monkeypatch.setattr(worker_mod.provider_registry, "get_quota_providers", lambda: ["claude", "gemini"])
+    cli_options = {
+        "candidate_profiles": [{"engine": "gemini", "profile_name": "default"}],
+        "requested_target": {"provider": "codex", "model": "gpt-5.5"},
+    }
+
+    assert worker_mod._profile_route_providers("codex", "plan_archive_analyze", cli_options) == ["codex"]
+
+
+def test_profile_route_providers_R_keeps_matching_profile_target(monkeypatch):
+    from app.modules.claude_worker.worker import worker as worker_mod
+
+    monkeypatch.setattr(worker_mod.provider_registry, "get_quota_providers", lambda: ["claude", "gemini"])
+    cli_options = {
+        "candidate_profiles": [{"engine": "gemini", "profile_name": "default"}],
+        "requested_target": {"provider": "gemini", "model": "gemini-3.1-pro"},
+    }
+
+    assert worker_mod._profile_route_providers("gemini", "plan_archive_analyze", cli_options) == ["gemini"]
+
+
+def test_worker_runtime_readiness_snapshot_R_includes_session_and_binary_without_userprofile_secret(monkeypatch):
+    from app.modules.claude_worker.worker import worker as worker_mod
+
+    monkeypatch.setattr(
+        "app.modules.claude_worker.services.executors.gemini_executor._resolve_gemini_binary",
+        lambda env: "C:/Users/test/AppData/Roaming/npm/gemini.cmd",
+    )
+    snapshot = worker_mod._worker_runtime_readiness_snapshot({
+        "SESSIONNAME": "Console",
+        "USERNAME": "Narang",
+        "USERPROFILE": "C:/Users/Narang",
+        "APP_MODE": "dev",
+        "PATH": "C:/one;C:/two;C:/three;C:/four;C:/five",
+    })
+
+    assert snapshot["session_name"] == "Console"
+    assert snapshot["username"] == "Narang"
+    assert snapshot["userprofile_present"] is True
+    assert snapshot["app_mode"] == "dev"
+    assert snapshot["gemini_binary"].endswith("gemini.cmd")
+    assert "USERPROFILE" not in snapshot
+
+
 @pytest.mark.asyncio
 async def test_process_pending_requests_keeps_pending_when_outside_execution_window(monkeypatch):
     from app.modules.claude_worker.worker import worker as worker_mod
