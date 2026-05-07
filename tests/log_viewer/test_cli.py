@@ -19,7 +19,7 @@ from app.log_viewer.cli import (
     main,
     show_source,
 )
-from app.log_viewer.config import CLEANUP_FILTER_PATTERN
+from app.log_viewer.config import CLEANUP_FILTER_PATTERN, get_sources
 from app.log_viewer.follower import LogLine
 
 
@@ -90,6 +90,77 @@ class TestBuildParser:
         args = parser.parse_args(["api", "--cleanup"])
         assert args.target == "api"
         assert args.cleanup is True
+
+    def test_public_safe_flag_true(self):
+        """R: --public-safe 전달 → public_safe=True."""
+        parser = build_parser()
+        args = parser.parse_args(["--public-safe"])
+        assert args.public_safe is True
+
+
+class TestPublicSafeSourcePolicy:
+    def test_public_safe_sources_R_excludes_api_and_admin_only_sources(self):
+        """R: public-safe source set은 FRONTEND/TUNNEL만 허용하고 API/worker 계열을 제외한다."""
+        sources = get_sources(public_safe=True)
+        names = {src.name for src in sources}
+
+        assert names == {"FRONTEND", "TUNNEL"}
+        assert "API" not in names
+        assert "WORKER" not in names
+        assert "WATCHDOG" not in names
+        assert all(src.public_safe for src in sources)
+
+    def test_public_safe_sources_B_empty_log_dir_returns_no_worker_sources(self, tmp_path: Path, monkeypatch):
+        """B: 로그 파일 유무와 무관하게 public-safe 정책은 금지 source를 만들지 않는다."""
+        monkeypatch.setenv("MONITOR_LOG_DIR", str(tmp_path))
+
+        sources = get_sources(public_safe=True)
+        names = {src.name for src in sources}
+
+        assert names == {"FRONTEND", "TUNNEL"}
+        assert not any(name.startswith(("API", "WORKER", "WATCHDOG", "PR:", "PS:")) for name in names)
+
+    def test_public_safe_cli_E_rejects_api_target(self):
+        """E: api --public-safe 단일 target은 명확히 거절한다."""
+        with pytest.raises(SystemExit) as exc:
+            main(["api", "--public-safe"])
+
+        assert exc.value.code == 2
+
+    def test_public_safe_cli_E_rejects_admin_combination(self):
+        """E: --admin --public-safe 조합은 명확히 거절한다."""
+        with pytest.raises(SystemExit) as exc:
+            main(["--admin", "--public-safe"])
+
+        assert exc.value.code == 2
+
+    def test_public_safe_static_C_uses_same_source_policy_as_follow(self):
+        """C: static/follow all 경로가 같은 public-safe source 정책을 전달한다."""
+        with patch("app.log_viewer.cli.show_all_sources") as show_all_sources, \
+             patch("app.log_viewer.cli.show_plan_runners") as show_plan_runners:
+            main(["--public-safe"])
+
+        show_all_sources.assert_called_once_with(False, None, cleanup=False, public_safe=True)
+        show_plan_runners.assert_not_called()
+
+        with patch("app.log_viewer.cli.follow_all_sources") as follow_all_sources:
+            main(["--follow", "--public-safe"])
+
+        follow_all_sources.assert_called_once_with(False, cleanup=False, public_safe=True)
+
+    def test_public_safe_follow_does_not_enable_runner_watcher(self):
+        """C: public-safe follow에서는 RunnerWatcher 동적 plan-runner source를 생성하지 않는다."""
+        with patch("app.log_viewer.cli.get_sources", return_value=[]), \
+             patch("app.log_viewer.cli.MultiTailer"), \
+             patch("app.log_viewer.cli.StaticSourceWatcher") as static_watcher, \
+             patch("app.log_viewer.cli.RunnerWatcher") as runner_watcher, \
+             patch("app.log_viewer.cli.time.sleep", side_effect=KeyboardInterrupt):
+            static_watcher.return_value.refresh.side_effect = KeyboardInterrupt
+            from app.log_viewer.cli import follow_all_sources
+
+            follow_all_sources(admin=False, public_safe=True)
+
+        runner_watcher.assert_not_called()
 
 
 # ---------------------------------------------------------------------------
