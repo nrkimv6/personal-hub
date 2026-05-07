@@ -72,9 +72,9 @@
 				candidate_keys: Array.from(selectedKeys),
 				selected_targets: selectedTargets,
 			});
-			onQueueSuccess?.(res);
 			selectedKeys = new Set();
-			load();
+			await load();
+			onQueueSuccess?.(res);
 		} catch (e) {
 			error = e instanceof Error ? e.message : '큐잉 실패';
 		} finally {
@@ -155,8 +155,8 @@
 											candidate_keys: [key],
 											selected_targets: selectedTargets,
 										});
+										await load();
 										onQueueSuccess?.(res);
-										load();
 									} catch (e) {
 										error = e instanceof Error ? e.message : '큐잉 실패';
 									}
@@ -203,9 +203,9 @@
 								candidate_keys: [key],
 								selected_targets: selectedTargets,
 							});
-							onQueueSuccess?.(res);
 							previewModal = null;
-							load();
+							await load();
+							onQueueSuccess?.(res);
 						} catch (e) {
 							error = e instanceof Error ? e.message : '큐잉 실패';
 						}
