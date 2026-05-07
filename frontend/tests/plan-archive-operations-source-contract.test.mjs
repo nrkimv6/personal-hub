@@ -101,10 +101,10 @@ test('PlanArchiveCandidateTable receives selectedTargets as prop', () => {
 	assert.match(candidateTableSource, /onQueueSuccess/);
 });
 
-test('PlanArchiveCandidateTable reports individual queue success before refresh', () => {
+test('PlanArchiveCandidateTable refreshes individual queue before reporting success', () => {
 	assert.match(
 		candidateTableSource,
-		/const res = await archiveScheduleApi\.queueCandidates\(\{[\s\S]*candidate_keys:\s*\[key\][\s\S]*onQueueSuccess\?\.\(res\)[\s\S]*load\(\)/
+		/const res = await archiveScheduleApi\.queueCandidates\(\{[\s\S]*candidate_keys:\s*\[key\][\s\S]*await load\(\)[\s\S]*onQueueSuccess\?\.\(res\)/
 	);
 });
 
