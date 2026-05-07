@@ -22,6 +22,8 @@ def test_db_engine(tmp_path_factory):
     from app.models.base import Base
     from app.models.plan_record import PlanEvent, PlanRecord
     from app.models.tracking_item import TrackingItem, TrackingItemPlanLink
+    from app.modules.claude_worker.models.llm_request import LLMRequest
+    from app.modules.writing.models.writing_batch import WritingBatch
 
     db_path = tmp_path_factory.mktemp("plan_records_api_db") / "test.db"
     engine = create_engine(
@@ -42,6 +44,8 @@ def test_db_engine(tmp_path_factory):
             PlanEvent.__table__,
             TrackingItem.__table__,
             TrackingItemPlanLink.__table__,
+            WritingBatch.__table__,
+            LLMRequest.__table__,
         ],
     )
     try:
@@ -97,6 +101,8 @@ class TestPlanRecordsApiDbBootstrap:
         assert "plan_events" in tables
         assert "tracking_items" in tables
         assert "tracking_item_plan_links" in tables
+        assert "writing_batches" in tables
+        assert "llm_requests" in tables
 
     def test_plan_records_bootstrap_right_supports_event_fk(self, test_db_session):
         from app.models.plan_record import PlanEvent, PlanRecord
