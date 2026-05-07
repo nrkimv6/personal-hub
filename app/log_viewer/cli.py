@@ -2,7 +2,7 @@
 cli.py — CLI 진입점 (static 모드 + follow 모드 출력)
 
 사용법:
-    python -m app.log_viewer [target] [--admin] [--lines N] [--follow] [--cleanup]
+    python -m app.log_viewer [target] [--admin] [--public-safe] [--lines N] [--follow] [--cleanup]
 
 target:
     생략 시 — 모든 소스 표시 (admin 여부에 따라 필터)
@@ -11,6 +11,7 @@ target:
 
 옵션:
     --admin      admin 전용 소스 포함
+    --public-safe Public 로그 표면용 allowlist만 표시
     --lines N    tail 줄수 오버라이드 (기본: 소스별 tail_lines)
     --follow/-f  실시간 tail 모드 (Follow 모드)
     --cleanup    cleanup/정리 이벤트 라인만 표시
@@ -196,11 +197,20 @@ def _print_source(source_name: str, files: list[Path], color: str, lines: int, f
             _print_line("  (비어있음)")
 
 
-def show_source(name: str, admin: bool, lines_override: int | None, cleanup: bool = False) -> None:
+def show_source(
+    name: str,
+    admin: bool,
+    lines_override: int | None,
+    cleanup: bool = False,
+    public_safe: bool = False,
+) -> None:
     """단일 소스를 찾아 출력한다."""
     src = get_source_by_name(_normalize_target(name))
     if src is None:
         print(f"알 수 없는 소스: {name!r}", file=sys.stderr)
+        return
+    if public_safe and not src.public_safe:
+        print(f"public-safe에서 허용되지 않는 소스: {name!r}", file=sys.stderr)
         return
 
     dirs = _resolve_dirs(admin)
@@ -211,9 +221,14 @@ def show_source(name: str, admin: bool, lines_override: int | None, cleanup: boo
     _print_source(src.name, files, src.color, n, filter_pattern=CLEANUP_FILTER_PATTERN if cleanup else None)
 
 
-def show_all_sources(admin: bool, lines_override: int | None, cleanup: bool = False) -> None:
+def show_all_sources(
+    admin: bool,
+    lines_override: int | None,
+    cleanup: bool = False,
+    public_safe: bool = False,
+) -> None:
     """admin 여부에 따른 모든 소스를 출력한다."""
-    sources = get_sources(admin)
+    sources = get_sources(admin, public_safe=public_safe)
     dirs = _resolve_dirs(admin)
     for src in sources:
         patterns = [f"{p}*" for p in src.patterns]
@@ -227,11 +242,19 @@ def show_all_sources(admin: bool, lines_override: int | None, cleanup: bool = Fa
 # ---------------------------------------------------------------------------
 
 
-def follow_source(name: str, admin: bool, cleanup: bool = False) -> None:
+def follow_source(
+    name: str,
+    admin: bool,
+    cleanup: bool = False,
+    public_safe: bool = False,
+) -> None:
     """단일 소스를 실시간 tail한다."""
     src = get_source_by_name(_normalize_target(name))
     if src is None:
         print(f"알 수 없는 소스: {name!r}", file=sys.stderr)
+        return
+    if public_safe and not src.public_safe:
+        print(f"public-safe에서 허용되지 않는 소스: {name!r}", file=sys.stderr)
         return
 
     dirs = _resolve_dirs(admin)
@@ -254,7 +277,7 @@ def follow_source(name: str, admin: bool, cleanup: bool = False) -> None:
         pass
 
 
-def follow_all_sources(admin: bool, cleanup: bool = False) -> None:
+def follow_all_sources(admin: bool, cleanup: bool = False, public_safe: bool = False) -> None:
     """모든 소스를 실시간 통합 tail한다.
 
     - plan-runner는 RunnerWatcher로 동적 관리.
@@ -263,7 +286,7 @@ def follow_all_sources(admin: bool, cleanup: bool = False) -> None:
     """
     tailer = MultiTailer(cleanup=cleanup)
     dirs = _resolve_dirs(admin)
-    sources = list(get_sources(admin))
+    sources = list(get_sources(admin, public_safe=public_safe))
 
     # 시작 시 1회 스캔: stale 파일은 제외 (StaticSourceWatcher가 오늘 파일 생기면 추가)
     for src in sources:
@@ -274,14 +297,15 @@ def follow_all_sources(admin: bool, cleanup: bool = False) -> None:
         elif path is not None and is_stale(path):
             print(f"[{src.name}] (오늘 로그 파일 대기 중...)", flush=True)
 
-    runner_watcher = RunnerWatcher()
+    runner_watcher = None if public_safe else RunnerWatcher()
     static_watcher = StaticSourceWatcher(sources, dirs)
 
     _print_follow_banner("ALL", cleanup)
     try:
         while True:
             static_watcher.refresh(tailer)
-            runner_watcher.refresh(tailer)
+            if runner_watcher is not None:
+                runner_watcher.refresh(tailer)
             for ln in tailer.poll_once():
                 _print_follow_line(ln)
             time.sleep(0.2)
@@ -370,6 +394,12 @@ def build_parser() -> argparse.ArgumentParser:
         help="Admin 전용 소스 포함",
     )
     parser.add_argument(
+        "--public-safe",
+        action="store_true",
+        default=False,
+        help="Public 로그 표면용 allowlist만 표시",
+    )
+    parser.add_argument(
         "--lines",
         "-n",
         type=int,
@@ -400,28 +430,49 @@ def main(argv: list[str] | None = None) -> None:
     target: str | None = args.target
     normalized_target = _normalize_target(target) if target is not None else None
     admin: bool = args.admin
+    public_safe: bool = args.public_safe
     lines: int | None = args.lines
     cleanup: bool = args.cleanup
     follow: bool = args.follow
+
+    if admin and public_safe:
+        parser.error("--admin and --public-safe cannot be used together")
+
+    if public_safe and normalized_target is not None:
+        src = get_source_by_name(normalized_target)
+        if normalized_target == "PLAN-RUNNER" or src is None or not src.public_safe:
+            parser.error(f"{target!r} is not allowed with --public-safe")
 
     if follow:
         # plan-runner는 RunnerWatcher가 follow_all_sources 내부에서 처리
         try:
             if normalized_target is None or normalized_target == "PLAN-RUNNER":
-                follow_all_sources(admin, cleanup=cleanup)
+                if public_safe:
+                    follow_all_sources(admin, cleanup=cleanup, public_safe=True)
+                else:
+                    follow_all_sources(admin, cleanup=cleanup)
             else:
-                follow_source(normalized_target, admin, cleanup=cleanup)
+                if public_safe:
+                    follow_source(normalized_target, admin, cleanup=cleanup, public_safe=True)
+                else:
+                    follow_source(normalized_target, admin, cleanup=cleanup)
         except KeyboardInterrupt:
             pass
         return
 
     if normalized_target is None:
-        show_all_sources(admin, lines, cleanup=cleanup)
-        show_plan_runners(admin, lines, cleanup=cleanup)
+        if public_safe:
+            show_all_sources(admin, lines, cleanup=cleanup, public_safe=True)
+        else:
+            show_all_sources(admin, lines, cleanup=cleanup)
+            show_plan_runners(admin, lines, cleanup=cleanup)
     elif normalized_target == "PLAN-RUNNER":
         show_plan_runners(admin, lines, cleanup=cleanup)
     else:
-        show_source(normalized_target, admin, lines, cleanup=cleanup)
+        if public_safe:
+            show_source(normalized_target, admin, lines, cleanup=cleanup, public_safe=True)
+        else:
+            show_source(normalized_target, admin, lines, cleanup=cleanup)
 
 
 if __name__ == "__main__":

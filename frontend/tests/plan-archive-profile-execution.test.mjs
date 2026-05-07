@@ -2,12 +2,12 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import test from 'node:test';
 
-const apiSource = readFileSync('frontend/src/lib/api/plan-records.ts', 'utf8');
-const scheduleApiSource = readFileSync('frontend/src/lib/api/plan-archive-schedule.ts', 'utf8');
+const apiSource = readFileSync(new URL('../src/lib/api/plan-records.ts', import.meta.url), 'utf8');
+const scheduleApiSource = readFileSync(new URL('../src/lib/api/plan-archive-schedule.ts', import.meta.url), 'utf8');
 const combinedPlanArchiveApiSource = `${apiSource}\n${scheduleApiSource}`;
-const systemSource = readFileSync('frontend/src/lib/api/system.ts', 'utf8');
-const archiveTabSource = readFileSync('frontend/src/routes/plans/ArchiveTab.svelte', 'utf8');
-const schedulerSource = readFileSync('frontend/src/routes/scheduler/plan-archive/+page.svelte', 'utf8');
+const systemSource = readFileSync(new URL('../src/lib/api/system.ts', import.meta.url), 'utf8');
+const archiveTabSource = readFileSync(new URL('../src/routes/plans/ArchiveTab.svelte', import.meta.url), 'utf8');
+const schedulerSource = readFileSync(new URL('../src/routes/scheduler/plan-archive/+page.svelte', import.meta.url), 'utf8');
 
 test('plan records API exposes archive execution control contract', () => {
 	assert.match(apiSource, /archive_state\?: string \| null/);

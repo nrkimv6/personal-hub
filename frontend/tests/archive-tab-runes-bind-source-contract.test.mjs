@@ -1,9 +1,11 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import test from 'node:test';
 
-const archiveTabPath = 'src/routes/plans/ArchiveTab.svelte';
-const archiveTabSource = readFileSync(archiveTabPath, 'utf8');
+const archiveTabUrl = new URL('../src/routes/plans/ArchiveTab.svelte', import.meta.url);
+const archiveTabPath = fileURLToPath(archiveTabUrl);
+const archiveTabSource = readFileSync(archiveTabUrl, 'utf8');
 let svelteCompile = null;
 let svelteCompilerLoadError = null;
 
