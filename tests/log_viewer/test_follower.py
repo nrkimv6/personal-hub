@@ -11,7 +11,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from app.log_viewer.config import CLEANUP_FILTER_PATTERN
+from app.log_viewer.config import CLEANUP_FILTER_PATTERN, get_sources
 from app.log_viewer.follower import (
     FileTailer,
     LogLine,
@@ -691,3 +691,26 @@ class TestStaticSourceWatcher:
 
         watcher.refresh(tailer)
         assert "TST8" not in tailer._sources
+
+    def test_static_watcher_public_safe_C_does_not_register_api_log(self, tmp_path: Path):
+        """C: public-safe source list를 받은 watcher는 api_*.log를 등록하지 않는다."""
+        from datetime import date
+
+        today_str = date.today().strftime("%Y%m%d")
+        (tmp_path / f"api_{today_str}_120000.log").write_text(
+            "pid=1234 role=watchdog [process-watch]\n",
+            encoding="utf-8",
+        )
+        (tmp_path / f"frontend_2_{today_str}_120000.log").write_text(
+            "ERROR public-safe frontend line\n",
+            encoding="utf-8",
+        )
+
+        watcher = StaticSourceWatcher(get_sources(public_safe=True), [tmp_path])
+        tailer = MultiTailer()
+
+        watcher.refresh(tailer)
+
+        assert "FRONTEND" in tailer._sources
+        assert "API" not in tailer._sources
+        assert not any(name.startswith(("PR:", "PS:")) for name in tailer._sources)

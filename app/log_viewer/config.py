@@ -39,6 +39,10 @@ class LogSource:
     # stale 판정 대상 여부 (파일명 날짜 기반으로 이전 세션 파일 제외)
     check_stale: bool = False
 
+    # Public-safe 표면에 노출 가능한지 여부.
+    # API/worker/watchdog/runner 계열은 프로세스 진단이 섞일 수 있어 opt-in만 허용한다.
+    public_safe: bool = False
+
 
 # ---------------------------------------------------------------------------
 # 기본 로그 소스 목록 (logs.ps1 $logConfig / $timestampedLogPatterns 대응)
@@ -72,6 +76,7 @@ LOG_SOURCES: list[LogSource] = [
         tail_lines=3,
         admin_only=False,
         check_stale=False,
+        public_safe=True,
     ),
     LogSource(
         name="API",
@@ -127,6 +132,7 @@ LOG_SOURCES: list[LogSource] = [
         admin_only=False,
         check_stale=True,
         error_only=True,  # Follow 모드에서 error/warning만 표시
+        public_safe=True,
     ),
     LogSource(
         name="WATCHDOG",
@@ -242,12 +248,20 @@ CLEANUP_FILTER_PATTERN = r"\[cleanup\]|heartbeat.*cleanup|stale.*runner|force_cl
 # ---------------------------------------------------------------------------
 
 
-def get_sources(admin: bool = False) -> list[LogSource]:
+def get_public_safe_sources() -> list[LogSource]:
+    """Public-safe 표면에 노출 가능한 로그 소스 목록을 반환한다."""
+    return [s for s in LOG_SOURCES if s.public_safe]
+
+
+def get_sources(admin: bool = False, public_safe: bool = False) -> list[LogSource]:
     """
     admin 모드 여부에 따라 표시할 로그 소스 목록을 반환한다.
 
     admin=False이면 admin_only=True 소스를 제외한다.
+    public_safe=True이면 명시 allowlist만 반환한다.
     """
+    if public_safe:
+        return get_public_safe_sources()
     if admin:
         return list(LOG_SOURCES)
     return [s for s in LOG_SOURCES if not s.admin_only]

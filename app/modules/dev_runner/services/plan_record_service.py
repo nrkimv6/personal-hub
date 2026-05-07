@@ -920,6 +920,7 @@ class PlanRecordService:
         attempt_state: Optional[str] = None,
     ) -> dict:
         """archive 파일과 DB 레코드를 합쳐 실행/이관 후보를 반환."""
+        state_filter = state
         archive_entries = [entry for entry in registered_paths if entry.get("type") == "archive"]
         files_by_hash: Dict[str, List[Path]] = {}
         registered_by_file: Dict[str, str] = {}
@@ -954,14 +955,14 @@ class PlanRecordService:
                 file_str = str(file_path)
                 stat = file_path.stat()
                 db_exists = record is not None
-                state = "matched" if db_exists else "file_only"
+                candidate_state = "matched" if db_exists else "file_only"
                 reason = "파일과 DB 레코드가 매칭됐습니다." if db_exists else "DB 레코드가 없어 DB 이관 또는 sync 대상입니다."
                 eligible_for_import = not db_exists
                 eligible_for_analysis = False
 
                 if db_exists:
                     if record.file_path != file_str:
-                        state = "stale_path"
+                        candidate_state = "stale_path"
                         reason = "DB file_path가 현재 archive 파일 경로와 다릅니다."
                         eligible_for_import = True
                     if record.archived_at is None or record.status != "archived":
@@ -971,7 +972,7 @@ class PlanRecordService:
 
                 duplicate_paths = [path for path in all_paths if path != file_str]
                 if duplicate_paths:
-                    state = "duplicate_hash"
+                    candidate_state = "duplicate_hash"
                     reason = "동일 파일명 해시를 가진 archive 파일이 2개 이상입니다."
 
                 candidate_items.append({
@@ -979,7 +980,7 @@ class PlanRecordService:
                     "file_path": file_str,
                     "file_exists": True,
                     "db_exists": db_exists,
-                    "state": state,
+                    "state": candidate_state,
                     "reason": reason,
                     "eligible_for_import": eligible_for_import,
                     "eligible_for_analysis": eligible_for_analysis,
@@ -1052,8 +1053,8 @@ class PlanRecordService:
 
         # 필터 적용
         filtered = candidate_items
-        if state:
-            filtered = [i for i in filtered if i["state"] == state]
+        if state_filter:
+            filtered = [i for i in filtered if i["state"] == state_filter]
         if q:
             q_lower = q.lower()
             filtered = [i for i in filtered if q_lower in i.get("file_path", "").lower()]
@@ -1085,7 +1086,8 @@ class PlanRecordService:
             elif attempt_state == "last_succeeded":
                 filtered = [i for i in filtered if i.get("last_attempt_status") == "completed"]
 
-        # eligible_for_analysis DESC, file_only DESC, needs_archive_normalization DESC,
+        # eligible_for_analysis DESC, file_only DESC, file-backed before db_only,
+        # needs_archive_normalization DESC,
         # archived_at ASC (None last), file_path ASC
         def sort_key(item):
             record = item.get("record")
@@ -1093,6 +1095,7 @@ class PlanRecordService:
             return (
                 not item["eligible_for_analysis"],   # eligible first
                 item["state"] != "file_only",         # file_only second
+                item["state"] == "db_only",           # keep file-backed records before db-only
                 not item["needs_archive_normalization"],  # needs_norm third
                 archived_at,                          # oldest archived first
                 item.get("file_path", ""),
