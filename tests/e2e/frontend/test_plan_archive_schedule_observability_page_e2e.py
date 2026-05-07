@@ -8,6 +8,7 @@ not live T5 endpoint evidence.
 import json
 import os
 import re
+import time
 
 import pytest
 from playwright.sync_api import Page, expect
@@ -20,6 +21,15 @@ ADMIN_URL = os.environ.get("E2E_FRONTEND_URL", "http://localhost:6101")
 
 def _json_response(route, payload):
     route.fulfill(status=200, content_type="application/json", body=json.dumps(payload))
+
+
+def _wait_until(predicate, *, timeout: float = 5.0, interval: float = 0.05) -> None:
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if predicate():
+            return
+        time.sleep(interval)
+    assert predicate()
 
 
 def _dashboard_payload(schedule=None):
@@ -516,6 +526,7 @@ def test_plan_archive_candidate_queue_posts_selected_targets_and_refreshes(page:
     ]
     assert captured_payloads[0]["candidate_keys"] == ["candidate-000"]
     assert captured_payloads[1]["candidate_keys"] == ["candidate-001"]
+    _wait_until(lambda: len(candidate_list_calls) >= 3)
     assert len(candidate_list_calls) >= 3
 
 

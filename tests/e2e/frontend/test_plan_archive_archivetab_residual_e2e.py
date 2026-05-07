@@ -5,6 +5,7 @@ ArchiveTab에 redirect banner/placeholder/retrieval 없이 잔류 컴포넌트(D
 The source-contract tests in this file are static/T3 checks, not live T4 evidence.
 """
 import json
+import os
 from pathlib import Path
 
 import pytest
@@ -13,7 +14,7 @@ from playwright.sync_api import Page, expect
 
 pytestmark = [pytest.mark.e2e, pytest.mark.integration]
 
-ADMIN_URL = "http://localhost:6101"
+ADMIN_URL = os.environ.get("E2E_FRONTEND_URL", "http://localhost:6101")
 
 
 def _json_response(route, payload):

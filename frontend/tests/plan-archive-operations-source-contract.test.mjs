@@ -72,6 +72,13 @@ test('PlanArchiveCandidateTable imports createPagePagination and uses pager', ()
 	assert.doesNotMatch(candidateTableSource, /let hasMore\s*=/);
 });
 
+test('listArchiveCandidates bypasses browser cache for post-mutation refreshes', () => {
+	assert.match(
+		apiSource,
+		/listArchiveCandidates:[\s\S]*\/records\/archive-candidates[\s\S]*cache:\s*'no-store'/
+	);
+});
+
 // ─── history default filter is empty; queue keeps pending/processing/failed default
 test('PlanArchiveHistoryTable default status filter is empty (전체 표시)', () => {
 	assert.match(historyTableSource, /scheduleStatusFilter = \$state\(''\)/);

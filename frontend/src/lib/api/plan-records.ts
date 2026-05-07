@@ -642,7 +642,9 @@ export const planRecordsApi = {
 		if (params?.skip != null) q.set('skip', String(params.skip));
 		if (params?.limit != null) q.set('limit', String(params.limit));
 		const qs = q.toString();
-		return planRecordsRequest<ArchiveCandidateSummary>(`/records/archive-candidates${qs ? '?' + qs : ''}`);
+		return planRecordsRequest<ArchiveCandidateSummary>(`/records/archive-candidates${qs ? '?' + qs : ''}`, {
+			cache: 'no-store'
+		});
 	},
 
 	/**
