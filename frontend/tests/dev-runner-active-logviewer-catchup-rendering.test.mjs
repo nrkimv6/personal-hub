@@ -88,8 +88,8 @@ test("hasLoadedLogContent uses HEADER_ONLY_TAGS not only DIAG check", () => {
 
 test("loadRecent resets retry only after hasLoadedLogContent not on any sourceLines", () => {
   // 수정 전: sourceLines.length > 0 → 수정 후: hasLoadedLogContent()
-  assert.match(logViewer, /if \(hasLoadedLogContent\(\)\) \{\s*recentRetryAttempt = 0/);
-  assert.doesNotMatch(logViewer, /if \(sourceLines\.length > 0\) \{\s*recentRetryAttempt = 0/);
+  assert.match(logViewer, /if \(hasLoadedLogContent\(\)\) \{\s*recentRetryBackoff\.reset\(\)/);
+  assert.doesNotMatch(logViewer, /if \(sourceLines\.length > 0\) \{\s*recentRetry(?:Attempt = 0|Backoff\.reset\(\))/);
 });
 
 // ── Phase 3: catch-up trigger 계약 ──────────────────────────────────────────

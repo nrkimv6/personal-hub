@@ -6,6 +6,10 @@ const logViewer = readFileSync(
   new URL("../src/lib/components/dev-runner/LogViewer.svelte", import.meta.url),
   "utf8",
 );
+const backoff = readFileSync(
+  new URL("../src/lib/dev-runner/backoff.ts", import.meta.url),
+  "utf8",
+);
 const runnerInstance = readFileSync(
   new URL("../src/lib/components/dev-runner/RunnerInstanceTab.svelte", import.meta.url),
   "utf8",
@@ -50,7 +54,8 @@ test("diagnostics cannot block initial recent catch-up", () => {
 });
 
 test("managed catch-up is retried and coalesced", () => {
-  assert.match(logViewer, /const MAX_RECENT_RETRY_ATTEMPTS = 4/);
+  assert.match(logViewer, /createBackoff\(\{ baseMs: 600, maxMs: 60000, maxAttempts: 4 \}\)/);
+  assert.match(backoff, /nextDelay\(\): number \| null/);
   assert.match(logViewer, /function scheduleManagedRecentRetry/);
   assert.match(logViewer, /let _catchUpPromise: Promise<void> \| null = null/);
   assert.match(logViewer, /if \(_catchUpPromise\) return _catchUpPromise/);

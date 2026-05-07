@@ -6,6 +6,10 @@ const source = readFileSync(
   new URL("../src/lib/components/dev-runner/LogViewer.svelte", import.meta.url),
   "utf8",
 );
+const logTags = readFileSync(
+  new URL("../src/lib/dev-runner/log-tags.ts", import.meta.url),
+  "utf8",
+);
 
 test("long single-line Claude RESULT output collapses by character threshold", () => {
   assert.match(source, /const PREVIEW_LINE_LIMIT = 3/);
@@ -17,7 +21,8 @@ test("long single-line Claude RESULT output collapses by character threshold", (
 
 test("ERROR and STDERR filters persist and report hidden count", () => {
   assert.match(source, /const TAG_FILTER_STORAGE_KEY = 'devRunnerHiddenLogTags'/);
-  assert.match(source, /const FILTERABLE_TAGS = \['ERROR', 'STDERR'\]/);
+  assert.match(source, /import \{ FILTERABLE_TAGS, getTagStyle \} from '\$lib\/dev-runner\/log-tags'/);
+  assert.match(logTags, /export const FILTERABLE_TAGS = \['ERROR', 'STDERR'\]/);
   assert.match(source, /let hiddenTags = \$state<Set<string>>\(new Set\(\)\)/);
   assert.match(source, /window\.localStorage\.setItem\(TAG_FILTER_STORAGE_KEY/);
   assert.match(source, /hidden \{hiddenLogCount\}/);

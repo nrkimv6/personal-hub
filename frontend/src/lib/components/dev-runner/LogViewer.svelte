@@ -2,9 +2,21 @@
 	import { onMount, onDestroy } from 'svelte';
 	import { devRunnerLogApi } from '$lib/api';
 	import { apiGate } from '$lib/stores/apiGate.svelte';
+	import { createBackoff } from '$lib/dev-runner/backoff';
+	import { BatchTracker } from '$lib/dev-runner/batch-tracker.svelte';
+	import {
+		defaultLineHandlers,
+		type LinePipelineContext
+	} from '$lib/dev-runner/line-pipeline';
 	import { isStartOnlyRecentLog } from '$lib/dev-runner/log-recent-fallback.js';
+	import { getLogLineVariant } from '$lib/dev-runner/log-line-variant';
+	import { FILTERABLE_TAGS, getTagStyle } from '$lib/dev-runner/log-tags';
+	import type { BatchPlanItem, ParsedLine, ResultSegment } from '$lib/dev-runner/log-types';
 	import { getExitReasonDisplay } from '$lib/utils/dev-runner-exit-reason';
 	import { shouldShowMergeCompletionBanner } from '$lib/utils/dev-runner-merge-banner';
+	import LogLine from './LogLine.svelte';
+	import LogLineNoise from './LogLineNoise.svelte';
+	import LogLineSeparator from './LogLineSeparator.svelte';
 
 	interface Props {
 		runnerId: string;
@@ -30,28 +42,9 @@
 		['merge_pending', 'queued', 'merging', 'testing', 'fixing', 'resolving'].includes(mergeStatus ?? '')
 	);
 
-	// Phase 2: 전체실행 시 Plan 파일 리스트 추적
-	interface BatchPlanItem {
-		name: string;
-		status: 'pending' | 'running' | 'done';
-	}
-	let batchPlans = $state<BatchPlanItem[]>([]);
-	let batchDoneCount = $derived(batchPlans.filter(p => p.status === 'done').length);
-
-	interface ParsedLine {
-		id: string;
-		timestamp: string;
-		tag: string;
-		message: string;
-		raw: string;
-		isStale: boolean;
-		noiseCount?: number;
-	}
-
-	interface ResultSegment {
-		num: string;
-		text: string;
-	}
+	const batchTracker = new BatchTracker();
+	let batchPlans = $derived(batchTracker.plans);
+	let batchDoneCount = $derived(batchTracker.doneCount);
 
 	let lines = $state<ParsedLine[]>([]);
 	let expandedNoiseIndices = $state<number[]>([]);
@@ -76,9 +69,6 @@
 	const MAX_RENDER_CHARS = 8 * 1024;
 	const PREVIEW_TOGGLE_STORAGE_KEY = 'devRunnerPreviewCollapse';
 	const TAG_FILTER_STORAGE_KEY = 'devRunnerHiddenLogTags';
-	const FILTERABLE_TAGS = ['ERROR', 'STDERR'];
-	const RECENT_RETRY_BASE_DELAY_MS = 600;
-	const MAX_RECENT_RETRY_ATTEMPTS = 4;
 	let previewCollapsedEnabled = $state(true);
 	let hiddenTags = $state<Set<string>>(new Set());
 	let visibleLines = $derived(lines.filter((line) => !hiddenTags.has(line.tag)));
@@ -86,41 +76,13 @@
 	let lineSequence = 0;
 	let loadedRecentLogIdentity = $state<string | null>(null);
 	let recentRetryTimer: ReturnType<typeof setTimeout> | null = null;
-	let recentRetryAttempt = 0;
+	const recentRetryBackoff = createBackoff({ baseMs: 600, maxMs: 60000, maxAttempts: 4 });
 
 	let copied = $state(false);
 	let expandedLongLines = $state<Set<string>>(new Set());
 	let runMetaExpanded = $state(false);
 
-	const BASE_DELAY = 3000;
-
-	// Tag colors for dark background
-	const tagColors: Record<string, { text: string; bg: string }> = {
-		AI: { text: 'text-blue-400', bg: 'bg-blue-500/20' },
-		TOOL: { text: 'text-yellow-700', bg: 'bg-yellow-900/20' },
-		DONE: { text: 'text-green-400', bg: 'bg-green-500/20' },
-		RESULT: { text: 'text-emerald-700', bg: 'bg-emerald-900/20' },
-		ERROR: { text: 'text-red-400', bg: 'bg-red-500/20' },
-		FAILURE: { text: 'text-red-300', bg: 'bg-red-600/38' },
-		HOLD: { text: 'text-yellow-300', bg: 'bg-yellow-600/20' },
-		INFO: { text: 'text-gray-500', bg: 'bg-transparent' },
-		SYSTEM: { text: 'text-purple-400', bg: 'bg-purple-500/20' },
-		WARN: { text: 'text-orange-400', bg: 'bg-orange-500/20' },
-		STDERR: { text: 'text-red-400', bg: 'bg-red-500/30' },
-		LINE: { text: 'text-gray-600', bg: 'bg-transparent' },
-		DIAG: { text: 'text-cyan-400', bg: 'bg-cyan-500/20' },
-		THINK: { text: 'text-violet-400', bg: 'bg-violet-500/20' },
-		PHASE: { text: 'text-indigo-400', bg: 'bg-indigo-500/20' },
-		TRACK: { text: 'text-purple-400', bg: 'bg-purple-500/20' },
-		CYCLE: { text: 'text-white', bg: 'bg-gray-600' },
-		MERGE: { text: 'text-teal-400', bg: 'bg-teal-500/20' },
-		COMMIT: { text: 'text-green-400', bg: 'bg-green-500/20' },
-		TEST: { text: 'text-cyan-400', bg: 'bg-cyan-500/20' },
-		SKIP: { text: 'text-gray-500', bg: 'bg-gray-500/20' },
-		GIT: { text: 'text-orange-400', bg: 'bg-orange-500/20' },
-		BATCH: { text: 'text-teal-400', bg: 'bg-teal-500/20' },
-		NOISE: { text: 'text-gray-600', bg: 'bg-gray-700/20' }
-	};
+	const sseReconnectBackoff = createBackoff({ baseMs: 3000, maxMs: 60000 });
 
 	const LINE_PATTERN = /^\s*\[?(\d{2}:\d{2}:\d{2})\]?\s*\[(\w+)\]\s*(.*)/;
 	const DIAG_PATTERN = /^\[(\w+)\]\s*(.*)/;
@@ -368,59 +330,38 @@
 	}
 
 	function addLine(text: string, isStale: boolean) {
-		// Phase 2: 그레이아웃 타이밍 변경 — 새 세션 시작 시에만 stale 마크
-		if (text.includes(SEPARATOR_PATTERN) && !isStale) {
-			if (pendingStale) {
-				lines = lines.map((l) => ({ ...l, isStale: true }));
-			}
-			pendingStale = true;
-		}
-
 		const parsed = parseLine(text, isStale);
-
-                if (parsed.tag === 'NOISE' && !isStale) {
-                        showNoiseIndicator = true;
-                        if (noiseTimer) { clearTimeout(noiseTimer); }
-                        noiseTimer = setTimeout(() => { showNoiseIndicator = false; noiseTimer = null; }, 2000);
-                } else if (!isStale) {
-                        showNoiseIndicator = false;
-                        if (noiseTimer) { clearTimeout(noiseTimer); noiseTimer = null; }
-                }
-
-                // BATCH 마커 감지 → 전체실행 파일 리스트 추적
-		if (parsed.tag === 'BATCH' && !isStale) {
-			const listMatch = parsed.message.match(/^PLAN_LIST\s+(.+)$/);
-			if (listMatch) {
-				batchPlans = listMatch[1].split(',').map(n => ({
-					name: n.trim(),
-					status: 'pending' as const
-				}));
+		const context: LinePipelineContext = {
+			isStale,
+			hasSeparator: isSeparator,
+			markExistingLinesStale: () => {
+				lines = lines.map((l) => ({ ...l, isStale: true }));
+			},
+			getPendingStale: () => pendingStale,
+			setPendingStale: (value) => {
+				pendingStale = value;
+			},
+			showNoiseIndicator: () => {
+				showNoiseIndicator = true;
+				if (noiseTimer) clearTimeout(noiseTimer);
+				noiseTimer = setTimeout(() => {
+					showNoiseIndicator = false;
+					noiseTimer = null;
+				}, 2000);
+			},
+			hideNoiseIndicator: () => {
+				showNoiseIndicator = false;
+				if (noiseTimer) {
+					clearTimeout(noiseTimer);
+					noiseTimer = null;
+				}
+			},
+			batchTracker,
+			showFailureBanner: (message) => {
+				failureBanner = { show: true, message };
 			}
-			const startMatch = parsed.message.match(/^PLAN_START\s+(.+)$/);
-			if (startMatch) {
-				const name = startMatch[1].trim();
-				batchPlans = batchPlans.map(p =>
-					p.name === name ? { ...p, status: 'running' as const } : p
-				);
-			}
-			const doneMatch = parsed.message.match(/^PLAN_DONE\s+(.+)$/);
-			if (doneMatch) {
-				const name = doneMatch[1].trim();
-				batchPlans = batchPlans.map(p =>
-					p.name === name ? { ...p, status: 'done' as const } : p
-				);
-			}
-		}
-		// SEPARATOR 감지 시 배치 리스트 초기화
-		if (text.includes(SEPARATOR_PATTERN) && !isStale) {
-			batchPlans = [];
-		}
-
-		// FAILURE 태그 감지 → sticky 배너 갱신
-		if (parsed.tag === 'FAILURE' && !isStale) {
-			failureBanner = { show: true, message: parsed.message };
-		}
-
+		};
+		for (const handler of defaultLineHandlers) handler(parsed, context);
 		pushLine(parsed);
 	}
 
@@ -442,7 +383,7 @@
 
 	let emptyLogMessage = $derived.by(() => {
 		if (lastLogLoadError) return '로그를 다시 불러오는 중입니다';
-		if (mode === 'managed' && recentRetryAttempt > 0) return '로그 catch-up 재시도 중입니다';
+		if (mode === 'managed' && recentRetryBackoff.attempts > 0) return '로그 catch-up 재시도 중입니다';
 		if (mode === 'managed' && (running || apiGate.state === 'open')) return '로그 파일을 찾는 중입니다';
 		return '표시할 로그가 아직 없습니다';
 	});
@@ -455,18 +396,17 @@
 
 	function scheduleManagedRecentRetry(reason: string) {
 		if (mode !== 'managed' || hasLoadedLogContent() || recentRetryTimer) return;
-		if (recentRetryAttempt >= MAX_RECENT_RETRY_ATTEMPTS) {
+		const delay = recentRetryBackoff.nextDelay();
+		if (delay === null) {
 			if (lastLogLoadError) {
 				addLine(`[DIAG] 로그 catch-up 재시도 중단: ${lastLogLoadError}`, false);
 			}
 			return;
 		}
-		const delay = RECENT_RETRY_BASE_DELAY_MS * Math.pow(2, recentRetryAttempt);
-		recentRetryAttempt += 1;
 		recentRetryTimer = setTimeout(async () => {
 			recentRetryTimer = null;
 			if (mode !== 'managed' || hasLoadedLogContent()) return;
-			addLine(`[DIAG] 로그 catch-up 재시도 #${recentRetryAttempt}: ${reason}`, false);
+			addLine(`[DIAG] 로그 catch-up 재시도 #${recentRetryBackoff.attempts}: ${reason}`, false);
 			await loadRecent();
 			if (!hasLoadedLogContent() && (running || apiGate.state === 'open')) {
 				scheduleManagedRecentRetry(reason);
@@ -514,10 +454,11 @@
 	}
 
 	function getReconnectDelay() {
-		return Math.min(BASE_DELAY * Math.pow(2, reconnectCount), 60000);
+		return sseReconnectBackoff.nextDelay() ?? 60000;
 	}
 
 	function manualReconnect() {
+		sseReconnectBackoff.reset();
 		reconnectCount = 0;
 		if (lines.length <= 3) {
 			void loadRecent();
@@ -558,6 +499,7 @@
 		eventSource.onopen = () => {
 			connected = 'connected';
 			sseStarted = true;
+			sseReconnectBackoff.reset();
 			reconnectCount = 0;
 			consecutiveErrors = 0;
 		};
@@ -606,7 +548,7 @@
 			eventSource = null;
 
 			connected = 'disconnected';
-			reconnectCount++;
+			reconnectCount = sseReconnectBackoff.attempts + 1;
 
 			// Redis 미연결 시 재연결 시도 중단 (서버에서 pubsub 누수 가속 방지)
 			const maxRetries = 5;
@@ -626,7 +568,7 @@
 				lines = res.lines.map((text: string) => parseLine(text, true));
 				expandedLongLines = new Set();
 				lastLogLoadError = null;
-				recentRetryAttempt = 0;
+				recentRetryBackoff.reset();
 				clearRecentRetryTimer();
 			}
 		} catch (error) {
@@ -720,7 +662,7 @@
 			}
 			lastLogLoadError = null;
 			if (hasLoadedLogContent()) {
-				recentRetryAttempt = 0;
+				recentRetryBackoff.reset();
 				clearRecentRetryTimer();
 			}
 		} catch (error) {
@@ -779,10 +721,6 @@
 		clearRecentRetryTimer();
 	});
 
-	function getTagStyle(tag: string) {
-		return tagColors[tag] ?? tagColors.INFO;
-	}
-
 	// 탭 전환 시 (hidden→visible) autoScroll=true이면 맨 아래로 복원
 	$effect(() => {
 		if (!logContainer) return;
@@ -824,7 +762,7 @@
 		}
 		if (previousManagedRetryKey === retryKey) return;
 		previousManagedRetryKey = retryKey;
-		recentRetryAttempt = 0;
+		recentRetryBackoff.reset();
 		if (!hasLoadedLogContent()) {
 			scheduleManagedRecentRetry('runner/api state changed');
 		}
@@ -1062,111 +1000,100 @@
 		{:else}
 			{#each visibleLines as line, i}
 				{#if line.tag === 'NOISE'}
-					<div class="dr-log-line dr-log-line-noise flex items-center py-0 leading-5 {line.isStale ? 'opacity-30' : ''}">
-						{#if expandedNoiseIndices.includes(i)}
-							<span class="text-gray-600 italic">··· {line.noiseCount} hidden lines ···</span>
-							<button
-								onclick={() => expandedNoiseIndices = expandedNoiseIndices.filter(n => n !== i)}
-								class="ml-2 text-gray-600 hover:text-gray-400"
-							>▲</button>
-						{:else}
-							<button
-								onclick={() => expandedNoiseIndices = [...expandedNoiseIndices, i]}
-								class="text-gray-600 hover:text-gray-400 italic w-full text-left"
-							>··· {line.noiseCount} hidden lines ···</button>
-						{/if}
-					</div>
+					<LogLineNoise
+						{line}
+						expanded={expandedNoiseIndices.includes(i)}
+						onExpand={() => expandedNoiseIndices = [...expandedNoiseIndices, i]}
+						onCollapse={() => expandedNoiseIndices = expandedNoiseIndices.filter(n => n !== i)}
+					/>
 				{:else if isSeparator(line.raw)}
-					<div class="py-2 text-center select-none opacity-60">
-						<span class="text-gray-500 text-[10px]">{extractSeparatorText(line.raw)}</span><!-- separator -->
-					</div>
+					<LogLineSeparator text={extractSeparatorText(line.raw)} />
 				{:else if line.tag === 'CYCLE'}
 					{@const style = getTagStyle(line.tag)}
+					{@const cycleInfo = getLogLineVariant(line)}
 					{@const cycleExpanded = isExpanded(line.id)}
 					{@const cycleCollapsed = shouldCollapseMessage(line.message)}
-					<div class="phase-separator {line.isStale ? 'opacity-30' : ''}">
-						<span class="dr-tag-badge {style.bg}">{line.tag}</span>
-						<span class="font-mono text-[10px] text-muted-foreground whitespace-pre-wrap">
-							{cycleCollapsed && !cycleExpanded ? getPreviewLines(line.message) : getRenderableText(line.message)}
-						</span>
-						{#if cycleCollapsed}
-							<button
-								type="button"
-								class={getExpandButtonClass(cycleExpanded)}
-								aria-expanded={cycleExpanded}
-								aria-pressed={cycleExpanded}
-								onclick={() => toggleExpand(line.id)}
-								onkeydown={(e) => handleExpandKeydown(e, line.id)}
-							>
-								{cycleExpanded ? '접기' : getExpandLabel(line.message)}
-							</button>
-						{/if}
-					</div>
+					<LogLine
+						{line}
+						{style}
+						variant={cycleInfo.variant}
+						containerClass={cycleInfo.containerClass}
+						bodyClass={cycleInfo.bodyClass}
+						expanded={cycleExpanded}
+						collapsed={cycleCollapsed}
+						expandLabel={getExpandLabel(line.message)}
+						expandButtonClass={getExpandButtonClass(cycleExpanded)}
+						onToggleExpand={() => toggleExpand(line.id)}
+						onExpandKeydown={(e) => handleExpandKeydown(e, line.id)}
+					>
+						{cycleCollapsed && !cycleExpanded ? getPreviewLines(line.message) : getRenderableText(line.message)}
+					</LogLine>
 				{:else if line.tag === 'PHASE'}
 					{@const style = getTagStyle(line.tag)}
+					{@const phaseInfo = getLogLineVariant(line)}
 					{@const phaseExpanded = isExpanded(line.id)}
 					{@const phaseCollapsed = shouldCollapseMessage(line.message)}
-					<div class="dr-log-line dr-log-line-phase flex items-start gap-2 py-0 leading-5 mt-1.5 border-t border-indigo-900/40 {line.isStale ? 'opacity-30' : ''}">
-						<span class="text-xs text-gray-400/60 shrink-0 w-[56px] tabular-nums select-none">{line.timestamp}</span>
-						<span class="shrink-0 w-[42px] text-right {style.text}">
-							<span class="dr-tag-badge {style.bg}">{line.tag}</span>
-						</span>
-						<span class="flex-1 min-w-0 break-all text-indigo-300 font-medium whitespace-pre-wrap">
-							{phaseCollapsed && !phaseExpanded ? getPreviewLines(line.message) : getRenderableText(line.message)}
-						</span>
-						{#if phaseCollapsed}
-							<button
-								type="button"
-								class={getExpandButtonClass(phaseExpanded)}
-								aria-expanded={phaseExpanded}
-								aria-pressed={phaseExpanded}
-								onclick={() => toggleExpand(line.id)}
-								onkeydown={(e) => handleExpandKeydown(e, line.id)}
-							>
-								{phaseExpanded ? '접기' : getExpandLabel(line.message)}
-							</button>
-						{/if}
-					</div>
+					<LogLine
+						{line}
+						{style}
+						variant={phaseInfo.variant}
+						containerClass={phaseInfo.containerClass}
+						bodyClass={phaseInfo.bodyClass}
+						expanded={phaseExpanded}
+						collapsed={phaseCollapsed}
+						expandLabel={getExpandLabel(line.message)}
+						expandButtonClass={getExpandButtonClass(phaseExpanded)}
+						onToggleExpand={() => toggleExpand(line.id)}
+						onExpandKeydown={(e) => handleExpandKeydown(e, line.id)}
+					>
+						{phaseCollapsed && !phaseExpanded ? getPreviewLines(line.message) : getRenderableText(line.message)}
+					</LogLine>
 				{:else if line.tag === 'TOOL'}
 					{@const style = getTagStyle(line.tag)}
+					{@const toolInfo = getLogLineVariant(line)}
 					{@const toolExpanded = isExpanded(line.id)}
 					{@const toolCollapsed = shouldCollapseMessage(line.message)}
-					<div class="dr-log-line dr-log-line-tool flex items-start gap-2 py-0 leading-5 opacity-40 {line.isStale ? 'opacity-20' : ''}">
-						<span class="text-xs text-gray-600 shrink-0 w-[56px] tabular-nums select-none">{line.timestamp}</span>
-						<span class="shrink-0 w-[42px] text-right {style.text}">
-							<span class="dr-tag-badge {style.bg}">{line.tag}</span>
-						</span>
-						<span class="flex-1 min-w-0 break-all whitespace-pre-wrap text-gray-500">
-							{toolCollapsed && !toolExpanded ? getPreviewLines(line.message) : getRenderableText(line.message)}
-						</span>
-						{#if toolCollapsed}
-							<button
-								type="button"
-								class={getExpandButtonClass(toolExpanded)}
-								aria-expanded={toolExpanded}
-								aria-pressed={toolExpanded}
-								onclick={() => toggleExpand(line.id)}
-								onkeydown={(e) => handleExpandKeydown(e, line.id)}
-							>
-								{toolExpanded ? '접기' : getExpandLabel(line.message)}
-							</button>
-						{/if}
-					</div>
+					<LogLine
+						{line}
+						{style}
+						variant={toolInfo.variant}
+						containerClass={toolInfo.containerClass}
+						bodyClass={toolInfo.bodyClass}
+						timestampClass={toolInfo.timestampClass}
+						expanded={toolExpanded}
+						collapsed={toolCollapsed}
+						expandLabel={getExpandLabel(line.message)}
+						expandButtonClass={getExpandButtonClass(toolExpanded)}
+						onToggleExpand={() => toggleExpand(line.id)}
+						onExpandKeydown={(e) => handleExpandKeydown(e, line.id)}
+					>
+						{toolCollapsed && !toolExpanded ? getPreviewLines(line.message) : getRenderableText(line.message)}
+					</LogLine>
 				{:else if line.tag === 'RESULT'}
 					{@const style = getTagStyle(line.tag)}
 					{@const resultSegments = parseResultSegments(line.message)}
-					{@const hasMultiResultSegments = resultSegments.length >= 2}
 					{@const resultMatch = resultSegments.length === 1 ? resultSegments[0] : null}
 					{@const resultBody = resultMatch ? resultMatch.text : line.message}
 					{@const resultExpanded = isExpanded(line.id)}
 					{@const resultCollapsed = shouldCollapseMessage(resultBody)}
 					{@const resultIsFailure = isFailureResultBody(resultBody)}
-					<div class="dr-log-line dr-log-line-result flex items-start gap-0 py-0 leading-5 {resultIsFailure ? 'opacity-100 bg-red-950/35 border-l-2 border-red-500 -mx-1 px-1 rounded' : 'opacity-60'} {line.isStale ? 'opacity-20' : ''}">
+					{@const resultInfo = getLogLineVariant(line, { resultFailure: resultIsFailure })}
+					<LogLine
+						{line}
+						{style}
+						variant={resultInfo.variant}
+						containerClass={resultInfo.containerClass}
+						bodyClass={resultInfo.bodyClass}
+						timestampClass={resultInfo.timestampClass}
+						badgeWrapperClass={resultInfo.badgeWrapperClass}
+						expanded={resultExpanded}
+						collapsed={resultCollapsed}
+						expandLabel={getExpandLabel(resultBody)}
+						expandButtonClass={getExpandButtonClass(resultExpanded)}
+						onToggleExpand={() => toggleExpand(line.id)}
+						onExpandKeydown={(e) => handleExpandKeydown(e, line.id)}
+					>
 						{#if resultMatch}
-							<span class="text-xs text-gray-600 shrink-0 w-[56px] tabular-nums select-none text-right pr-1">{line.timestamp}</span>
-							<span class="shrink-0 w-[42px] text-right {style.text} mr-1">
-								<span class="dr-tag-badge {style.bg}">{line.tag}</span>
-							</span>
 							<span class="flex-1 min-w-0 flex items-baseline bg-gray-900/60 rounded px-1 font-mono">
 								<span class="shrink-0 w-[28px] text-right pr-1.5 text-gray-600 tabular-nums select-none text-[10px]">{resultMatch.num}</span>
 								<span class="text-gray-500 select-none text-[10px] pr-1">→</span>
@@ -1176,72 +1103,37 @@
 								<span class="flex-1 min-w-0 break-all whitespace-pre-wrap {resultIsFailure ? 'text-red-200' : 'text-emerald-300/80'} text-[11px]">
 									{resultCollapsed && !resultExpanded ? getPreviewLines(resultBody) : getRenderableText(resultBody)}
 								</span>
-								{#if resultCollapsed}
-									<button
-										type="button"
-										class={getExpandButtonClass(resultExpanded)}
-										aria-expanded={resultExpanded}
-										aria-pressed={resultExpanded}
-										onclick={() => toggleExpand(line.id)}
-										onkeydown={(e) => handleExpandKeydown(e, line.id)}
-									>
-										{resultExpanded ? '접기' : getExpandLabel(resultBody)}
-									</button>
-								{/if}
 							</span>
 						{:else}
-							<span class="text-xs text-gray-600 shrink-0 w-[56px] tabular-nums select-none">{line.timestamp}</span>
-							<span class="shrink-0 w-[42px] text-right {style.text}">
-								<span class="dr-tag-badge {style.bg}">{line.tag}</span>
-							</span>
 							{#if resultIsFailure}
 								<span class="shrink-0 mx-1 rounded bg-red-500/20 px-1 text-[10px] font-semibold text-red-200">FAIL</span>
 							{/if}
 							<span class="flex-1 min-w-0 break-all whitespace-pre-wrap {resultIsFailure ? 'text-red-200' : 'text-gray-400'} text-xs">
 								{resultCollapsed && !resultExpanded ? getPreviewLines(resultBody) : getRenderableText(resultBody)}
 							</span>
-							{#if resultCollapsed}
-								<button
-									type="button"
-									class={getExpandButtonClass(resultExpanded)}
-									aria-expanded={resultExpanded}
-									aria-pressed={resultExpanded}
-									onclick={() => toggleExpand(line.id)}
-									onkeydown={(e) => handleExpandKeydown(e, line.id)}
-								>
-									{resultExpanded ? '접기' : getExpandLabel(resultBody)}
-								</button>
-							{/if}
 						{/if}
-					</div>
+					</LogLine>
 				{:else if line.tag}
 					{@const style = getTagStyle(line.tag)}
+					{@const lineInfo = getLogLineVariant(line)}
 					{@const lineExpanded = isExpanded(line.id)}
 					{@const lineCollapsed = shouldCollapseMessage(line.message)}
-					<div
-						class="dr-log-line dr-log-line-{line.tag.toLowerCase()} flex items-start gap-2 py-0 leading-5 {line.isStale ? 'opacity-30' : ''} {line.tag === 'ERROR' ? 'bg-red-950/50 -mx-3 px-3 rounded' : line.tag === 'FAILURE' ? 'bg-red-950/70 border-l-2 border-red-500 -mx-3 px-3 rounded' : line.tag === 'HOLD' ? 'bg-yellow-950/40 border-l-2 border-yellow-500 -mx-3 px-3 rounded' : ''}"
-						title={line.tag === 'DONE' ? 'LLM call done; runner completion is reported by the completed event' : undefined}
+					<LogLine
+						{line}
+						{style}
+						variant={lineInfo.variant}
+						containerClass={lineInfo.containerClass}
+						bodyClass={lineInfo.bodyClass}
+						title={lineInfo.title}
+						expanded={lineExpanded}
+						collapsed={lineCollapsed}
+						expandLabel={getExpandLabel(line.message)}
+						expandButtonClass={getExpandButtonClass(lineExpanded)}
+						onToggleExpand={() => toggleExpand(line.id)}
+						onExpandKeydown={(e) => handleExpandKeydown(e, line.id)}
 					>
-						<span class="text-xs text-gray-400/60 shrink-0 w-[56px] tabular-nums select-none">{line.timestamp}</span>
-						<span class="shrink-0 w-[42px] text-right {style.text}">
-							<span class="dr-tag-badge {style.bg}">{line.tag}</span>
-						</span>
-						<span class="flex-1 min-w-0 break-all whitespace-pre-wrap {line.tag === 'FAILURE' ? 'text-red-300 font-bold' : line.tag === 'HOLD' ? 'text-yellow-300 font-bold' : line.tag === 'ERROR' ? 'text-red-400' : line.tag === 'DONE' ? 'text-green-400' : 'text-gray-300'}">
-							{lineCollapsed && !lineExpanded ? getPreviewLines(line.message) : getRenderableText(line.message)}
-						</span>
-						{#if lineCollapsed}
-							<button
-								type="button"
-								class={getExpandButtonClass(lineExpanded)}
-								aria-expanded={lineExpanded}
-								aria-pressed={lineExpanded}
-								onclick={() => toggleExpand(line.id)}
-								onkeydown={(e) => handleExpandKeydown(e, line.id)}
-							>
-								{lineExpanded ? '접기' : getExpandLabel(line.message)}
-							</button>
-						{/if}
-					</div>
+						{lineCollapsed && !lineExpanded ? getPreviewLines(line.message) : getRenderableText(line.message)}
+					</LogLine>
 				{:else}
 					{@const rawExpanded = isExpanded(line.id)}
 					{@const rawCollapsed = shouldCollapseMessage(line.raw)}
