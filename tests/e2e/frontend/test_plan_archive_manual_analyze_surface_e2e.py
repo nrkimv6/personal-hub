@@ -44,8 +44,14 @@ def _record_payload(**overrides):
     return payload
 
 
-def _install_archive_routes(page: Page) -> dict[str, int]:
-    calls = {"analyze": 0}
+def _install_archive_routes(page: Page) -> dict[str, object]:
+    calls: dict[str, object] = {
+        "analyze": 0,
+        "preview": 0,
+        "apply": 0,
+        "reanalyze": 0,
+        "reanalyze_payloads": [],
+    }
 
     def handle_api(route):
         url = route.request.url
