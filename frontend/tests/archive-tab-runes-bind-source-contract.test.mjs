@@ -3,9 +3,7 @@ import { readFileSync } from 'node:fs';
 import test from 'node:test';
 
 const archiveTabPath = 'src/routes/plans/ArchiveTab.svelte';
-const residualStatePath = 'src/routes/plans/archive-tab/planArchiveResidualState.svelte.ts';
 const archiveTabSource = readFileSync(archiveTabPath, 'utf8');
-const residualStateSource = readFileSync(residualStatePath, 'utf8');
 let svelteCompile = null;
 let svelteCompilerLoadError = null;
 
@@ -30,17 +28,17 @@ const retrievalBindTargets = [
 
 const localBindTargets = [...retrievalBindTargets];
 
-function findLetInitializer(name) {
-	const match = residualStateSource.match(new RegExp(`^[ \\t]*${name}[ \\t]*=([^\\r\\n]*)`, 'm'));
+function findLetInitializer(source, name) {
+	const match = source.match(new RegExp(`^[ \\t]*let[ \\t]+${name}(?::[^=\\r\\n]+)?[ \\t]*=([^\\r\\n]*)`, 'm'));
 	return match?.[1].trimStart() ?? null;
 }
 
-function hasStateDeclaration(name) {
-	return findLetInitializer(name)?.startsWith('$state(') === true;
+function hasStateDeclaration(source, name) {
+	return findLetInitializer(source, name)?.startsWith('$state(') === true;
 }
 
-function hasPlainLetDeclaration(name) {
-	const initializer = findLetInitializer(name);
+function hasPlainLetDeclaration(source, name) {
+	const initializer = findLetInitializer(source, name);
 	return initializer != null && !initializer.startsWith('$state(');
 }
 
@@ -113,28 +111,23 @@ test('ArchiveTab Svelte markup parses', {
 	}
 });
 
-test('planArchiveResidualState retrieval bind targets are Svelte runes state', () => {
-	const failures = retrievalBindTargets.filter((name) => {
-		return !hasStateDeclaration(name);
-	});
-
-	assert.deepEqual(
-		failures,
-		[],
-		`${residualStatePath}: Retrieval bind targets must be declared with $state(...): ${failures.join(', ')}`,
+test('ArchiveTab does not import retrieval residual state', () => {
+	assert.equal(
+		archiveTabSource.includes('./archive-tab/planArchiveResidualState.svelte'),
+		false,
+		`${archiveTabPath}: archive tab must not import planArchiveResidualState.`,
 	);
 });
 
-test('ArchiveTab retrieval inputs do not bind to plain local lets', () => {
+test('ArchiveTab does not keep retrieval bind inputs', () => {
 	const failures = localBindTargets.filter((name) => {
-		const hasBind = new RegExp(`bind:value=\\{${name}\\}`).test(archiveTabSource);
-		return hasBind && hasPlainLetDeclaration(name);
+		return new RegExp(`bind:value=\\{${name}\\}`).test(archiveTabSource);
 	});
 
 	assert.deepEqual(
 		failures,
 		[],
-		`${archiveTabPath}: Can only bind to state or props. Plain local let declarations cannot back retrieval bind:value targets: ${failures.join(', ')}`,
+		`${archiveTabPath}: retrieval bind:value targets belong on /scheduler/plan-archive, not archive tab: ${failures.join(', ')}`,
 	);
 });
 
@@ -153,7 +146,7 @@ test('ArchiveTab local bind targets use runes state', () => {
 	const bindPattern = /bind:(?:value|checked)=\{([A-Za-z_$][\w$]*)\}/g;
 
 	for (const [, name] of archiveTabSource.matchAll(bindPattern)) {
-		if (hasPlainLetDeclaration(name) && !hasStateDeclaration(name)) {
+		if (hasPlainLetDeclaration(archiveTabSource, name) && !hasStateDeclaration(archiveTabSource, name)) {
 			declarationFailures.push(name);
 		}
 	}
@@ -162,22 +155,5 @@ test('ArchiveTab local bind targets use runes state', () => {
 		[...new Set(declarationFailures)],
 		[],
 		`${archiveTabPath}: Can only bind to state or props. Local bind targets must use $state(...).`,
-	);
-});
-
-test('planArchiveResidualState does not keep analyze bind targets', () => {
-	const forbidden = [
-		'queueAnalyzeProvider',
-		'queueAnalyzeModel',
-		'manualAnalyzeProvider',
-		'manualAnalyzeModel',
-		'manualAnalyzeTimeout',
-	];
-	const found = forbidden.filter((name) => residualStateSource.includes(name));
-
-	assert.deepEqual(
-		found,
-		[],
-		`${residualStatePath}: Analyze bind state belongs to scheduler page, not ArchiveTab residual state.`,
 	);
 });
