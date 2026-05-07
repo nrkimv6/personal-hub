@@ -183,7 +183,7 @@ def test_archive_retrieval_surface_is_removed_from_archive_tab(
 
     page.goto(f"{frontend_url}/plans?tab=archive", wait_until="domcontentloaded")
 
-    expect(page.get_by_text("archived retrieval seed")).to_be_visible()
+    expect(page.get_by_text("아카이브된 계획서")).to_be_visible()
     expect(page.get_by_text("Plan Archive retrieval")).to_have_count(0)
     expect(page.get_by_text("14d follow-up")).to_have_count(0)
     expect(page.get_by_text("Top file refs")).to_have_count(0)

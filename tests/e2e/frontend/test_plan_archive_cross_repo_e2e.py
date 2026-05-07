@@ -176,7 +176,7 @@ def archive_cross_repo_page(page: Page, frontend_url: str, system_mode: str):
 def test_archive_cross_repo_surface_is_removed_from_archive_tab(archive_cross_repo_page):
     page, calls = archive_cross_repo_page
 
-    expect(page.get_by_text("Plan Archive cross repo")).to_be_visible()
+    expect(page.get_by_text("아카이브된 계획서")).to_be_visible()
     expect(page.get_by_placeholder("repo_key")).to_have_count(0)
     expect(page.get_by_role("button", name="retrieval 검색")).to_have_count(0)
     expect(page.get_by_text("wtools · downstream_sync")).to_have_count(0)
