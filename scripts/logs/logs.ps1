@@ -19,6 +19,9 @@ param(
     [switch]$Admin,  # Use admin log directory (logs/admin/)
 
     [Parameter()]
+    [switch]$PublicSafe,  # Use public-safe source allowlist
+
+    [Parameter()]
     [switch]$Cleanup,  # Filter output to show only runner cleanup events
 
     [Parameter()]
@@ -51,7 +54,7 @@ Monitor Page Log Viewer
 =======================
 
 Usage:
-    .\logs.ps1 [target] [-Lines N] [-Follow] [-Cleanup] [-Help]
+    .\logs.ps1 [target] [-Lines N] [-Follow] [-PublicSafe] [-Cleanup] [-Help]
 
 Targets:
     all       Show API, Worker, Frontend, and Dev-Runner logs together (default)
@@ -65,6 +68,7 @@ Targets:
 Options:
     -Lines N    Number of lines to show (default: 50)
     -Follow     Follow logs in real-time (like tail -f)
+    -PublicSafe Show only public-safe log sources (frontend/tunnel)
     -Cleanup    Filter output to show only runner cleanup/정리 events
     -Help       Show this help message
 
@@ -75,6 +79,7 @@ Examples:
     .\logs.ps1 devrunner -Follow -Cleanup  # Show only cleanup events in real-time
     .\logs.ps1 worker -Lines 100         # Show last 100 lines of worker logs
     .\logs.ps1 all -Follow               # Follow all logs in real-time
+    .\logs.ps1 all -Follow -PublicSafe   # Follow public-safe logs only
 
 "@
     exit 0
@@ -707,6 +712,10 @@ if ($Follow) {
         $pyArgs += "--admin"
     }
 
+    if ($PublicSafe) {
+        $pyArgs += "--public-safe"
+    }
+
     if ($Cleanup) {
         $pyArgs += "--cleanup"
     }
@@ -733,6 +742,10 @@ if ($Follow) {
 
     if ($Admin) {
         $pyArgs += "--admin"
+    }
+
+    if ($PublicSafe) {
+        $pyArgs += "--public-safe"
     }
 
     if ($Cleanup) {
