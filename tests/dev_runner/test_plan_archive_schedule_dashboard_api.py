@@ -298,6 +298,7 @@ def test_archive_llm_request_detail_R_returns_requested_effective_actual_target_
             "engine": "claude",
             "profile_name": "work",
             "label": "claude/work/claude-sonnet-4-5",
+            "dedupe_key": "profile:claude:work:claude-sonnet-4-5",
         },
         "effective_target": {
             "provider": "claude",
@@ -306,6 +307,7 @@ def test_archive_llm_request_detail_R_returns_requested_effective_actual_target_
             "engine": "claude",
             "profile_name": "work",
             "label": "claude/work/claude-sonnet-4-5",
+            "dedupe_key": "profile:claude:work:claude-sonnet-4-5",
         },
         "candidate_profiles": [{"engine": "claude", "profile_name": "work"}],
         "target_label": "claude/work/claude-sonnet-4-5",
@@ -349,6 +351,52 @@ def test_archive_llm_request_detail_R_returns_requested_effective_actual_target_
     assert data["assigned_profile"]["profile_name"] == "work"
     assert data["save_outcome_status"] == "stale_skipped"
     assert data["save_outcome_reason"] == "newer_completed_result_exists"
+
+    list_resp = public_client.get("/api/v1/plans/records/archive-llm-requests?page=1&page_size=10")
+    assert list_resp.status_code == 200
+    row = next(item for item in list_resp.json()["items"] if item["id"] == req.id)
+    assert row["profile_key"] == "claude:work"
+    assert row["engine"] == "claude"
+    assert row["profile_name"] == "work"
+    assert row["target_label"] == "claude/work/claude-sonnet-4-5"
+    assert row["requested_target"]["dedupe_key"] == "profile:claude:work:claude-sonnet-4-5"
+    assert row["effective_target"]["profile_name"] == "work"
+
+
+def test_archive_llm_request_detail_R_handles_malformed_cli_options_target_fields_null_safe(
+    public_client,
+    db,
+):
+    """malformed cli_options must not turn detail target read-back into a 500."""
+    from app.modules.claude_worker.models.llm_request import LLMRequest
+
+    req = LLMRequest(
+        caller_type="plan_archive_analyze",
+        caller_id="42",
+        status="failed",
+        provider="codex",
+        model="gpt-5.5",
+        requested_at=datetime.utcnow(),
+        prompt="test prompt",
+        cli_options='{"requested_target": ',
+    )
+    db.add(req)
+    db.commit()
+    db.refresh(req)
+
+    resp = public_client.get(f"/api/v1/plans/records/archive-llm-requests/{req.id}")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["cli_options"] == '{"requested_target": '
+    assert data["profile_key"] is None
+    assert data["target_label"] is None
+    assert data["requested_target"]["provider"] == "codex"
+    assert data["requested_target"]["model"] == "gpt-5.5"
+    assert data["requested_target"]["profile_key"] is None
+    assert data["effective_target"]["provider"] == "codex"
+    assert data["actual_target"]["provider"] == "codex"
+    assert data["actual_target"]["engine"] is None
+    assert data["assigned_profile"] is None
 
 
 def test_archive_llm_request_detail_R_profileless_actual_target_does_not_inherit_requested_profile(
