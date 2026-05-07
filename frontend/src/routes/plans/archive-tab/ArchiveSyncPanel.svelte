@@ -31,9 +31,6 @@
     disabled={importLoading}
     title="archive 경로의 파일을 DB에 일괄 등록합니다 (DB 이관). 이미 등록된 레코드는 category만 업데이트합니다."
   >{importLoading ? '이관 중...' : 'DB 이관'}</button>
-  <span class="text-xs text-muted-foreground">
-    <a href="/scheduler/plan-archive" class="text-primary underline hover:no-underline">Plan Archive 운영 →</a>
-  </span>
   {#if importResult}
     <span class="text-xs text-muted-foreground">이관: {importResult.created}생성 {importResult.updated}갱신 {importResult.skipped}스킵</span>
   {/if}
