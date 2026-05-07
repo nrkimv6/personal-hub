@@ -12,6 +12,7 @@ def _skip_admin_mode_if_public(system_mode: str):
 @pytest.fixture
 def archive_cross_repo_page(page: Page, frontend_url: str, system_mode: str):
     _skip_admin_mode_if_public(system_mode)
+    calls = {"search": 0, "metrics": 0, "cross_index": 0}
 
     def route_api(route: Route):
         url = route.request.url
@@ -79,6 +80,7 @@ def archive_cross_repo_page(page: Page, frontend_url: str, system_mode: str):
             )
             return
         if "/api/v1/plans/retrieval/search" in url:
+            calls["search"] += 1
             route.fulfill(
                 status=200,
                 json={
@@ -118,6 +120,7 @@ def archive_cross_repo_page(page: Page, frontend_url: str, system_mode: str):
             )
             return
         if "/api/v1/plans/retrieval/metrics" in url:
+            calls["metrics"] += 1
             route.fulfill(
                 status=200,
                 json={
@@ -145,6 +148,7 @@ def archive_cross_repo_page(page: Page, frontend_url: str, system_mode: str):
             )
             return
         if "/api/v1/plans/retrieval/cross-repo/index" in url:
+            calls["cross_index"] += 1
             route.fulfill(
                 status=200,
                 json={
@@ -164,31 +168,31 @@ def archive_cross_repo_page(page: Page, frontend_url: str, system_mode: str):
     page.route(re.compile(r".*/api/v1/llm/requests.*"), lambda route: route.fulfill(status=200, json={"items": [], "page": 1, "pages": 1, "total": 0}))
     page.route(re.compile(r".*/api/v1/dev-runner/plans.*"), lambda route: route.fulfill(status=200, json=[]))
     page.goto(f"{frontend_url}/plans?tab=archive", wait_until="domcontentloaded")
-    expect(page.get_by_text("Plan Archive retrieval")).to_be_visible()
-    return page
+    expect(page.get_by_text("Plan Archive retrieval")).to_have_count(0)
+    return page, calls
 
 
 @pytest.mark.e2e
-def test_archive_cross_repo_surface_renders_repo_filter_badge_and_warning(archive_cross_repo_page: Page):
-    page = archive_cross_repo_page
+def test_archive_cross_repo_surface_is_removed_from_archive_tab(archive_cross_repo_page):
+    page, calls = archive_cross_repo_page
 
-    expect(page.get_by_placeholder("repo_key")).to_be_visible()
-    page.get_by_placeholder("repo_key").fill("wtools")
-    page.get_by_role("button", name="retrieval 검색").click()
-
-    expect(page.get_by_text("wtools · downstream_sync")).to_be_visible()
-    expect(page.get_by_text("Repo evidence", exact=True)).to_be_visible()
-    expect(page.get_by_text("Downstream sync evidence 후보")).to_be_visible()
+    expect(page.get_by_text("아카이브된 계획서")).to_be_visible()
+    expect(page.get_by_placeholder("repo_key")).to_have_count(0)
+    expect(page.get_by_role("button", name="retrieval 검색")).to_have_count(0)
+    expect(page.get_by_text("wtools · downstream_sync")).to_have_count(0)
+    expect(page.get_by_text("Repo evidence", exact=True)).to_have_count(0)
+    expect(page.get_by_text("Downstream sync evidence 후보")).to_have_count(0)
+    assert calls == {"search": 0, "metrics": 0, "cross_index": 0}
 
 
 @pytest.mark.e2e
-def test_archive_cross_repo_surface_runs_dry_run_for_selected_record(archive_cross_repo_page: Page):
-    page = archive_cross_repo_page
+def test_archive_cross_repo_index_controls_are_removed_from_archive_tab(archive_cross_repo_page):
+    page, calls = archive_cross_repo_page
 
     record_cell = page.locator('td[title="docs/archive/2026-05-05-cross.md"]').first
     expect(record_cell).to_be_visible()
     record_cell.evaluate("el => el.click()")
-    expect(page.get_by_text("Cross-repo index")).to_be_visible()
-    expect(page.get_by_text("#42 Plan Archive cross repo")).to_be_visible()
-    page.get_by_role("button", name="cross dry-run").click()
-    expect(page.get_by_text("repos 2", exact=True)).to_be_visible()
+    expect(page.get_by_text("Cross-repo index")).to_have_count(0)
+    expect(page.get_by_role("button", name="cross dry-run")).to_have_count(0)
+    expect(page.get_by_text("repos 2", exact=True)).to_have_count(0)
+    assert calls == {"search": 0, "metrics": 0, "cross_index": 0}

@@ -31,10 +31,16 @@ test('ArchiveTab does not contain LLM request result modal', () => {
 	assert.doesNotMatch(archiveTabSource, /requestDetailRecord|requestDetailLoading/);
 });
 
-// 유지 대상 섹션 — ArchiveTab에 잔류
-test('ArchiveTab contains Plan Archive retrieval section (retained)', () => {
-	assert.match(archiveTabSource, /ArchiveRetrievalPanel/);
-	assert.match(archiveTabSource, /planArchiveResidualState/);
+test('ArchiveTab does not contain Plan Archive retrieval section', () => {
+	assert.doesNotMatch(archiveTabSource, /ArchiveRetrievalPanel/);
+	assert.doesNotMatch(archiveTabSource, /planArchiveResidualState/);
+	assert.doesNotMatch(archiveTabSource, /Plan Archive retrieval/);
+});
+
+test('ArchiveTab does not contain moved-operation announcement banner', () => {
+	assert.doesNotMatch(archiveTabSource, /archive 파일\/DB 관리 전용/);
+	assert.doesNotMatch(archiveTabSource, /schedule 운영/);
+	assert.doesNotMatch(archiveTabSource, /\/scheduler\/plan-archive/);
 });
 
 test('scheduler plan archive page owns operational sections', () => {

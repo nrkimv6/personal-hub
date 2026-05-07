@@ -17,7 +17,7 @@ def _skip_admin_mode_if_public(system_mode: str) -> None:
 
 
 def _install_archive_routes(page: Page) -> dict[str, int]:
-    calls = {"index_apply": 0, "index_dry_run": 0}
+    calls = {"index_apply": 0, "index_dry_run": 0, "metrics": 0, "search": 0}
 
     def handle_api(route):
         url = route.request.url
@@ -93,6 +93,7 @@ def _install_archive_routes(page: Page) -> dict[str, int]:
             _json_response(route, {"items": [], "total": 0, "page": 1, "page_size": 50, "pages": 1})
             return
         if "/api/v1/plans/retrieval/search" in url:
+            calls["search"] += 1
             _json_response(
                 route,
                 {
@@ -131,6 +132,7 @@ def _install_archive_routes(page: Page) -> dict[str, int]:
             )
             return
         if "/api/v1/plans/retrieval/metrics" in url:
+            calls["metrics"] += 1
             _json_response(
                 route,
                 {
@@ -171,34 +173,7 @@ def _install_archive_routes(page: Page) -> dict[str, int]:
     return calls
 
 
-def test_archive_retrieval_surface_renders_search_evidence_and_metrics(
-    page: Page,
-    frontend_url: str,
-    system_mode: str,
-):
-    _skip_admin_mode_if_public(system_mode)
-    _install_archive_routes(page)
-
-    page.goto(f"{frontend_url}/plans?tab=archive", wait_until="domcontentloaded")
-
-    expect(page.get_by_text("Plan Archive retrieval")).to_be_visible()
-    expect(page.get_by_text("14d follow-up")).to_be_visible()
-    expect(page.get_by_text("50%")).to_be_visible()
-    expect(page.get_by_text("Top file refs")).to_be_visible()
-    expect(page.get_by_text("frontend/src/routes/plans/ArchiveTab.svelte").first).to_be_visible()
-    expect(page.get_by_text("누락 후보 파일군")).to_be_visible()
-
-    page.get_by_placeholder("키워드, 파일명, 함수명").fill("evidence")
-    page.get_by_placeholder("파일 경로 filter").fill("ArchiveTab.svelte")
-    page.get_by_role("button", name="retrieval 검색").click()
-
-    expect(page.get_by_text("Plan Archive retrieval index MVP")).to_be_visible()
-    expect(page.get_by_text("chunk #301")).to_be_visible()
-    expect(page.get_by_text("evidence chunk와 source id를 표시한다.")).to_be_visible()
-    expect(page.get_by_text("#401 mentioned_in_plan: frontend/src/routes/plans/ArchiveTab.svelte")).to_be_visible()
-
-
-def test_archive_index_apply_requires_dry_run_result(
+def test_archive_retrieval_surface_is_removed_from_archive_tab(
     page: Page,
     frontend_url: str,
     system_mode: str,
@@ -208,15 +183,37 @@ def test_archive_index_apply_requires_dry_run_result(
 
     page.goto(f"{frontend_url}/plans?tab=archive", wait_until="domcontentloaded")
 
-    apply_button = page.get_by_role("button", name="apply index")
-    expect(apply_button).to_be_disabled()
+    expect(page.get_by_text("아카이브된 계획서")).to_be_visible()
+    expect(page.get_by_text("Plan Archive retrieval")).to_have_count(0)
+    expect(page.get_by_text("14d follow-up")).to_have_count(0)
+    expect(page.get_by_text("Top file refs")).to_have_count(0)
+    expect(page.get_by_text("누락 후보 파일군")).to_have_count(0)
+    expect(page.get_by_placeholder("키워드, 파일명, 함수명")).to_have_count(0)
+    expect(page.get_by_placeholder("파일 경로 filter")).to_have_count(0)
+    expect(page.get_by_role("button", name="retrieval 검색")).to_have_count(0)
+
+    assert calls["index_dry_run"] == 0
     assert calls["index_apply"] == 0
+    assert calls["metrics"] == 0
+    assert calls["search"] == 0
 
-    page.get_by_role("button", name="dry-run").click()
-    expect(page.get_by_text("indexed 9", exact=True)).to_be_visible()
-    expect(apply_button).to_be_enabled()
 
-    apply_button.click()
-    expect(page.get_by_text("run #77")).to_be_visible()
-    assert calls["index_dry_run"] == 1
-    assert calls["index_apply"] == 1
+def test_archive_index_controls_are_removed_from_archive_tab(
+    page: Page,
+    frontend_url: str,
+    system_mode: str,
+):
+    _skip_admin_mode_if_public(system_mode)
+    calls = _install_archive_routes(page)
+
+    page.goto(f"{frontend_url}/plans?tab=archive", wait_until="domcontentloaded")
+
+    expect(page.get_by_role("button", name="dry-run")).to_have_count(0)
+    expect(page.get_by_role("button", name="apply index")).to_have_count(0)
+    expect(page.get_by_text("indexed 9", exact=True)).to_have_count(0)
+    expect(page.get_by_text("run #77")).to_have_count(0)
+
+    assert calls["index_dry_run"] == 0
+    assert calls["index_apply"] == 0
+    assert calls["metrics"] == 0
+    assert calls["search"] == 0

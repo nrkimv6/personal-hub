@@ -93,6 +93,6 @@ def test_archive_tab_hides_execution_readiness_missing_warning(
 
     page.goto(f"{frontend_url}/automation?tab=plans&subtab=archive", wait_until="domcontentloaded")
 
-    expect(page.get_by_text("이 화면은 archive 파일/DB 관리 전용입니다.")).to_be_visible()
+    expect(page.get_by_text("이 화면은 archive 파일/DB 관리 전용입니다.")).to_have_count(0)
     expect(page.get_by_text("Plan Archive execution readiness missing")).to_have_count(0)
     expect(page.get_by_text("llm_schedule_profile_policies")).to_have_count(0)
