@@ -6,6 +6,7 @@ from sqlalchemy import Column, DateTime, ForeignKey, Index, Integer, JSON, Strin
 from sqlalchemy.orm import relationship
 
 from app.models.base import Base
+from app.modules.claude_worker.models import llm_request as _llm_request  # noqa: F401
 
 
 class PlanArchiveExecutionJob(Base):
