@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import subprocess
 import sys
+import threading
 import time
 from datetime import date
 from pathlib import Path
@@ -85,3 +86,71 @@ def test_log_viewer_follow_subprocess_picks_up_late_file(tmp_path: Path):
             proc.wait(timeout=3.0)
         except subprocess.TimeoutExpired:
             proc.kill()
+
+
+@pytest.mark.timeout(30)
+def test_public_safe_follow_E_does_not_emit_worker_process_lines(tmp_path: Path):
+    """T3: public-safe follow subprocess는 API worker/process 진단 라인을 출력하지 않는다."""
+    today_str = date.today().strftime("%Y%m%d")
+    api_log = tmp_path / f"api_{today_str}_120000.log"
+    frontend_log = tmp_path / f"frontend_2_{today_str}_120000.log"
+    api_log.write_text("", encoding="utf-8")
+    frontend_log.write_text("", encoding="utf-8")
+
+    import os
+
+    full_env = {
+        **os.environ,
+        "MONITOR_LOG_DIR": str(tmp_path),
+        "PYTHONUNBUFFERED": "1",
+        "STATIC_WATCHER_INTERVAL": "0.2",
+    }
+
+    proc = subprocess.Popen(
+        [sys.executable, "-m", "app.log_viewer", "--follow", "--public-safe"],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        env=full_env,
+        cwd=str(Path(__file__).resolve().parent.parent.parent),
+    )
+
+    lines: list[str] = []
+
+    def reader() -> None:
+        assert proc.stdout is not None
+        for line in proc.stdout:
+            lines.append(line)
+
+    thread = threading.Thread(target=reader, daemon=True)
+    thread.start()
+
+    try:
+        time.sleep(0.8)
+        with api_log.open("a", encoding="utf-8") as fh:
+            fh.write("role=claude_watchdog pid=1234 ppid=1 [process-watch]\n")
+        with frontend_log.open("a", encoding="utf-8") as fh:
+            fh.write("ERROR frontend_public_safe_allowed\n")
+
+        deadline = time.monotonic() + 10.0
+        while time.monotonic() < deadline:
+            output = "".join(lines)
+            if "frontend_public_safe_allowed" in output:
+                break
+            time.sleep(0.1)
+
+        output = "".join(lines)
+        assert "frontend_public_safe_allowed" in output
+        assert "role=claude_watchdog" not in output
+        assert "pid=1234" not in output
+        assert "[process-watch]" not in output
+        assert "api_" not in output
+    finally:
+        proc.terminate()
+        try:
+            proc.wait(timeout=3.0)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+        thread.join(timeout=1.0)
