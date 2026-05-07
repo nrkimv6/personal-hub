@@ -261,6 +261,7 @@ def test_archive_profile_execution_controls_and_capacity_state(
     frontend_url: str,
     system_mode: str,
 ):
+    """Scheduler surface smoke; selected-target payload shape is owned by schedule observability E2E."""
     _skip_admin_mode_if_public(system_mode)
     calls = _install_archive_execution_routes(page)
     page.add_init_script("localStorage.clear()")
@@ -284,18 +285,3 @@ def test_archive_profile_execution_controls_and_capacity_state(
     page.get_by_role("button", name="Backlog 실행").click()
     expect(page.get_by_text("큐잉 1건", exact=True)).to_be_visible()
     assert calls["run"] == 1
-    assert calls["run_payloads"] == [
-        {
-            "selected_targets": [
-                {
-                    "provider": "claude",
-                    "model": "claude-sonnet-4-5",
-                    "profile_key": "claude:work",
-                    "engine": "claude",
-                    "profile_name": "work",
-                    "label": "claude/work/claude-sonnet-4-5",
-                    "kind": "profile",
-                }
-            ]
-        }
-    ]
