@@ -24,6 +24,7 @@
 		{ provider: 'gemini', model: 'gemini-2.0-flash', profile_key: null },
 		{ provider: 'codex', model: 'gpt-5.5', profile_key: null },
 	];
+	const POPUP_ID = 'plan-archive-target-selector-popup';
 
 	let targets = $state<SelectedTarget[]>(FALLBACK_TARGETS);
 	let loading = $state(false);
@@ -181,6 +182,31 @@
 		onchange?.([]);
 	}
 
+	function isGroupFullySelected(provider: string): boolean {
+		const group = groupTargets(provider);
+		return group.length > 0 && group.every((t) => isSelected(t));
+	}
+
+	function selectGroup(provider: string) {
+		const selectedByKey = new Map(selectedTargets.map((t) => [targetSelectionKey(t), t]));
+		const nextByKey = new Map(selectedTargets.map((t) => [targetSelectionKey(t), t]));
+		for (const t of groupTargets(provider)) {
+			nextByKey.set(targetSelectionKey(t), selectedByKey.get(targetSelectionKey(t)) ?? t);
+		}
+		const next = Array.from(nextByKey.values());
+		selectedTargets = next;
+		saveTargets(next);
+		onchange?.(next);
+	}
+
+	function clearGroup(provider: string) {
+		const groupKeys = new Set(groupTargets(provider).map((t) => targetSelectionKey(t)));
+		const next = selectedTargets.filter((t) => !groupKeys.has(targetSelectionKey(t)));
+		selectedTargets = next;
+		saveTargets(next);
+		onchange?.(next);
+	}
+
 	function groupKeys(): string[] {
 		const keys = new Set<string>();
 		for (const t of targets) keys.add(t.provider);
@@ -206,6 +232,8 @@
 			type="button"
 			class="inline-flex items-center gap-1 rounded border border-border px-2 py-1 text-xs hover:bg-muted"
 			aria-expanded={open}
+			aria-controls={POPUP_ID}
+			aria-haspopup="true"
 			onclick={() => { open = !open; }}
 		>
 			<span>{selectedTargets.length}개 선택됨</span>
@@ -245,25 +273,46 @@
 	{#if selectedTargets.length > 0}
 		<div class="flex flex-wrap gap-1">
 			{#each selectedTargets as t}
-				<button
-					type="button"
-					class="inline-flex items-center gap-1 rounded border border-border px-2 py-0.5 text-xs hover:bg-muted"
+				<div
+					class="inline-flex max-w-full items-center gap-1 rounded border border-border px-2 py-0.5 text-xs"
 					title={targetLabel(t)}
-					onclick={() => removeTarget(t)}
 				>
 					<span class="max-w-[320px] truncate">{targetLabel(t)}</span>
-					<X class="h-3 w-3 opacity-60" />
-				</button>
+					<button
+						type="button"
+						class="-mr-1 inline-flex flex-shrink-0 rounded p-0.5 text-muted-foreground hover:bg-muted hover:text-foreground"
+						aria-label="target 제거: {targetLabel(t)}"
+						onclick={() => removeTarget(t)}
+					>
+						<X class="h-3 w-3" />
+					</button>
+				</div>
 			{/each}
 		</div>
 	{/if}
 
 	{#if open}
-		<div class="rounded border border-border p-2">
+		<div id={POPUP_ID} class="rounded border border-border p-2">
 			<div class="grid grid-cols-1 gap-2 lg:grid-cols-2">
 				{#each groupKeys() as k}
 					<div class="rounded border border-border/60 p-2">
-						<div class="mb-1 text-xs font-medium text-muted-foreground">{k}</div>
+						<div class="mb-1 flex items-center gap-2">
+							<div class="text-xs font-medium text-muted-foreground">{k}</div>
+							<button
+								type="button"
+								class="ml-auto inline-flex rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-40"
+								title={isGroupFullySelected(k) ? `${k} target 모두 해제` : `${k} target 모두 선택`}
+								aria-label={isGroupFullySelected(k) ? `${k} target 모두 해제` : `${k} target 모두 선택`}
+								disabled={groupTargets(k).length === 0}
+								onclick={() => isGroupFullySelected(k) ? clearGroup(k) : selectGroup(k)}
+							>
+								{#if isGroupFullySelected(k)}
+									<XCircle class="h-3.5 w-3.5" />
+								{:else}
+									<CheckCheck class="h-3.5 w-3.5" />
+								{/if}
+							</button>
+						</div>
 						<div class="flex flex-wrap gap-1">
 							{#each groupTargets(k) as t}
 								{@const checked = isSelected(t)}

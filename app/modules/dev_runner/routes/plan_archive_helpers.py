@@ -75,8 +75,10 @@ def _archive_target_fields(
     requested_profile_name = requested.get("profile_name") or legacy_profile_name
     requested_profile_key = requested.get("profile_key") or legacy_profile_key
     target_label = requested.get("label") or legacy_target_label
+    requested_dedupe_key = requested.get("dedupe_key") if isinstance(requested.get("dedupe_key"), str) else None
     effective_provider = effective.get("provider") or provider
     effective_model = effective.get("model") if effective.get("model") is not None else model
+    effective_dedupe_key = effective.get("dedupe_key") if isinstance(effective.get("dedupe_key"), str) else requested_dedupe_key
     requested_target = {
         "provider": requested_provider,
         "model": requested_model,
@@ -85,6 +87,7 @@ def _archive_target_fields(
         "profile_name": requested_profile_name,
         "label": target_label,
         "target_label": target_label,
+        "dedupe_key": requested_dedupe_key,
     }
     effective_target = {
         "provider": effective_provider,
@@ -94,6 +97,7 @@ def _archive_target_fields(
         "profile_name": effective.get("profile_name") or requested_profile_name,
         "label": effective.get("label") or target_label,
         "target_label": effective.get("label") or target_label,
+        "dedupe_key": effective_dedupe_key,
     }
     has_actual_assignment = bool(actual_engine or actual_profile_name)
     actual_target = {
@@ -104,6 +108,7 @@ def _archive_target_fields(
         "profile_name": actual_profile_name,
         "label": target_label if has_actual_assignment else None,
         "target_label": target_label if has_actual_assignment else None,
+        "dedupe_key": effective_dedupe_key if has_actual_assignment else None,
     }
     assigned_profile = None
     if actual_engine or actual_profile_name:
