@@ -10,13 +10,17 @@ const logTags = readFileSync(
   new URL("../src/lib/dev-runner/log-tags.ts", import.meta.url),
   "utf8",
 );
+const logRender = readFileSync(
+  new URL("../src/lib/dev-runner/log-render.ts", import.meta.url),
+  "utf8",
+);
 
 test("long single-line Claude RESULT output collapses by character threshold", () => {
-  assert.match(source, /const PREVIEW_LINE_LIMIT = 3/);
-  assert.match(source, /const PREVIEW_CHAR_LIMIT = 600/);
-  assert.match(source, /linePreview\.length > PREVIEW_CHAR_LIMIT/);
+  assert.match(logRender, /export const PREVIEW_LINE_LIMIT = 3/);
+  assert.match(logRender, /export const PREVIEW_CHAR_LIMIT = 600/);
+  assert.match(logRender, /linePreview\.length > PREVIEW_CHAR_LIMIT/);
   assert.match(source, /function shouldCollapseMessage\(message: string\): boolean/);
-  assert.match(source, /getHiddenLineCount\(message\) > 0 \|\| getHiddenCharCount\(message\) > 0/);
+  assert.match(logRender, /getHiddenLineCount\(message\) > 0 \|\| getHiddenCharCount\(message\) > 0/);
 });
 
 test("ERROR and STDERR filters persist and report hidden count", () => {

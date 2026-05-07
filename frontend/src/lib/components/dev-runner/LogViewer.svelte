@@ -10,9 +10,27 @@
 	} from '$lib/dev-runner/line-pipeline';
 	import { isStartOnlyRecentLog } from '$lib/dev-runner/log-recent-fallback.js';
 	import { getLogLineVariant } from '$lib/dev-runner/log-line-variant';
+	import {
+		HEADER_ONLY_TAGS,
+		SEPARATOR_PATTERN,
+		buildSessionSeparator as buildParsedSessionSeparator,
+		createLineId as createParsedLineId,
+		extractLogIdentity,
+		extractSeparatorText,
+		isSeparator,
+		parseLine as parseRawLine
+	} from '$lib/dev-runner/log-parse';
+	import {
+		getExpandLabel,
+		getPreviewLines,
+		getRenderableText,
+		isFailureResultBody,
+		parseResultSegments,
+		shouldCollapseMessage as shouldCollapseMessageBase
+	} from '$lib/dev-runner/log-render';
 	import { LogStream } from '$lib/dev-runner/log-stream.svelte';
 	import { FILTERABLE_TAGS, getTagStyle } from '$lib/dev-runner/log-tags';
-	import type { BatchPlanItem, ParsedLine, ResultSegment } from '$lib/dev-runner/log-types';
+	import type { BatchPlanItem, ParsedLine } from '$lib/dev-runner/log-types';
 	import { getExitReasonDisplay } from '$lib/utils/dev-runner-exit-reason';
 	import { shouldShowMergeCompletionBanner } from '$lib/utils/dev-runner-merge-banner';
 	import LogLine from './LogLine.svelte';
@@ -58,10 +76,6 @@
 	let failureBanner = $state<{ show: boolean; message: string } | null>(null); // FAILURE 태그 sticky 배너
 	let lastLogLoadError = $state<string | null>(null);
 	const MAX_LINES = 500;
-	const SEPARATOR_PATTERN = '════════════════';
-	const PREVIEW_LINE_LIMIT = 3;
-	const PREVIEW_CHAR_LIMIT = 600;
-	const MAX_RENDER_CHARS = 8 * 1024;
 	const PREVIEW_TOGGLE_STORAGE_KEY = 'devRunnerPreviewCollapse';
 	const TAG_FILTER_STORAGE_KEY = 'devRunnerHiddenLogTags';
 	let previewCollapsedEnabled = $state(true);
@@ -100,12 +114,6 @@
 	let reconnectCount = $derived(stream.reconnectCount);
 	let redisAvailable = $derived(stream.redisAvailable);
 
-	const LINE_PATTERN = /^\s*\[?(\d{2}:\d{2}:\d{2})\]?\s*\[(\w+)\]\s*(.*)/;
-	const DIAG_PATTERN = /^\[(\w+)\]\s*(.*)/;
-	const MERGE_TAG_PATTERN = /^\[MERGE\]\[(\w+)\]\s*(.*)/;
-	const WRAPPER_PREFIX_PATTERN = /^\[(PR|PS):[^\]]+\]\s*/;
-	const HEADER_ONLY_TAGS = new Set(['DIAG', 'TRIGGER', 'RUN_META', 'ENV', 'START']);
-
 	let planBasename = $derived(
 		planFile ? (planFile.split(/[\\/]/).pop() ?? planFile) : (currentPlanName ?? null)
 	);
@@ -125,149 +133,17 @@
 		return `Run meta · ${parts.join(' · ')}`;
 	});
 
-	function normalizeLogText(text: string): string {
-		return text.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
-	}
-
 	function createLineId(tag: string, timestamp: string, raw: string): string {
 		lineSequence += 1;
-		const seed = `${tag}|${timestamp}|${raw}`;
-		let hash = 0;
-		for (let i = 0; i < seed.length; i++) {
-			hash = ((hash << 5) - hash + seed.charCodeAt(i)) | 0;
-		}
-		return `${lineSequence}-${Math.abs(hash)}`;
+		return createParsedLineId(lineSequence, tag, timestamp, raw);
 	}
 
 	function parseLine(text: string, isStale: boolean): ParsedLine {
-		const normalizedRaw = normalizeLogText(text);
-		const [head = '', ...tail] = normalizedRaw.split('\n');
-		const tailText = tail.length > 0 ? `\n${tail.join('\n')}` : '';
-
-		// [PR:name#hash|PID:12345] prefix 제거 후 일반 파싱
-		const strippedHead = head.replace(WRAPPER_PREFIX_PATTERN, '');
-		const finalMatch = strippedHead.match(LINE_PATTERN);
-		if (finalMatch) {
-			const message = `${finalMatch[3]}${tailText}`;
-			return {
-				id: createLineId(finalMatch[2], finalMatch[1], normalizedRaw),
-				timestamp: finalMatch[1],
-				tag: finalMatch[2],
-				message,
-				raw: normalizedRaw,
-				isStale
-			};
-		}
-		// [MERGE][TAG] message 형식 (머지 로그)
-		const mergeMatch = strippedHead.match(MERGE_TAG_PATTERN);
-		if (mergeMatch) {
-			const message = `${mergeMatch[2]}${tailText}`;
-			return {
-				id: createLineId(mergeMatch[1], '', normalizedRaw),
-				timestamp: '',
-				tag: mergeMatch[1],
-				message,
-				raw: normalizedRaw,
-				isStale
-			};
-		}
-		const diagMatch = strippedHead.match(DIAG_PATTERN);
-		if (diagMatch) {
-			const tag = diagMatch[1];
-			const message = `${diagMatch[2]}${tailText}`;
-			if (tag === 'NOISE') {
-				const noiseCount = parseInt(diagMatch[2]) || 0;
-				return { id: createLineId(tag, '', normalizedRaw), timestamp: '', tag, message, raw: normalizedRaw, isStale, noiseCount };
-			}
-			return { id: createLineId(tag, '', normalizedRaw), timestamp: '', tag, message, raw: normalizedRaw, isStale };
-		}
-		return {
-			id: createLineId('', '', normalizedRaw),
-			timestamp: '',
-			tag: '',
-			message: normalizedRaw,
-			raw: normalizedRaw,
-			isStale
-		};
-	}
-
-	function isSeparator(text: string): boolean {
-		return text.includes(SEPARATOR_PATTERN);
-	}
-
-	function extractSeparatorText(text: string): string {
-		return text.replace(/[═=\s]+/g, ' ').trim() || '새 세션';
-	}
-
-	function getRenderableText(message: string): string {
-		const normalized = normalizeLogText(message);
-		if (normalized.length <= MAX_RENDER_CHARS) return normalized;
-		const hiddenChars = normalized.length - MAX_RENDER_CHARS;
-		return `${normalized.slice(0, MAX_RENDER_CHARS)}\n… ${hiddenChars} chars truncated`;
-	}
-
-	function parseResultSegments(message: string): ResultSegment[] {
-		const normalized = normalizeLogText(message);
-		const markerPattern = /(\d+)→/g;
-		const markers = [...normalized.matchAll(markerPattern)];
-		if (markers.length === 0) return [];
-
-		return markers.map((marker, index) => {
-			const markerIndex = marker.index ?? 0;
-			const nextMarkerIndex = markers[index + 1]?.index ?? normalized.length;
-			const textStart = markerIndex + marker[0].length;
-			let text = normalized.slice(textStart, nextMarkerIndex);
-			if (text.startsWith(' ')) text = text.slice(1);
-			return { num: marker[1], text };
-		});
-	}
-
-	function getPreviewLines(message: string, maxLines: number = PREVIEW_LINE_LIMIT): string {
-		const renderable = getRenderableText(message);
-		const parts = renderable.split('\n');
-		const linePreview = parts.slice(0, maxLines).join('\n');
-		if (parts.length <= maxLines && linePreview.length > PREVIEW_CHAR_LIMIT) {
-			return `${linePreview.slice(0, PREVIEW_CHAR_LIMIT)}…`;
-		}
-		return linePreview;
-	}
-
-	function getHiddenLineCount(message: string, maxLines: number = PREVIEW_LINE_LIMIT): number {
-		const normalized = normalizeLogText(message);
-		const count = normalized.split('\n').length;
-		return Math.max(0, count - maxLines);
-	}
-
-	function getHiddenCharCount(message: string): number {
-		const normalized = normalizeLogText(message);
-		return Math.max(0, normalized.length - PREVIEW_CHAR_LIMIT);
+		return parseRawLine(text, isStale, createLineId);
 	}
 
 	function shouldCollapseMessage(message: string): boolean {
-		if (!previewCollapsedEnabled) return false;
-		return getHiddenLineCount(message) > 0 || getHiddenCharCount(message) > 0;
-	}
-
-	function isFailureResultBody(message: string): boolean {
-		const lower = normalizeLogText(message).toLowerCase();
-		return (
-			lower.includes('(empty aggregated_output)') ||
-			lower.includes('positional parameter') ||
-			lower.includes('error parsing glob') ||
-			lower.includes('not recognized') ||
-			lower.includes('os error') ||
-			lower.includes('traceback') ||
-			lower.includes('[error]')
-		);
-	}
-
-	function getExpandLabel(message: string): string {
-		const hiddenLines = getHiddenLineCount(message);
-		const hiddenChars = getHiddenCharCount(message);
-		const parts: string[] = [];
-		if (hiddenLines > 0) parts.push(`+${hiddenLines} lines`);
-		if (hiddenChars > 0) parts.push(`+${hiddenChars} chars`);
-		return parts.length > 0 ? `… 더보기 (${parts.join(', ')})` : '… 더보기';
+		return shouldCollapseMessageBase(message, previewCollapsedEnabled);
 	}
 
 	function toggleExpand(lineId: string) {
@@ -494,17 +370,8 @@
 		}
 	}
 
-	function extractLogIdentity(parsed: ParsedLine[]): string | null {
-		for (const line of parsed) {
-			if (line.tag !== 'START') continue;
-			const match = line.message.match(/\blog_path=([^\s]+)/);
-			if (match) return match[1];
-		}
-		return null;
-	}
-
 	function buildSessionSeparator(identity: string): ParsedLine {
-		return parseLine(`${SEPARATOR_PATTERN} new log session: ${identity} ${SEPARATOR_PATTERN}`, false);
+		return buildParsedSessionSeparator(identity, createLineId);
 	}
 
 	async function loadRecent() {

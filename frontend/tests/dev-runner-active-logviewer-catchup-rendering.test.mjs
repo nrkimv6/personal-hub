@@ -7,6 +7,10 @@ const logViewer = readFileSync(
   new URL("../src/lib/components/dev-runner/LogViewer.svelte", import.meta.url),
   "utf8",
 );
+const logParse = readFileSync(
+  new URL("../src/lib/dev-runner/log-parse.ts", import.meta.url),
+  "utf8",
+);
 const devRunnerTab = readFileSync(
   new URL("../src/routes/automation/DevRunnerTab.svelte", import.meta.url),
   "utf8",
@@ -16,8 +20,8 @@ const devRunnerTab = readFileSync(
 
 test("WRAPPER_PREFIX_PATTERN constant is defined covering PR and PS", () => {
   assert.ok(
-    logViewer.includes("WRAPPER_PREFIX_PATTERN") && logViewer.includes("(PR|PS)"),
-    "WRAPPER_PREFIX_PATTERN with (PR|PS) alternation must be defined in LogViewer"
+    logParse.includes("WRAPPER_PREFIX_PATTERN") && logParse.includes("(PR|PS)"),
+    "WRAPPER_PREFIX_PATTERN with (PR|PS) alternation must be defined in log-parse"
   );
 });
 
@@ -31,8 +35,9 @@ test("WRAPPER_PREFIX_PATTERN pattern source matches [PR:...] and [PS:...] lines"
 });
 
 test("parseLine uses WRAPPER_PREFIX_PATTERN not PR_PREFIX_PATTERN", () => {
-  assert.match(logViewer, /strippedHead\s*=\s*head\.replace\(WRAPPER_PREFIX_PATTERN/);
-  assert.doesNotMatch(logViewer, /head\.replace\(PR_PREFIX_PATTERN/);
+  assert.match(logParse, /strippedHead\s*=\s*head\.replace\(WRAPPER_PREFIX_PATTERN/);
+  assert.match(logViewer, /parseRawLine\(text, isStale, createLineId\)/);
+  assert.doesNotMatch(logParse, /head\.replace\(PR_PREFIX_PATTERN/);
 });
 
 test("stripWrapperPrefix removes [PR:...] from line", () => {
@@ -69,11 +74,11 @@ test("lines with different body content are not deduped even with same prefix ty
 // ── Phase 1: hasLoadedLogContent ────────────────────────────────────────────
 
 test("HEADER_ONLY_TAGS constant covers TRIGGER, RUN_META, ENV, START", () => {
-  assert.match(logViewer, /HEADER_ONLY_TAGS\s*=\s*new Set\(\[/);
-  assert.match(logViewer, /HEADER_ONLY_TAGS[\s\S]{0,200}'TRIGGER'/);
-  assert.match(logViewer, /HEADER_ONLY_TAGS[\s\S]{0,200}'RUN_META'/);
-  assert.match(logViewer, /HEADER_ONLY_TAGS[\s\S]{0,200}'ENV'/);
-  assert.match(logViewer, /HEADER_ONLY_TAGS[\s\S]{0,200}'START'/);
+  assert.match(logParse, /HEADER_ONLY_TAGS\s*=\s*new Set\(\[/);
+  assert.match(logParse, /HEADER_ONLY_TAGS[\s\S]{0,200}'TRIGGER'/);
+  assert.match(logParse, /HEADER_ONLY_TAGS[\s\S]{0,200}'RUN_META'/);
+  assert.match(logParse, /HEADER_ONLY_TAGS[\s\S]{0,200}'ENV'/);
+  assert.match(logParse, /HEADER_ONLY_TAGS[\s\S]{0,200}'START'/);
 });
 
 test("hasLoadedLogContent uses HEADER_ONLY_TAGS not only DIAG check", () => {
