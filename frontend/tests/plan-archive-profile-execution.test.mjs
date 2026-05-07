@@ -3,6 +3,8 @@ import { readFileSync } from 'node:fs';
 import test from 'node:test';
 
 const apiSource = readFileSync('frontend/src/lib/api/plan-records.ts', 'utf8');
+const scheduleApiSource = readFileSync('frontend/src/lib/api/plan-archive-schedule.ts', 'utf8');
+const combinedPlanArchiveApiSource = `${apiSource}\n${scheduleApiSource}`;
 const systemSource = readFileSync('frontend/src/lib/api/system.ts', 'utf8');
 const archiveTabSource = readFileSync('frontend/src/routes/plans/ArchiveTab.svelte', 'utf8');
 const schedulerSource = readFileSync('frontend/src/routes/scheduler/plan-archive/+page.svelte', 'utf8');
@@ -12,11 +14,11 @@ test('plan records API exposes archive execution control contract', () => {
 	assert.match(apiSource, /execution_state\?: string \| null/);
 	assert.match(apiSource, /latest_attempt\?: PlanArchiveExecutionAttempt \| null/);
 	assert.match(apiSource, /next_available_at\?: string \| null/);
-	assert.match(apiSource, /runArchiveExecutions/);
-	assert.match(apiSource, /\/records\/archive-executions\/run/);
-	assert.match(apiSource, /syncArchiveExecutions/);
-	assert.match(apiSource, /\/records\/archive-executions\/sync/);
-	assert.match(apiSource, /selected_profiles\?: PlanArchiveSelectedProfile\[\]/);
+	assert.match(combinedPlanArchiveApiSource, /runArchiveExecutions/);
+	assert.match(combinedPlanArchiveApiSource, /\/records\/archive-executions\/run/);
+	assert.match(combinedPlanArchiveApiSource, /syncArchiveExecutions/);
+	assert.match(combinedPlanArchiveApiSource, /\/records\/archive-executions\/sync/);
+	assert.match(combinedPlanArchiveApiSource, /selected_profiles\?: PlanArchiveSelectedProfile\[\]/);
 });
 
 test('system API exposes schedule profile policy wrappers', () => {
