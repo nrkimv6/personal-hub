@@ -46,6 +46,12 @@ from _dr_runner_predicates import (
 logger = logging.getLogger(__name__)
 
 
+def _decode_recent_meta_value(value):
+    if isinstance(value, bytes):
+        return value.decode("utf-8", errors="replace")
+    return value
+
+
 def _build_recent_runner_meta(
     redis_client: redis.Redis,
     runner_id: str,
@@ -66,15 +72,16 @@ def _build_recent_runner_meta(
         ("branch_exists", redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:branch_exists")),
         ("branch_merged_to_main", redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:branch_merged_to_main")),
         ("metadata_checked_at", redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:metadata_checked_at")),
+        ("gate_evidence_summary", redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:gate_evidence_summary")),
     ):
         if value is not None:
-            meta[field] = value
+            meta[field] = _decode_recent_meta_value(value)
     if plan_file:
         meta["display_plan_name"] = Path(str(plan_file)).name
     for field in ("accepted_at", "started_at"):
         value = redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:{field}")
         if value is not None:
-            meta[field] = value
+            meta[field] = _decode_recent_meta_value(value)
     return meta
 
 

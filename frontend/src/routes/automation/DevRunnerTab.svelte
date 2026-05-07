@@ -243,6 +243,7 @@
 		display_severity?: 'info' | 'warn' | 'error' | 'approval' | 'success' | 'muted';
 		display_secondary?: string | null;
 		hide_stale_branch_badge?: boolean;
+		gate_evidence_summary?: Record<string, unknown> | null;
 	}
 
 	interface RunnerSource {
@@ -281,6 +282,7 @@
 		display_severity?: 'info' | 'warn' | 'error' | 'approval' | 'success' | 'muted';
 		display_secondary?: string | null;
 		hide_stale_branch_badge?: boolean;
+		gate_evidence_summary?: Record<string, unknown> | null;
 	}
 
 	function createRunnerTab(runner: RunnerSource): RunnerTab {
@@ -316,6 +318,7 @@
 			display_severity: runner.display_severity ?? 'muted',
 			display_secondary: runner.display_secondary ?? null,
 			hide_stale_branch_badge: runner.hide_stale_branch_badge ?? false,
+			gate_evidence_summary: runner.gate_evidence_summary ?? null,
 		};
 	}
 
@@ -439,6 +442,7 @@
 			display_severity: runner.display_severity ?? tab.display_severity ?? 'muted',
 			display_secondary: runner.display_secondary ?? tab.display_secondary ?? null,
 			hide_stale_branch_badge: runner.hide_stale_branch_badge ?? tab.hide_stale_branch_badge ?? false,
+			gate_evidence_summary: runner.gate_evidence_summary ?? tab.gate_evidence_summary ?? null,
 		};
 	}
 
@@ -1221,6 +1225,7 @@
 										displayLabel={tab.display_label}
 										displaySecondary={tab.display_secondary}
 										hideStaleBranchBadge={tab.hide_stale_branch_badge}
+										gateEvidenceSummary={tab.gate_evidence_summary}
 										onStop={() => handleTabStop(tab.id)}
 										onClose={() => handleCloseTab(tab.id)}
 										onRestart={() => handleRestart(tab)}

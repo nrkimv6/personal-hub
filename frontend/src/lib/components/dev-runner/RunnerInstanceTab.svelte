@@ -42,6 +42,7 @@
 		displayLabel?: string | null;
 		displaySecondary?: string | null;
 		hideStaleBranchBadge?: boolean;
+		gateEvidenceSummary?: Record<string, unknown> | null;
 		onStop: () => void;
 		onClose: () => void;
 		onRestart?: () => void;
@@ -49,7 +50,7 @@
 		logRef?: (ref: LogViewerRef) => void;
 	}
 
-	let { runnerId, planFile, running, engine, startTime, worktreePath = null, branch = null, mergeStatus = null, mergeReason = null, mergeMessage = null, trigger = null, orphan = false, orphanAlive = false, redisMissing = false, logFileFound = false, exitReason = null, error = null, displayPlanName = null, remainingPostMergeTasks = null, mergeEvidenceMissing = null, executionCount = null, worktreeExists = 'unknown', branchExists = 'unknown', branchMergedToMain = 'unknown', metadataCheckedAt = 'unknown', displayLabel = null, displaySecondary = null, hideStaleBranchBadge = false, onStop, onClose, onRestart, onBatchPlansChange, logRef }: Props = $props();
+	let { runnerId, planFile, running, engine, startTime, worktreePath = null, branch = null, mergeStatus = null, mergeReason = null, mergeMessage = null, trigger = null, orphan = false, orphanAlive = false, redisMissing = false, logFileFound = false, exitReason = null, error = null, displayPlanName = null, remainingPostMergeTasks = null, mergeEvidenceMissing = null, executionCount = null, worktreeExists = 'unknown', branchExists = 'unknown', branchMergedToMain = 'unknown', metadataCheckedAt = 'unknown', displayLabel = null, displaySecondary = null, hideStaleBranchBadge = false, gateEvidenceSummary = null, onStop, onClose, onRestart, onBatchPlansChange, logRef }: Props = $props();
 
 	let logViewer:
 		| {
@@ -246,6 +247,22 @@
 		return displaySecondary;
 	}
 
+	function gateEvidenceLabel(): string | null {
+		if (!gateEvidenceSummary) return null;
+		const reason = gateEvidenceSummary.reason;
+		const status = gateEvidenceSummary.status;
+		if (typeof reason === 'string' && reason) return reason;
+		if (typeof status === 'string' && status) return status;
+		return null;
+	}
+
+	function gateEvidenceTitle(): string {
+		if (!gateEvidenceSummary) return '';
+		return Object.entries(gateEvidenceSummary)
+			.map(([key, value]) => `${key}: ${typeof value === 'string' ? value : JSON.stringify(value)}`)
+			.join('\n');
+	}
+
 	let needsPostMergeFollowup = $derived(
 		!running && (remainingPostMergeTasks ?? 0) > 0 && (exitReason === 'completed' || mergeEvidenceMissing === true)
 	);
@@ -267,6 +284,7 @@
 			`log_file_found: ${logFileFound}`,
 			`remaining_post_merge_tasks: ${remainingPostMergeTasks ?? 0}`,
 			`merge_evidence_missing: ${mergeEvidenceMissing ?? false}`,
+			gateEvidenceLabel() ? `gate_evidence_summary: ${gateEvidenceLabel()}` : null,
 			`metadata_checked_at: ${metadataCheckedAt ?? 'unknown'}`
 		];
 		return rows.filter(Boolean).join('\n');
@@ -325,6 +343,12 @@
 			{#if needsPostMergeFollowup}
 				<span class="shrink-0 px-1.5 py-0.5 rounded text-[10px] bg-amber-100 text-amber-800" title={metaTitle}>
 					후처리 필요
+				</span>
+			{/if}
+
+			{#if gateEvidenceLabel()}
+				<span class="shrink-0 px-1.5 py-0.5 rounded text-[10px] bg-red-100 text-red-700" title={gateEvidenceTitle()}>
+					{gateEvidenceLabel()}
 				</span>
 			{/if}
 

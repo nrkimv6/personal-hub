@@ -696,6 +696,30 @@ def _preserve_terminal_merge_state_if_needed(ctx: _StreamCleanupCtx, *, flag_pre
     return True
 
 
+def _persist_fallback_gate_evidence_summary(
+    ctx: _StreamCleanupCtx,
+    detect_result: dict,
+    done_result: dict,
+) -> None:
+    if not ctx.runner_id or not isinstance(done_result, dict):
+        return
+    try:
+        merge_status = _get_merge_status(ctx.redis_client, ctx.runner_id) or MERGED
+        MergePersistence(ctx.redis_client, ctx.runner_id).persist_result_metadata(
+            {
+                "success": bool(done_result.get("success", True)),
+                "merge_status": merge_status,
+                "message": done_result.get("message") or f"fallback done status={done_result.get('status', 'unknown')}",
+                "reason": done_result.get("reason") or done_result.get("status"),
+                "quarantine_diff_path": detect_result.get("quarantine_diff_path"),
+                "snapshot_path": detect_result.get("snapshot_path"),
+                "post_merge_done": done_result,
+            }
+        )
+    except Exception:
+        logger.debug("[_stream_output] fallback gate evidence persist failed", exc_info=True)
+
+
 def decide_cleanup_action(
     state,
     exit_code: Optional[int],
@@ -934,6 +958,7 @@ def _execute_cleanup_action(
                 _done_result = handle_post_merge_done_fn(
                     _v2_detect["plan_file"], ctx.runner_id, _pub_fallback, ctx.redis_client
                 )
+                _persist_fallback_gate_evidence_summary(ctx, _v2_detect, _done_result)
                 if ctx.wf_manager and ctx.runner_id:
                     try:
                         _wf = ctx.wf_manager.get_by_runner_id(ctx.runner_id)
