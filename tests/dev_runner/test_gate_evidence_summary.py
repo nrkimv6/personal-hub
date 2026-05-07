@@ -3,6 +3,7 @@
 import json
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 from app.modules.dev_runner.schemas import MergeStatusResponse, RunStatusResponse, RunnerListItem
 from app.modules.dev_runner.services.event_payload import build_status_payload
@@ -15,6 +16,7 @@ if str(SCRIPTS_DIR) not in sys.path:
 from _dr_constants import RUNNER_KEY_PREFIX  # noqa: E402
 from _dr_merge_persistence import MergePersistence  # noqa: E402
 from _dr_process_utils import _build_recent_runner_meta  # noqa: E402
+from _dr_stream_cleanup import _persist_fallback_gate_evidence_summary  # noqa: E402
 
 
 class _FakeRedis:
@@ -100,6 +102,24 @@ def test_recent_runner_meta_preserves_gate_evidence_summary_as_json_text():
     )
 
     assert json.loads(meta["gate_evidence_summary"])["reason"] == "service_lock"
+
+
+def test_stream_cleanup_fallback_persists_gate_evidence_summary():
+    redis = _FakeRedis()
+    prefix = f"{RUNNER_KEY_PREFIX}:runner-1"
+    redis.set(f"{prefix}:merge_status", "merged")
+    ctx = SimpleNamespace(runner_id="runner-1", redis_client=redis)
+
+    _persist_fallback_gate_evidence_summary(
+        ctx,
+        {"plan_file": "docs/plan/example.md", "snapshot_path": "logs/dev_runner/snapshot.json"},
+        {"success": True, "status": "restart_scheduled", "message": "restart required"},
+    )
+
+    summary = json.loads(redis.get(f"{prefix}:gate_evidence_summary"))
+    assert summary["reason"] == "restart_scheduled"
+    assert summary["merge_snapshot_path"] == "logs/dev_runner/snapshot.json"
+    assert summary["restart_after_merge"] is True
 
 
 def test_schema_and_http_error_detail_preserve_summary():
