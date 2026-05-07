@@ -69,6 +69,7 @@ export interface RunStatusResponse {
 	claim_state?: string | null;
 	claim_owner_runner_id?: string | null;
 	claim_message?: string | null;
+	gate_evidence_summary?: Record<string, unknown> | null;
 }
 
 export interface RunnerListItem {
@@ -104,6 +105,7 @@ export interface RunnerListItem {
 	display_severity?: 'info' | 'warn' | 'error' | 'approval' | 'success' | 'muted';
 	display_secondary?: string | null;
 	hide_stale_branch_badge?: boolean;
+	gate_evidence_summary?: Record<string, unknown> | null;
 }
 
 export interface PlanProgressResponse {

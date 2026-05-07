@@ -759,6 +759,10 @@ class TestListRunners:
         await fake_async.set(f"{prefix}:merge_status", "error")
         await fake_async.set(f"{prefix}:merge_reason", "stale_merge_blocked")
         await fake_async.set(f"{prefix}:merge_message", "stale merge gate: risk=BLOCK")
+        await fake_async.set(
+            f"{prefix}:gate_evidence_summary",
+            json.dumps({"reason": "stale_merge_blocked", "status": "error"}),
+        )
 
         response = await client.get("/api/v1/dev-runner/runners")
 
@@ -769,6 +773,7 @@ class TestListRunners:
         assert data[0]["exit_reason"] == "completed"
         assert data[0]["merge_status"] == "error"
         assert data[0]["merge_reason"] == "stale_merge_blocked"
+        assert data[0]["gate_evidence_summary"]["reason"] == "stale_merge_blocked"
         assert data[0]["remaining_post_merge_tasks"] == 1
         assert data[0]["display_state"] == "merge_error"
         assert data[0]["display_label"] == "머지 오류"
@@ -783,6 +788,10 @@ class TestGetRunnerStatus:
         await fake_async.set(f"{prefix}:status", "stopped")
         await fake_async.set(f"{prefix}:plan_file", "docs/plan/test.md")
         await fake_async.set(f"{prefix}:merge_status", "approval_required")
+        await fake_async.set(
+            f"{prefix}:gate_evidence_summary",
+            json.dumps({"reason": "service_lock", "status": "approval_required"}),
+        )
         await fake_async.set(f"{prefix}:branch_exists", "false")
 
         response = await client.get(f"/api/v1/dev-runner/runners/{rid}")
@@ -795,6 +804,7 @@ class TestGetRunnerStatus:
         assert data["display_severity"] == "approval"
         assert data["display_secondary"] is None
         assert data["hide_stale_branch_badge"] is True
+        assert data["gate_evidence_summary"]["reason"] == "service_lock"
 
     async def test_runner_list_and_sse_payload_display_fields_match(self, client, mock_executor_redis):
         """R: list API와 SSE status payload는 같은 backend display policy를 공유한다."""
@@ -895,6 +905,10 @@ class TestMergeApprovalPayload:
         await fake_async.set(f"{prefix}:merge_status", "approval_required")
         await fake_async.set(f"{prefix}:merge_reason", "service_lock")
         await fake_async.set(f"{prefix}:merge_message", "MERGE_PRECHECK_FAILED[service_lock]: blocked")
+        await fake_async.set(
+            f"{prefix}:gate_evidence_summary",
+            json.dumps({"reason": "service_lock", "status": "approval_required"}),
+        )
 
         response = await client.get(f"/api/v1/dev-runner/merge/{rid}")
         assert response.status_code == 200
@@ -902,3 +916,4 @@ class TestMergeApprovalPayload:
         assert data["status"] == "approval_required"
         assert data["reason"] == "service_lock"
         assert "MERGE_PRECHECK_FAILED[service_lock]" in data["message"]
+        assert data["gate_evidence_summary"]["reason"] == "service_lock"

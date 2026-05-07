@@ -91,6 +91,7 @@ class RunStatusResponse(BaseModel):
     display_severity: RunnerDisplaySeverity = "muted"
     display_secondary: Optional[str] = None
     hide_stale_branch_badge: bool = False
+    gate_evidence_summary: Optional[dict[str, Any]] = None
 
 
 class RunnerListItem(BaseModel):
@@ -128,6 +129,7 @@ class RunnerListItem(BaseModel):
     display_severity: RunnerDisplaySeverity = "muted"
     display_secondary: Optional[str] = None
     hide_stale_branch_badge: bool = False
+    gate_evidence_summary: Optional[dict[str, Any]] = None
 
 
 class PlanProgressResponse(BaseModel):
@@ -1078,6 +1080,7 @@ class MergeStatusResponse(BaseModel):
     message: str = ""
     reason: Optional[str] = None
     quarantine_diff_path: Optional[str] = None
+    gate_evidence_summary: Optional[dict[str, Any]] = None
 
 
 class MergeHistoryItem(BaseModel):
@@ -1095,6 +1098,7 @@ class MergeHistoryItem(BaseModel):
     message: str = ""
     reason: Optional[str] = None
     quarantine_diff_path: Optional[str] = None
+    gate_evidence_summary: Optional[dict[str, Any]] = None
 
 
 class DevRunnerSettingsResponse(BaseModel):

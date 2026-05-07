@@ -40,6 +40,7 @@ STATUS_FIELDS: tuple[str, ...] = (
     "branch_exists",
     "branch_merged_to_main",
     "metadata_checked_at",
+    "gate_evidence_summary",
 )
 
 
@@ -72,6 +73,21 @@ def _coerce_metadata_checked_at(value) -> str:
     return str(text)
 
 
+def _coerce_json_dict(value) -> dict | None:
+    text = _decode_text(value)
+    if text is None:
+        return None
+    if isinstance(text, dict):
+        return text
+    try:
+        import json
+
+        parsed = json.loads(str(text))
+    except Exception:
+        return None
+    return parsed if isinstance(parsed, dict) else None
+
+
 def build_status_payload(sync_redis, runner_id: str) -> Optional[dict]:
     """특정 runner의 현재 상태를 Redis에서 읽어 dict로 반환"""
     try:
@@ -83,6 +99,7 @@ def build_status_payload(sync_redis, runner_id: str) -> Optional[dict]:
         data["branch_exists"] = _coerce_metadata_state(data.get("branch_exists"))
         data["branch_merged_to_main"] = _coerce_metadata_state(data.get("branch_merged_to_main"))
         data["metadata_checked_at"] = _coerce_metadata_checked_at(data.get("metadata_checked_at"))
+        data["gate_evidence_summary"] = _coerce_json_dict(data.get("gate_evidence_summary"))
         read_model = build_runner_read_model(
             runner_id=runner_id,
             running=data.get("status") == "running",

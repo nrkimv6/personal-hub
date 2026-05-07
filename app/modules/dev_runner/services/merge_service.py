@@ -114,6 +114,7 @@ class MergeService:
                 return None
             reason = await self.async_redis.get(self._runner_key(runner_id, "merge_reason"))
             quarantine_diff_path = await self.async_redis.get(self._runner_key(runner_id, "quarantine_diff_path"))
+            gate_evidence_summary = await self._read_gate_evidence_summary(runner_id)
             message = await self.async_redis.get(self._runner_key(runner_id, "merge_message")) or ""
             if not reason:
                 reason = await self.async_redis.get(self._runner_key(runner_id, "done_post_merge_error"))
@@ -125,6 +126,7 @@ class MergeService:
                 "message": message,
                 "reason": reason,
                 "quarantine_diff_path": quarantine_diff_path,
+                "gate_evidence_summary": gate_evidence_summary,
             }
         except Exception:
             return None
@@ -140,12 +142,24 @@ class MergeService:
                     # status 필드 보정: 없으면 success 값으로 유추
                     if "status" not in item:
                         item["status"] = "completed" if item.get("success") else "failed"
+                    item.setdefault("gate_evidence_summary", None)
                     result.append(item)
                 except Exception:
                     pass
             return result
         except Exception:
             return []
+
+    async def _read_gate_evidence_summary(self, runner_id: str) -> dict | None:
+        raw = await self.async_redis.get(self._runner_key(runner_id, "gate_evidence_summary"))
+        if not raw:
+            return None
+        try:
+            text = raw.decode("utf-8") if isinstance(raw, bytes) else raw
+            parsed = json.loads(text)
+        except Exception:
+            return None
+        return parsed if isinstance(parsed, dict) else None
 
     # ------------------------------------------------------------------
     # direct-merge 명령

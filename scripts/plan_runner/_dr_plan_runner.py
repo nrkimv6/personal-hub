@@ -51,6 +51,27 @@ from _dr_stream_cleanup import (
 
 logger = logging.getLogger(__name__)
 
+
+def _build_start_gate_evidence_summary(result: dict) -> dict | None:
+    if not isinstance(result, dict):
+        return None
+    reason = result.get("reason")
+    if not reason:
+        return None
+    summary = {
+        "tool": "dev-runner-listener",
+        "status": result.get("status") or "blocked",
+        "reason": reason,
+        "runner_id": result.get("runner_id"),
+        "message": result.get("message"),
+        "target_partition": result.get("target_partition"),
+        "target_read_back": result.get("target_read_back"),
+        "residue_blocker_code": result.get("residue_blocker_code"),
+        "claim_id": result.get("claim_id"),
+        "claim_state": result.get("claim_state"),
+    }
+    return {key: value for key, value in summary.items() if value not in (None, "")}
+
 def _register_canonical_alias() -> None:
     """unique loader name으로 import돼도 canonical alias를 최신 모듈로 맞춘다."""
     import sys as _sys
@@ -711,6 +732,14 @@ def start_plan_runner(command: Dict, redis_client: redis.Redis) -> Dict:
                     "runner_id": runner_id,
                     "action": "run",
                     "executed_at": datetime.now().isoformat(),
+                    "gate_evidence_summary": _build_start_gate_evidence_summary(
+                        {
+                            "reason": "reserved_status",
+                            "status": plan_status,
+                            "message": message,
+                            "runner_id": runner_id,
+                        }
+                    ),
                 }
         except Exception as status_err:
             logger.warning("[start_plan_runner] reserved status preflight failed: %s", status_err)
@@ -775,6 +804,19 @@ def start_plan_runner(command: Dict, redis_client: redis.Redis) -> Dict:
                     "runner_id": runner_id,
                     "action": "run",
                     "executed_at": datetime.now().isoformat(),
+                    "gate_evidence_summary": _build_start_gate_evidence_summary(
+                        {
+                            "reason": "claim_conflict",
+                            "status": "blocked",
+                            "message": (
+                                f"plan이 이미 실행 점유 중입니다 "
+                                f"(claim_id={_existing_claim.claim_id} state={_existing_claim.state})"
+                            ),
+                            "runner_id": runner_id,
+                            "claim_id": _existing_claim.claim_id,
+                            "claim_state": _existing_claim.state,
+                        }
+                    ),
                 }
         except Exception as _pf_claim_err:
             logger.debug(f"[start_plan_runner] DB claim preflight 실패 (무시): {_pf_claim_err}")

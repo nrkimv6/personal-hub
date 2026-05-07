@@ -124,6 +124,12 @@ class MergePersistence:
                 self.redis_client.delete(self._key("quarantine_diff_path"))
             if result.get("snapshot_path"):
                 self.redis_client.set(self._key("merge_snapshot_path"), str(result["snapshot_path"]))
+            summary = self.build_gate_evidence_summary(result)
+            if summary:
+                self.redis_client.set(
+                    self._key("gate_evidence_summary"),
+                    json.dumps(summary, ensure_ascii=False, sort_keys=True),
+                )
         except Exception:
             logger.debug("[MergePersistence] result metadata persist failed", exc_info=True)
 
@@ -143,6 +149,7 @@ class MergePersistence:
                         "message": result.get("message", f"merge_status={final_status}"),
                         "reason": result.get("reason"),
                         "quarantine_diff_path": result.get("quarantine_diff_path"),
+                        "gate_evidence_summary": self.build_gate_evidence_summary(result),
                     },
                     ensure_ascii=False,
                 ),
@@ -158,6 +165,32 @@ class MergePersistence:
         if merge_status == "merged" or (success and not merge_status):
             return "__MERGE_COMPLETED__"
         return "__MERGE_COMPLETED::merge_failed__"
+
+    @staticmethod
+    def build_gate_evidence_summary(result: dict) -> dict | None:
+        if not isinstance(result, dict):
+            return None
+        post_merge_done = result.get("post_merge_done")
+        if not isinstance(post_merge_done, dict):
+            post_merge_done = {}
+        reason = (
+            result.get("reason")
+            or post_merge_done.get("reason")
+            or post_merge_done.get("status")
+            or result.get("merge_status")
+        )
+        summary = {
+            "tool": "merge-test",
+            "status": result.get("merge_status") or result.get("status") or post_merge_done.get("status"),
+            "reason": reason,
+            "success": bool(result.get("success", False)),
+            "quarantine_diff_path": result.get("quarantine_diff_path") or post_merge_done.get("quarantine_diff_path"),
+            "merge_snapshot_path": result.get("snapshot_path"),
+            "done_post_merge_status": post_merge_done.get("status"),
+            "restart_after_merge": post_merge_done.get("status") == "restart_scheduled",
+            "message": result.get("message") or post_merge_done.get("message"),
+        }
+        return {key: value for key, value in summary.items() if value not in (None, "")}
 
     def publish_completed_sentinel(self, result: dict) -> None:
         channel = f"plan-runner:merge-log:{self.runner_id}"

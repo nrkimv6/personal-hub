@@ -105,6 +105,32 @@ def _coerce_runner_metadata_checked_at(*values: Any) -> str:
     return "unknown"
 
 
+def _coerce_gate_evidence_summary(*values: Any) -> dict | None:
+    for value in values:
+        decoded = _decode_runner_value(value)
+        if decoded is None:
+            continue
+        if isinstance(decoded, dict):
+            return decoded
+        try:
+            parsed = json.loads(str(decoded))
+        except Exception:
+            continue
+        if isinstance(parsed, dict):
+            return parsed
+    return None
+
+
+def _build_gate_failure_detail(message: str, summary: dict | None) -> str | dict:
+    if not summary:
+        return message
+    return {
+        "message": message,
+        "detail": message,
+        "gate_evidence_summary": summary,
+    }
+
+
 def _resolve_runner_plan_path(plan_file: str | None) -> Path | None:
     if not plan_file or plan_file in ("__ALL_PLANS__", "ALL"):
         return None
@@ -613,20 +639,21 @@ class ExecutorService:
 
             if not result_data.get("success"):
                 message = result_data.get("message", "Failed to start")
+                gate_evidence_summary = _coerce_gate_evidence_summary(result_data.get("gate_evidence_summary"))
                 _release_claim_safe(_new_claim_id)
                 if result_data.get("reason") == "reserved_status":
                     raise HTTPException(
                         status_code=409,
-                        detail=message,
+                        detail=_build_gate_failure_detail(message, gate_evidence_summary),
                     )
                 if self._is_codex_preflight_failure(resolved_engine, resolved_fix_engine, message):
                     raise HTTPException(
                         status_code=422,
-                        detail=message,
+                        detail=_build_gate_failure_detail(message, gate_evidence_summary),
                     )
                 raise HTTPException(
                     status_code=500,
-                    detail=message,
+                    detail=_build_gate_failure_detail(message, gate_evidence_summary),
                 )
 
             # 기존 워커에 attach된 경우 → 기존 runner_id로 상태 반환 (새 claim이 있으면 정리)
@@ -885,7 +912,8 @@ class ExecutorService:
             runner_id, "status", "pid", "plan_file", "start_time", "engine", "execution_count",
             "exit_reason", "error",
             "worktree_path", "branch", "merge_status",
-            "worktree_exists", "branch_exists", "branch_merged_to_main", "metadata_checked_at"
+            "worktree_exists", "branch_exists", "branch_merged_to_main", "metadata_checked_at",
+            "gate_evidence_summary"
         )
         status = data["status"]
         pid_str = data["pid"]
@@ -902,6 +930,7 @@ class ExecutorService:
         branch_exists = _coerce_runner_metadata_state(data["branch_exists"])
         branch_merged_to_main = _coerce_runner_metadata_state(data["branch_merged_to_main"])
         metadata_checked_at = _coerce_runner_metadata_checked_at(data["metadata_checked_at"])
+        gate_evidence_summary = _coerce_gate_evidence_summary(data["gate_evidence_summary"])
         running = status == "running"
 
         running, pid_str = await self._correct_pid_state(runner_id, status, pid_str, caller="get_runner_status")
@@ -956,6 +985,7 @@ class ExecutorService:
             display_severity=display.severity,
             display_secondary=display.secondary,
             hide_stale_branch_badge=display.hide_stale_branch_badge,
+            gate_evidence_summary=gate_evidence_summary,
         )
 
     async def get_all_runners(self) -> list:
@@ -994,7 +1024,8 @@ class ExecutorService:
                                                       "merge_reason", "merge_message",
                                                       "branch", "trigger", "exit_reason", "stop_stage", "error",
                                                       "worktree_exists", "branch_exists",
-                                                      "branch_merged_to_main", "metadata_checked_at")
+                                                      "branch_merged_to_main", "metadata_checked_at",
+                                                      "gate_evidence_summary")
                     status = d["status"]
                     pid_str = d["pid"]
                     plan_file = d["plan_file"]
@@ -1030,6 +1061,10 @@ class ExecutorService:
                     metadata_checked_at = _coerce_runner_metadata_checked_at(
                         d["metadata_checked_at"],
                         recent_meta.get("metadata_checked_at"),
+                    )
+                    gate_evidence_summary = _coerce_gate_evidence_summary(
+                        d["gate_evidence_summary"],
+                        recent_meta.get("gate_evidence_summary"),
                     )
                     if branch is None and worktree_path:
                         branch = f"runner/{rid}"
@@ -1167,6 +1202,7 @@ class ExecutorService:
                         display_severity=display.severity,
                         display_secondary=display.secondary,
                         hide_stale_branch_badge=display.hide_stale_branch_badge,
+                        gate_evidence_summary=gate_evidence_summary,
                     ))
                 return result
             finally:
