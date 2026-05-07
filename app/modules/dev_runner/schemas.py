@@ -6,6 +6,7 @@ from datetime import date, datetime
 from typing import Any, Literal, Optional, List, Union
 
 SUPPORTED_RUN_ENGINES = {"claude", "gemini", "codex", "cc-codex"}
+PLAN_ARCHIVE_BLOCKED_PROVIDERS = {"cc-codex"}
 
 RunnerMetadataState = Union[bool, Literal["unknown"]]
 RunnerDisplaySeverity = Literal["info", "warn", "error", "approval", "success", "muted"]
@@ -699,6 +700,14 @@ class PlanArchiveExecutionTarget(BaseModel):
     engine: Optional[str] = None
     profile_name: Optional[str] = None
     label: Optional[str] = None
+
+    @field_validator("provider", mode="before")
+    @classmethod
+    def validate_plan_archive_provider(cls, value):
+        provider = str(value or "").strip()
+        if provider in PLAN_ARCHIVE_BLOCKED_PROVIDERS:
+            raise ValueError(f"Plan Archive target provider is blocked: {provider}")
+        return provider
 
     def dedupe_key(self) -> str:
         """중복 방지 키.

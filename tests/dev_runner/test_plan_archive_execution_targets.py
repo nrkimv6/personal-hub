@@ -93,6 +93,11 @@ def test_targets_to_snapshot_skips_no_provider():
     assert len(result) == 0
 
 
+def test_targets_to_snapshot_rejects_cc_codex_for_plan_archive():
+    with pytest.raises(ValueError, match="provider is blocked: cc-codex"):
+        _targets_to_snapshot([{"provider": "cc-codex", "model": "gpt-5.3-codex"}])
+
+
 # ── R: Codex/GPT profile-less bulk execution ────────────────────────────────
 
 def test_run_archive_executions_R_queues_codex_gpt55_without_profile(db):
@@ -143,6 +148,40 @@ def test_run_archive_executions_R_selected_target_does_not_inherit_legacy_profil
     assert cli["requested_target"]["engine"] is None
 
 
+def test_run_archive_executions_regression_codex_gpt53_never_becomes_cc_codex(db):
+    """Re: codex/gpt-5.3-codex target preserves provider even with legacy profile noise."""
+    rec = _record(db)
+    db.commit()
+    fake = _fake_llm()
+    with patch(
+        "app.modules.dev_runner.services.plan_archive_execution_service.LLMService",
+        return_value=fake,
+    ):
+        result = PlanArchiveExecutionService(db).enqueue_record(
+            rec,
+            trigger_source="test",
+            selected_targets=[
+                {
+                    "provider": "codex",
+                    "model": "gpt-5.3-codex",
+                    "label": "codex/gpt-5.3-codex",
+                    "dedupe_key": "profileless:codex:gpt-5.3-codex",
+                }
+            ],
+            selected_profiles=[{"engine": "gemini", "profile_name": "default"}],
+        )
+
+    assert result["status_key"] == "queued"
+    req = db.query(LLMRequest).filter_by(id=result["request_ids"][0]).first()
+    assert req is not None
+    assert req.provider == "codex"
+    assert req.model == "gpt-5.3-codex"
+    assert req.dedupe_key == "profileless:codex:gpt-5.3-codex"
+    cli = json.loads(req.cli_options or "{}")
+    assert cli["target_label"] == "codex/gpt-5.3-codex"
+    assert "candidate_profiles" not in cli
+
+
 # ── R: N requests per N targets per record ──────────────────────────────────
 
 def test_run_archive_executions_R_creates_N_requests_for_N_targets_per_record(db):
@@ -173,6 +212,9 @@ def test_run_archive_executions_R_creates_N_requests_for_N_targets_per_record(db
     providers = {r.provider for r in reqs}
     assert "claude" in providers
     assert "codex" in providers
+    codex_req = next(r for r in reqs if r.provider == "codex")
+    codex_cli = json.loads(codex_req.cli_options or "{}")
+    assert "candidate_profiles" not in codex_cli
 
 
 # ── R: 개별/일괄 실행 같은 target 계약 ─────────────────────────────────────

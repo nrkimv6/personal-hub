@@ -29,6 +29,7 @@ from app.modules.dev_runner.services.plan_record_service import _is_temp_pytest_
 JOB_ACTIVE_STATUSES = {"pending", "queued", "processing", "blocked"}
 JOB_TERMINAL_STATUSES = {"completed", "failed", "cancelled"}
 ATTEMPT_RETRYABLE_STATUSES = {"blocked", "retryable"}
+PLAN_ARCHIVE_BLOCKED_PROVIDERS = {"cc-codex"}
 
 
 def _profiles_to_snapshot(selected_profiles: list[dict[str, str]] | None) -> list[dict[str, str]]:
@@ -142,6 +143,8 @@ def _targets_to_snapshot(
             provider = str(d.get("provider") or "").strip()
             if not provider:
                 continue
+            if provider in PLAN_ARCHIVE_BLOCKED_PROVIDERS:
+                raise ValueError(f"Plan Archive target provider is blocked: {provider}")
             model = str(d.get("model") or "").strip()
             profile_key = str(d.get("profile_key") or "").strip() or None
             engine = str(d.get("engine") or "").strip() or None
