@@ -12,11 +12,12 @@ const STREAM_URL = '/__local/api-gate/stream';
 const POLL_INTERVAL_MS = 2000;
 const RECONNECT_DELAYS_MS = [2000, 4000, 8000, 30000];
 const STALE_AFTER_MS = 600000;
+const INITIAL_REASON = 'API 상태 확인 중';
 
 function createApiGateStore() {
-	let state = $state<GateStateName>('open');
-	let reason = $state('');
-	let since = $state<number | null>(null);
+	let state = $state<GateStateName>('recovering');
+	let reason = $state(INITIAL_REASON);
+	let since = $state<number | null>(Date.now());
 	let apiPort = $state<number | null>(null);
 
 	let eventSource: EventSource | null = null;
@@ -24,6 +25,8 @@ function createApiGateStore() {
 	let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
 	let staleTimer: ReturnType<typeof setTimeout> | null = null;
 	let reconnectAttempt = 0;
+	let initialStatusSettled = false;
+	let initialStatusPromise: Promise<void> | null = null;
 
 	function applySnapshot(snapshot: GateSnapshot) {
 		const previousState = state;
@@ -31,6 +34,7 @@ function createApiGateStore() {
 		reason = snapshot.reason;
 		since = snapshot.since;
 		apiPort = snapshot.apiPort;
+		initialStatusSettled = true;
 		scheduleStaleTimer();
 		if (previousState !== 'open' && state === 'open') {
 			void reportGateRecoveryToApiHealth();
@@ -78,9 +82,26 @@ function createApiGateStore() {
 	}
 
 	async function refreshStatus(): Promise<void> {
-		const response = await fetch(STATUS_URL);
-		if (!response.ok) return;
+		const response = await fetch(STATUS_URL, {
+			headers: { 'x-api-gate-bypass': '1' }
+		});
+		if (!response.ok) throw new Error(`API gate status failed: HTTP ${response.status}`);
 		applySnapshot(await response.json());
+	}
+
+	async function ensureInitialStatus(): Promise<void> {
+		if (initialStatusSettled) return;
+		if (initialStatusPromise === null) {
+			initialStatusPromise = refreshStatus()
+				.catch(() => {
+					// Keep the initial recovering state so API calls stay blocked when
+					// the local gate status cannot be read.
+				})
+				.finally(() => {
+					initialStatusPromise = null;
+				});
+		}
+		await initialStatusPromise;
 	}
 
 	function scheduleSseReconnect() {
@@ -153,7 +174,8 @@ function createApiGateStore() {
 		start,
 		startPollingFallback,
 		stop,
-		refreshStatus
+		refreshStatus,
+		ensureInitialStatus
 	};
 }
 

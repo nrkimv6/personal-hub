@@ -58,6 +58,16 @@ test('api gate state keeps three-state recovery contract', () => {
 	assert.match(src, /slice\(-MAX_RECENT_EVENTS\)/);
 });
 
+test('client api gate starts closed until local status is known', () => {
+	const src = read('../src/lib/stores/apiGate.svelte.ts');
+	assert.match(src, /const INITIAL_REASON = 'API 상태 확인 중'/);
+	assert.match(src, /let state = \$state<GateStateName>\('recovering'\)/);
+	assert.match(src, /let initialStatusSettled = false/);
+	assert.match(src, /function applySnapshot\(snapshot: GateSnapshot\)[\s\S]+initialStatusSettled = true;/);
+	assert.match(src, /async function ensureInitialStatus\(\)/);
+	assert.match(src, /headers: \{ 'x-api-gate-bypass': '1' \}/);
+});
+
 test('api gate local routes expose status close open and stream', () => {
 	const status = read('../src/routes/__local/api-gate/status/+server.ts');
 	const close = read('../src/routes/__local/api-gate/close/+server.ts');
@@ -110,13 +120,33 @@ test('api gate stream route guards close and enqueue races', () => {
 
 test('client fetch guard blocks same-origin api calls and preserves bypasses', () => {
 	const hook = read('../src/hooks.client.ts');
-	assert.match(hook, /GATE_BLOCK_PATTERN\.test\(url\.pathname\)/);
-	assert.match(hook, /apiGate\.state !== 'open'/);
+	const client = read('../src/lib/api/client.ts');
 	assert.match(hook, /new ApiGateClosedError\(\)/);
 	assert.match(hook, /path\.startsWith\('\/__local\/'\)/);
 	assert.match(hook, /path\.startsWith\('\/_app\/'\)/);
 	assert.match(hook, /GATE_BYPASS_PATHS\.includes/);
 	assert.match(hook, /x-api-gate-bypass/);
+	assert.match(hook, /shouldBlockApiRequestForGate\(url\.toString\(\)\)/);
+	assert.match(client, /GATE_BLOCK_PATTERN\.test\(parsed\.pathname\)/);
+	assert.match(client, /apiGate\.state !== 'open'/);
+	assert.match(client, /const GATE_DIRECT_PORTS = new Set\(\['8000', '8001'\]\)/);
+	assert.match(client, /export function shouldBlockApiRequestForGate/);
+	assert.match(client, /await apiGate\.ensureInitialStatus\(\)/);
+	assert.match(client, /await waitForApiGate\(url, options\)/);
+	assert.match(client, /hasGateBypassHeader\(options\)/);
+});
+
+test('layout keeps svelte app mounted during api gate recovery', () => {
+	const layout = read('../src/routes/+layout.svelte');
+	assert.doesNotMatch(layout, /location\.reload\(\)/);
+	assert.match(layout, /void authStore\.checkAuth\(\);/);
+	assert.match(layout, /apiGate\.refreshStatus\(\)[\s\S]+\.finally\(\(\) => \{[\s\S]+authStore\.checkAuth\(\)/);
+});
+
+test('direct self restart uses explicit gate bypass header', () => {
+	const src = read('../src/lib/api/system.ts');
+	assert.match(src, /http:\/\/\$\{location\.hostname\}:\$\{port\}\/api\/v1\/system\/self-restart/);
+	assert.match(src, /headers: \{ 'x-api-gate-bypass': '1' \}/);
 });
 
 test('api gate singleton does not create component effects at module scope', () => {

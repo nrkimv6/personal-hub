@@ -84,7 +84,10 @@ export const systemApi = {
   // 특정 포트의 API 서버 self-restart (Dev: 8001, Prod: 8000)
   selfRestartByPort: async (port: number, delay: number = 2.0, reason: string = 'frontend_ui') => {
     const url = `http://${location.hostname}:${port}/api/v1/system/self-restart?delay=${delay}&reason=${encodeURIComponent(reason)}`;
-    const res = await fetch(url, { method: 'POST' });
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: { 'x-api-gate-bypass': '1' }
+    });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     return res.json() as Promise<{ status: string; pid: number; delay: number; message: string }>;
   },
