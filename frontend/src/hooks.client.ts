@@ -1,5 +1,8 @@
-import { apiGate } from '$lib/stores/apiGate.svelte';
-import { ApiGateClosedError, GATE_BLOCK_PATTERN, GATE_BYPASS_PATHS } from '$lib/api/client';
+import {
+	ApiGateClosedError,
+	GATE_BYPASS_PATHS,
+	shouldBlockApiRequestForGate
+} from '$lib/api/client';
 
 let originalFetch: typeof fetch | null = null;
 let fetchGateInstalled = false;
@@ -41,10 +44,8 @@ function installFetchGate() {
 		const url = resolveRequestUrl(input);
 		if (
 			url !== null &&
-			url.origin === window.location.origin &&
-			GATE_BLOCK_PATTERN.test(url.pathname) &&
 			!shouldBypassGate(url, input, init) &&
-			apiGate.state !== 'open'
+			shouldBlockApiRequestForGate(url.toString())
 		) {
 			return Promise.reject(new ApiGateClosedError());
 		}
