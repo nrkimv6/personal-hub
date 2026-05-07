@@ -94,6 +94,13 @@ test('PlanArchiveCandidateTable receives selectedTargets as prop', () => {
 	assert.match(candidateTableSource, /onQueueSuccess/);
 });
 
+test('PlanArchiveCandidateTable reports individual queue success before refresh', () => {
+	assert.match(
+		candidateTableSource,
+		/const res = await archiveScheduleApi\.queueCandidates\(\{[\s\S]*candidate_keys:\s*\[key\][\s\S]*onQueueSuccess\?\.\(res\)[\s\S]*load\(\)/
+	);
+});
+
 // ─── route shell is the only polling owner
 test('page.svelte owns the polling timer (POLL_NORMAL_MS / schedulePoll)', () => {
 	assert.match(pageSource, /POLL_NORMAL_MS/);

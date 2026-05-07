@@ -151,10 +151,11 @@
 								onclick={async () => {
 									if (selectedTargets.length === 0) return;
 									try {
-										await archiveScheduleApi.queueCandidates({
+										const res = await archiveScheduleApi.queueCandidates({
 											candidate_keys: [key],
 											selected_targets: selectedTargets,
 										});
+										onQueueSuccess?.(res);
 										load();
 									} catch (e) {
 										error = e instanceof Error ? e.message : '큐잉 실패';
