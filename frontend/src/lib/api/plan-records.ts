@@ -70,6 +70,7 @@ export interface PlanArchiveExecutionTarget {
 	engine?: string | null;
 	profile_name?: string | null;
 	label?: string | null;
+	dedupe_key?: string | null;
 	kind?: 'profile' | 'engine';
 }
 
