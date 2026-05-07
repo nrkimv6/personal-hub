@@ -30,6 +30,8 @@
 		CurrentTrackingResponse
 	} from '$lib/api';
 	import { fetchPlans as storeFetchPlans, plansStore } from '$lib/stores/devRunnerPlans';
+	import { apiGate } from '$lib/stores/apiGate.svelte';
+	import { isApiGateClosedError } from '$lib/api/client';
 
 	let { initialPlan = '', initialRunner = '' }: { initialPlan?: string; initialRunner?: string } = $props();
 
@@ -510,6 +512,8 @@
 
 	// Phase 2: URL 동기화 준비 완료 플래그 (onMount 완료 전 $effect 실행 방지)
 	let isReady = $state(false);
+	let reloadAfterApiGateOpen = $state(false);
+	let previousApiGateState = $state(apiGate.state);
 
 	// Phase 2: activeTabId 변경 시 URL ?runner= 파라미터 동기화
 	$effect(() => {
@@ -555,6 +559,9 @@
 
 			await syncRunnerTabs({ selectActive: true });
 		} catch (e) {
+			if (isApiGateClosedError(e)) {
+				reloadAfterApiGateOpen = true;
+			}
 			console.warn('[DevRunner] status API 호출 실패', e);
 		}
 	}
@@ -792,6 +799,9 @@
 		try {
 			return await storeFetchPlans();
 		} catch (e) {
+			if (isApiGateClosedError(e)) {
+				reloadAfterApiGateOpen = true;
+			}
 			console.warn('[DevRunner] plans API 호출 실패', e);
 			return [];
 		}
@@ -834,6 +844,20 @@
 		await pollStatus();
 		void fetchPlans();
 	}
+
+	$effect(() => {
+		const gateState = apiGate.state;
+		if (!isReady) {
+			previousApiGateState = gateState;
+			return;
+		}
+		if (gateState === 'open' && (reloadAfterApiGateOpen || previousApiGateState !== 'open')) {
+			reloadAfterApiGateOpen = false;
+			void loadData();
+			connectSSE();
+		}
+		previousApiGateState = gateState;
+	});
 
 	onMount(async () => {
                 if (window.innerWidth >= 640) {
