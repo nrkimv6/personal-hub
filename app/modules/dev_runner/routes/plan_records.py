@@ -118,6 +118,26 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/v1/plans", tags=["plan-records"])
 router_admin = APIRouter(prefix="/api/v1/plans", tags=["plan-records-admin"])
 _DEFAULT_PLANS_ARCHIVE_DIR = PROJECT_ROOT / ".worktrees" / "plans" / "docs" / "archive"
+_FAILURE_CATEGORY_ERROR_CODES = {
+    "gemini_cli_not_found": "GEMINI_CLI_NOT_FOUND",
+    "gemini_auth_required": "GEMINI_AUTH_REQUIRED",
+    "gemini_cli_error": "GEMINI_CLI_ERROR",
+}
+
+
+def _archive_request_error_code(
+    failure_category: Optional[str],
+    error_message: Optional[str],
+) -> Optional[str]:
+    category = (failure_category or "").strip()
+    if category in _FAILURE_CATEGORY_ERROR_CODES:
+        return _FAILURE_CATEGORY_ERROR_CODES[category]
+
+    message = error_message or ""
+    for code in _FAILURE_CATEGORY_ERROR_CODES.values():
+        if code in message:
+            return code
+    return None
 
 
 def _extract_profile_fields(cli: dict) -> tuple[Optional[str], Optional[str], Optional[str], Optional[str]]:
@@ -383,6 +403,7 @@ def get_archive_schedule_dashboard(db: Session = Depends(get_db)):
                 ),
                 record_id=r.caller_id,
                 failure_category=r.failure_category,
+                error_code=_archive_request_error_code(r.failure_category, r.error_message),
                 dedupe_key=r.dedupe_key,
                 requested_at=r.requested_at.isoformat() if r.requested_at else None,
                 processed_at=r.processed_at.isoformat() if r.processed_at else None,
@@ -533,6 +554,7 @@ def list_archive_llm_requests(
                 candidate_key=cli.get("candidate_key"),
                 source_schedule_run_id=cli.get("source_schedule_run_id"),
                 failure_category=r.failure_category,
+                error_code=_archive_request_error_code(r.failure_category, r.error_message),
                 dedupe_key=r.dedupe_key,
                 requested_at=r.requested_at.isoformat() if r.requested_at else None,
                 processed_at=r.processed_at.isoformat() if r.processed_at else None,
@@ -654,6 +676,7 @@ def get_archive_llm_request_detail(request_id: int, db: Session = Depends(get_db
         ),
         record_id=r.caller_id,
         failure_category=r.failure_category,
+        error_code=_archive_request_error_code(r.failure_category, r.error_message),
         dedupe_key=r.dedupe_key,
         requested_at=r.requested_at.isoformat() if r.requested_at else None,
         processed_at=r.processed_at.isoformat() if r.processed_at else None,
