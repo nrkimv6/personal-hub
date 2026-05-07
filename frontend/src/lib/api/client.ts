@@ -32,11 +32,50 @@ export const API_BASE = getApiBase();
  */
 export const GATE_BLOCK_PATTERN = /^\/api\//;
 export const GATE_BYPASS_PATHS = ['/api/v1/ready'] as const;
+const GATE_DIRECT_HOSTS = new Set(['localhost', '127.0.0.1']);
+const GATE_DIRECT_PORTS = new Set(['8000', '8001']);
 
 const TOKEN_KEY = 'auth_token';
 
+function parseGateUrl(url: string): URL | null {
+  try {
+    return new URL(url, isBrowser ? window.location.origin : 'http://localhost');
+  } catch {
+    return null;
+  }
+}
+
 function isGateBypassUrl(url: string): boolean {
-	return GATE_BYPASS_PATHS.some((path) => url.endsWith(path));
+  const parsed = parseGateUrl(url);
+  const pathname = parsed?.pathname ?? url;
+  return GATE_BYPASS_PATHS.includes(pathname as typeof GATE_BYPASS_PATHS[number]);
+}
+
+function hasGateBypassHeader(options?: RequestInit): boolean {
+  if (!options?.headers) return false;
+  return new Headers(options.headers).has('x-api-gate-bypass');
+}
+
+export function isApiGateManagedUrl(url: string): boolean {
+  if (!isBrowser) return false;
+
+  const parsed = parseGateUrl(url);
+  if (parsed === null || !GATE_BLOCK_PATTERN.test(parsed.pathname)) return false;
+
+  if (parsed.origin === window.location.origin) return true;
+  return GATE_DIRECT_HOSTS.has(parsed.hostname) && GATE_DIRECT_PORTS.has(parsed.port);
+}
+
+export function shouldBlockApiRequestForGate(url: string): boolean {
+  return isApiGateManagedUrl(url) && !isGateBypassUrl(url) && apiGate.state !== 'open';
+}
+
+async function waitForApiGate(url: string, options?: RequestInit): Promise<void> {
+  if (!isApiGateManagedUrl(url) || isGateBypassUrl(url) || hasGateBypassHeader(options)) return;
+  await apiGate.ensureInitialStatus();
+  if (apiGate.state !== 'open') {
+    throw new ApiGateClosedError();
+  }
 }
 
 /**
@@ -132,6 +171,8 @@ export async function fetchWithTimeout(
   options: RequestInit = {},
   timeout: number = 30000
 ): Promise<Response> {
+  await waitForApiGate(url, options);
+
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), timeout);
 
@@ -199,9 +240,7 @@ export async function request<T>(
   }
 
   // API gate owns request blocking during restart windows.
-  if (apiGate.state !== 'open' && !isGateBypassUrl(url)) {
-    throw new ApiGateClosedError();
-  }
+  await waitForApiGate(url, options);
 
   // 인증 헤더 추가
   const token = getAuthToken();
