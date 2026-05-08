@@ -5,7 +5,7 @@ import subprocess
 from dataclasses import asdict, dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import Iterable
+from typing import Iterable, Sequence
 
 
 REPORT_TYPE_NIGHTLY_REPO_SYNC = "nightly_repo_sync"
@@ -26,6 +26,8 @@ BLOCK_VERIFICATION_FAILED = "verification_failed"
 BLOCK_PUSH_REJECTED = "push_rejected"
 BLOCK_LOCK_HELD = "lock_held"
 BLOCK_ROOT_GUARD_SENTINEL = "root_guard_sentinel"
+BLOCK_SYNC_WORKTREE_EXISTS = "sync_worktree_exists"
+BLOCK_RESOLVER_UNAVAILABLE = "resolver_unavailable"
 
 MIRROR_SURFACES = (".agents/", ".agent/", ".claude/", ".gemini/")
 PLANS_COMMIT_WHITELIST = ("docs/plan/", "docs/archive/", "docs/history/", "TODO.md", "docs/DONE.md")
@@ -125,10 +127,19 @@ def _parse_short_status_path(line: str) -> str:
 
 
 class NightlyRepoSyncService:
-    def __init__(self, repo_root: str | Path, *, commit_script: str | Path | None = None):
+    def __init__(
+        self,
+        repo_root: str | Path,
+        *,
+        commit_script: str | Path | None = None,
+        resolver_command: Sequence[str] | None = None,
+        sync_stamp: str | None = None,
+    ):
         self.repo_root = Path(repo_root).resolve()
         self.plans_root = self.repo_root / ".worktrees" / "plans"
         self.commit_script = Path(commit_script or r"D:\work\project\tools\common\commit.ps1")
+        self.resolver_command = list(resolver_command or [])
+        self.sync_stamp = sync_stamp
 
     def run(self, *, allow_mutation: bool = True) -> RepoSyncSnapshot:
         snapshot = self.collect_snapshot(fetch=True)
@@ -140,14 +151,7 @@ class NightlyRepoSyncService:
         snapshot.plans_commit = self.commit_plans_changes()
         snapshot.actions.append(self.sync_main_ff_or_push(snapshot.root))
         if snapshot.root.diverged:
-            snapshot.actions.append(
-                SyncActionResult(
-                    stage=STAGE_SYNC_WORKTREE_RESOLVE,
-                    status="blocked",
-                    block_reason=BLOCK_DIVERGED_UNRESOLVED,
-                    stderr="main diverged; resolver worktree handoff required",
-                )
-            )
+            snapshot.actions.append(self.resolve_main_divergence())
         if snapshot.plans is not None:
             snapshot.actions.append(self.sync_plans_push_or_pull())
         snapshot.tracking = build_tracking_decision(snapshot)
@@ -259,6 +263,112 @@ class NightlyRepoSyncService:
             return result
         return SyncActionResult(stage=STAGE_PLANS_PUSH, status="noop")
 
+    def resolve_main_divergence(self) -> SyncActionResult:
+        """Resolve root main divergence in an isolated sync worktree.
+
+        The sync worktree starts from local main and merges origin/main there.
+        Only a clean merge can be fast-forwarded back into the root checkout.
+        Mirror-surface conflicts or mirror diffs are reported as blockers.
+        """
+        state = self._collect_branch_state(self.repo_root)
+        if self._root_guard_sentinel_exists():
+            return SyncActionResult(stage=STAGE_SYNC_WORKTREE_RESOLVE, status="blocked", block_reason=BLOCK_ROOT_GUARD_SENTINEL)
+        if state.dirty:
+            return SyncActionResult(stage=STAGE_SYNC_WORKTREE_RESOLVE, status="blocked", block_reason=BLOCK_ROOT_DIRTY)
+
+        stamp = self._sync_stamp()
+        branch = f"codex/nightly-main-sync-{stamp}"
+        worktree = self.repo_root / ".worktrees" / f"nightly-main-sync-{stamp}"
+        if worktree.exists() or self._branch_exists(branch):
+            return SyncActionResult(
+                stage=STAGE_SYNC_WORKTREE_RESOLVE,
+                status="blocked",
+                command=["git", "worktree", "add", "-b", branch, str(worktree), "main"],
+                block_reason=BLOCK_SYNC_WORKTREE_EXISTS,
+            )
+
+        add_result = self._run_git(self.repo_root, "worktree", "add", "-b", branch, str(worktree), "main", stage=STAGE_SYNC_WORKTREE_RESOLVE)
+        if add_result.exit_code != 0:
+            add_result.status = "blocked"
+            add_result.block_reason = BLOCK_DIVERGED_UNRESOLVED
+            return add_result
+
+        merge_result = self._run_git(
+            worktree,
+            "merge",
+            "origin/main",
+            "--no-ff",
+            "-m",
+            f"chore: nightly main sync {stamp}",
+            stage=STAGE_SYNC_WORKTREE_RESOLVE,
+        )
+        if merge_result.exit_code != 0:
+            conflict_files = self._unmerged_paths(worktree)
+            if any(is_mirror_surface_path(path) for path in conflict_files):
+                self._run_git(worktree, "merge", "--abort", stage=STAGE_SYNC_WORKTREE_RESOLVE)
+                self._cleanup_sync_worktree(worktree, branch)
+                merge_result.status = "blocked"
+                merge_result.block_reason = BLOCK_MIRROR_CONFLICT
+                merge_result.stderr = _append_detail(merge_result.stderr, f"mirror conflict files: {', '.join(conflict_files)}")
+                return merge_result
+            if not self.resolver_command:
+                self._run_git(worktree, "merge", "--abort", stage=STAGE_SYNC_WORKTREE_RESOLVE)
+                self._cleanup_sync_worktree(worktree, branch)
+                merge_result.status = "blocked"
+                merge_result.block_reason = BLOCK_RESOLVER_UNAVAILABLE
+                merge_result.stderr = _append_detail(merge_result.stderr, f"conflict files: {', '.join(conflict_files)}")
+                return merge_result
+            resolver = self._run_resolver(worktree, conflict_files)
+            if resolver.status != "ok":
+                self._run_git(worktree, "merge", "--abort", stage=STAGE_SYNC_WORKTREE_RESOLVE)
+                self._cleanup_sync_worktree(worktree, branch)
+                return resolver
+            unresolved = self._unmerged_paths(worktree)
+            if unresolved or self._conflict_markers_present(worktree):
+                self._run_git(worktree, "merge", "--abort", stage=STAGE_SYNC_WORKTREE_RESOLVE)
+                self._cleanup_sync_worktree(worktree, branch)
+                return SyncActionResult(
+                    stage=STAGE_SYNC_WORKTREE_RESOLVE,
+                    status="blocked",
+                    block_reason=BLOCK_DIVERGED_UNRESOLVED,
+                    stderr=f"resolver left unresolved files: {', '.join(unresolved)}",
+                )
+            commit = self._run_git(worktree, "commit", "--no-edit", stage=STAGE_SYNC_WORKTREE_RESOLVE)
+            if commit.exit_code != 0:
+                commit.status = "blocked"
+                commit.block_reason = BLOCK_DIVERGED_UNRESOLVED
+                return commit
+
+        mirror_diff = self._mirror_diff_paths(worktree, "main", "HEAD")
+        if mirror_diff:
+            self._cleanup_sync_worktree(worktree, branch)
+            return SyncActionResult(
+                stage=STAGE_SYNC_WORKTREE_RESOLVE,
+                status="blocked",
+                block_reason=BLOCK_MIRROR_CONFLICT,
+                stderr=f"mirror diff detected: {', '.join(mirror_diff)}",
+            )
+
+        ff_result = self._run_git(self.repo_root, "merge", "--ff-only", branch, stage=STAGE_MAIN_MERGE_PUSH)
+        if ff_result.exit_code != 0:
+            ff_result.status = "blocked"
+            ff_result.block_reason = BLOCK_DIVERGED_UNRESOLVED
+            return ff_result
+
+        push_result = self._run_git(self.repo_root, "push", "origin", "main", stage=STAGE_MAIN_MERGE_PUSH)
+        self._cleanup_sync_worktree(worktree, branch)
+        if push_result.exit_code != 0:
+            push_result.status = "blocked"
+            push_result.block_reason = BLOCK_PUSH_REJECTED
+            return push_result
+        return SyncActionResult(
+            stage=STAGE_MAIN_MERGE_PUSH,
+            status="ok",
+            command=["git", "merge", "--ff-only", branch, "&&", "git", "push", "origin", "main"],
+            exit_code=0,
+            stdout=_append_detail(ff_result.stdout, push_result.stdout),
+        )
+
     def _collect_branch_state(self, cwd: Path) -> BranchSyncState:
         branch = self._run_git(cwd, "branch", "--show-current")
         head = self._run_git(cwd, "rev-parse", "--short=9", "HEAD")
@@ -299,6 +409,54 @@ class NightlyRepoSyncService:
     def _root_guard_sentinel_exists(self) -> bool:
         return (self.repo_root / ".git" / "root-branch-guard.violation").exists()
 
+    def _sync_stamp(self) -> str:
+        return self.sync_stamp or datetime.now().strftime("%Y%m%d-%H%M%S")
+
+    def _branch_exists(self, branch: str) -> bool:
+        result = self._run_git(self.repo_root, "rev-parse", "--verify", f"refs/heads/{branch}")
+        return result.exit_code == 0
+
+    def _unmerged_paths(self, cwd: Path) -> list[str]:
+        result = self._run_git(cwd, "diff", "--name-only", "--diff-filter=U")
+        if result.exit_code != 0:
+            return []
+        return [_normalize_path(line.strip()) for line in result.stdout.splitlines() if line.strip()]
+
+    def _mirror_diff_paths(self, cwd: Path, before_ref: str, after_ref: str) -> list[str]:
+        result = self._run_git(cwd, "diff", "--name-only", f"{before_ref}..{after_ref}", "--", *MIRROR_SURFACES)
+        if result.exit_code != 0:
+            return []
+        return [_normalize_path(line.strip()) for line in result.stdout.splitlines() if line.strip()]
+
+    def _conflict_markers_present(self, cwd: Path) -> bool:
+        result = self._run_git(cwd, "grep", "-n", r"<<<<<<<\|=======\|>>>>>>>")
+        return result.exit_code == 0
+
+    def _run_resolver(self, cwd: Path, conflict_files: list[str]) -> SyncActionResult:
+        proc = subprocess.run(
+            self.resolver_command,
+            cwd=str(cwd),
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+        )
+        return SyncActionResult(
+            stage=STAGE_SYNC_WORKTREE_RESOLVE,
+            status="ok" if proc.returncode == 0 else "blocked",
+            command=list(self.resolver_command),
+            exit_code=proc.returncode,
+            stdout=proc.stdout.rstrip("\n"),
+            stderr=_append_detail(proc.stderr.rstrip("\n"), f"conflict files: {', '.join(conflict_files)}"),
+            block_reason=None if proc.returncode == 0 else BLOCK_DIVERGED_UNRESOLVED,
+        )
+
+    def _cleanup_sync_worktree(self, worktree: Path, branch: str) -> None:
+        if worktree.exists():
+            self._run_git(self.repo_root, "worktree", "remove", str(worktree), stage=STAGE_SYNC_WORKTREE_RESOLVE)
+        if self._branch_exists(branch):
+            self._run_git(self.repo_root, "branch", "-D", branch, stage=STAGE_SYNC_WORKTREE_RESOLVE)
+
     def _run_git(self, cwd: Path, *args: str, stage: str = STAGE_COLLECT) -> SyncActionResult:
         if _is_destructive_git_command(args):
             return SyncActionResult(
@@ -324,6 +482,14 @@ class NightlyRepoSyncService:
             stdout=proc.stdout.rstrip("\n"),
             stderr=proc.stderr.rstrip("\n"),
         )
+
+
+def _append_detail(base: str, detail: str) -> str:
+    if not base:
+        return detail
+    if not detail:
+        return base
+    return f"{base}\n{detail}"
 
 
 def build_tracking_decision(snapshot: RepoSyncSnapshot) -> TrackingReportDecision:

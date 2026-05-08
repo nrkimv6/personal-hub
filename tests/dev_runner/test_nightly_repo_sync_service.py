@@ -6,6 +6,7 @@ import subprocess
 from pathlib import Path
 
 from app.modules.dev_runner.services.nightly_repo_sync_service import (
+    BLOCK_MIRROR_CONFLICT,
     BLOCK_PLANS_POLICY_CHANGE,
     BLOCK_ROOT_DIRTY,
     BLOCK_VERIFICATION_FAILED,
@@ -40,6 +41,15 @@ def _init_repo_with_origin(tmp_path: Path) -> Path:
     _git(repo, "remote", "add", "origin", str(origin))
     _git(repo, "push", "-u", "origin", "main")
     return repo
+
+
+def _clone_origin(repo: Path, tmp_path: Path) -> Path:
+    other = tmp_path / "other"
+    _git(tmp_path, "clone", str(repo / ".." / "origin.git"), str(other))
+    _git(other, "checkout", "main")
+    _git(other, "config", "user.email", "other@example.com")
+    _git(other, "config", "user.name", "Other User")
+    return other
 
 
 def _add_plans_worktree(repo: Path) -> Path:
@@ -130,3 +140,82 @@ def test_destructive_git_command_is_denied(tmp_path: Path) -> None:
 
     assert result.status == "blocked"
     assert result.block_reason == BLOCK_VERIFICATION_FAILED
+
+
+def test_main_diverged_resolves_in_sync_worktree_then_pushes(tmp_path: Path) -> None:
+    repo = _init_repo_with_origin(tmp_path)
+    other = _clone_origin(repo, tmp_path)
+
+    (repo / "local.txt").write_text("local\n", encoding="utf-8")
+    _git(repo, "add", "local.txt")
+    _git(repo, "commit", "-m", "local change")
+
+    (other / "remote.txt").write_text("remote\n", encoding="utf-8")
+    _git(other, "add", "remote.txt")
+    _git(other, "commit", "-m", "remote change")
+    _git(other, "push", "origin", "main")
+    _git(repo, "fetch", "origin")
+
+    result = NightlyRepoSyncService(repo, sync_stamp="20260508-030000").resolve_main_divergence()
+
+    assert result.status == "ok"
+    assert result.stage == "main_merge_push"
+    assert (repo / "local.txt").read_text(encoding="utf-8") == "local\n"
+    assert (repo / "remote.txt").read_text(encoding="utf-8") == "remote\n"
+    assert not (repo / ".worktrees" / "nightly-main-sync-20260508-030000").exists()
+
+    remote_head = subprocess.run(
+        ["git", "rev-parse", "origin/main"],
+        cwd=repo,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    local_head = subprocess.run(
+        ["git", "rev-parse", "HEAD"],
+        cwd=repo,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    assert remote_head == local_head
+
+
+def test_main_diverged_mirror_conflict_blocks_without_push(tmp_path: Path) -> None:
+    repo = _init_repo_with_origin(tmp_path)
+    (repo / ".agents").mkdir()
+    (repo / ".agents" / "skill.md").write_text("base\n", encoding="utf-8")
+    _git(repo, "add", ".agents/skill.md")
+    _git(repo, "commit", "-m", "add mirror file")
+    _git(repo, "push", "origin", "main")
+    other = _clone_origin(repo, tmp_path)
+
+    (repo / ".agents" / "skill.md").write_text("local\n", encoding="utf-8")
+    _git(repo, "add", ".agents/skill.md")
+    _git(repo, "commit", "-m", "local mirror change")
+
+    (other / ".agents" / "skill.md").write_text("remote\n", encoding="utf-8")
+    _git(other, "add", ".agents/skill.md")
+    _git(other, "commit", "-m", "remote mirror change")
+    _git(other, "push", "origin", "main")
+    _git(repo, "fetch", "origin")
+    before_remote = subprocess.run(
+        ["git", "rev-parse", "origin/main"],
+        cwd=repo,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+
+    result = NightlyRepoSyncService(repo, sync_stamp="20260508-040000").resolve_main_divergence()
+
+    assert result.status == "blocked"
+    assert result.block_reason == BLOCK_MIRROR_CONFLICT
+    assert not (repo / ".worktrees" / "nightly-main-sync-20260508-040000").exists()
+    assert subprocess.run(
+        ["git", "rev-parse", "origin/main"],
+        cwd=repo,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip() == before_remote
