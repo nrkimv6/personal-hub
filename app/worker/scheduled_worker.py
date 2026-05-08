@@ -26,6 +26,7 @@ from app.modules.dev_runner.schedulers.devguide_staleness_schedule import Devgui
 from app.modules.dev_runner.schedulers.plan_archive_insight_schedule import PlanArchiveInsightBatchScheduler
 from app.modules.dev_runner.schedulers.plan_archive_schedule import PlanArchiveScheduler
 from app.modules.dev_runner.schedulers.pytest_run_schedule import PytestRunScheduler
+from app.modules.dev_runner.schedulers.nightly_repo_sync_schedule import NightlyRepoSyncScheduler
 from app.modules.dev_runner.schedulers.worktree_hygiene_schedule import WorktreeHygieneScheduler
 from app.modules.google_search.schedulers.search_schedule import GoogleSearchScheduler
 from app.modules.instagram.schedulers.feed_schedule import InstagramFeedScheduler
@@ -98,6 +99,7 @@ class ScheduledCrawlWorker(CrawlWorkerBase):
             ScheduleDateExpireScheduler(),
             AutoDevRunnerScheduler(),
             WorktreeHygieneScheduler(),
+            NightlyRepoSyncScheduler(),
         ]
 
     def _get_loop_interval(self) -> float:
