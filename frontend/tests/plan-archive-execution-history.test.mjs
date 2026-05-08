@@ -3,7 +3,10 @@ import { readFileSync } from 'node:fs';
 import test from 'node:test';
 
 const apiSource = readFileSync(new URL('../src/lib/api/plan-records.ts', import.meta.url), 'utf8');
-const scheduleApiSource = readFileSync(new URL('../src/lib/api/plan-archive-schedule.ts', import.meta.url), 'utf8');
+const scheduleApiSource = readFileSync(
+	new URL('../src/lib/api/plan-archive-schedule.ts', import.meta.url),
+	'utf8'
+);
 const combinedApiSource = `${apiSource}\n${scheduleApiSource}`;
 const archiveTabSource = readFileSync(new URL('../src/routes/plans/ArchiveTab.svelte', import.meta.url), 'utf8');
 const historyTabSource = readFileSync(new URL('../src/routes/plans/HistoryTab.svelte', import.meta.url), 'utf8');

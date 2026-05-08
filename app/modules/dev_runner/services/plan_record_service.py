@@ -1086,7 +1086,8 @@ class PlanRecordService:
             elif attempt_state == "last_succeeded":
                 filtered = [i for i in filtered if i.get("last_attempt_status") == "completed"]
 
-        # eligible_for_analysis DESC, file_only DESC, needs_archive_normalization DESC,
+        # eligible_for_analysis DESC, file_only DESC, file-backed before db_only,
+        # needs_archive_normalization DESC,
         # archived_at ASC (None last), file_path ASC
         def sort_key(item):
             record = item.get("record")
@@ -1094,6 +1095,7 @@ class PlanRecordService:
             return (
                 not item["eligible_for_analysis"],   # eligible first
                 item["state"] != "file_only",         # file_only second
+                item["state"] == "db_only",           # keep file-backed records before db-only
                 not item["needs_archive_normalization"],  # needs_norm third
                 archived_at,                          # oldest archived first
                 item.get("file_path", ""),

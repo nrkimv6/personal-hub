@@ -4,7 +4,7 @@ API Access Control Middleware
 모든 모드(운영/개발)에서 비관리자의 쓰기 작업을 제한하는 미들웨어.
 
 권한 매트릭스:
-- GET/HEAD/OPTIONS: 항상 허용
+- GET/HEAD/OPTIONS: localhost/admin은 허용, public 외부 요청은 public-safe/admin-only 분류
 - localhost: 자동 관리자로 모든 API 허용
 - 관리자 로그인: 모든 API 허용
 - 비관리자: 이벤트 관리, 인증만 허용
@@ -33,16 +33,53 @@ ALLOWED_WRITE_PATTERNS_FOR_ANONYMOUS = [
 # 항상 허용하는 메서드 (읽기 전용)
 ALWAYS_ALLOWED_METHODS = {"GET", "HEAD", "OPTIONS"}
 
-PUBLIC_SENSITIVE_READ_PREFIXES = (
-    "/api/v1/worker",
-    "/api/v1/llm/worker",
-    "/api/v1/system/process",
-    "/api/v1/system/orphan-cleanup",
-    "/api/v1/system/services",
-    "/api/v1/system/memory",
-    "/api/v1/system/death-log",
-    "/api/v1/system/boot-history",
+# Public-safe read prefixes are product or health surfaces that must work
+# without admin auth in public mode. Keep this list narrow and add a comment
+# here when a new public GET surface is intentionally exposed.
+PUBLIC_SAFE_READ_PREFIXES = (
+    "/api/v1/auth",
+    "/api/v1/health",
+    "/api/v1/system/liveness",
+    "/api/v1/system/mode",
+    "/api/v1/events",
+    "/api/v1/popups",
+    "/api/v1/uncategorized",
+    "/api/v1/monitoring/events/coupang-public-history",
+    "/api/v1/expo",
+    "/api/v1/expo/maps",
 )
+
+# Admin-only read prefixes expose local files, runners, process/service state,
+# plans, git repositories, search/scan status, or LLM/worker internals.
+ADMIN_ONLY_READ_PREFIXES = (
+    "/api/v1/dev-runner",
+    "/api/v1/plans",
+    "/api/v1/git-repos",
+    "/api/v1/file-search",
+    "/api/v1/test-runs",
+    "/api/v1/claude-sessions",
+    "/api/v1/system",
+    "/api/v1/worker",
+    "/api/v1/llm",
+    "/api/v1/ss",
+    "/api/ic",
+    "/api/fc",
+)
+
+
+def _path_matches_prefix(path: str, prefix: str) -> bool:
+    """Match a route prefix on a path-segment boundary."""
+    return path == prefix or path.startswith(f"{prefix}/")
+
+
+def is_public_safe_read_path(path: str) -> bool:
+    return any(_path_matches_prefix(path, prefix) for prefix in PUBLIC_SAFE_READ_PREFIXES)
+
+
+def is_admin_only_read_path(path: str) -> bool:
+    if is_public_safe_read_path(path):
+        return False
+    return any(_path_matches_prefix(path, prefix) for prefix in ADMIN_ONLY_READ_PREFIXES)
 
 
 class ProductionModeMiddleware(BaseHTTPMiddleware):
@@ -50,7 +87,7 @@ class ProductionModeMiddleware(BaseHTTPMiddleware):
     비관리자의 쓰기 작업을 제한하는 미들웨어.
 
     정책:
-    - 읽기 전용(GET/HEAD/OPTIONS): 항상 허용
+    - 읽기 전용(GET/HEAD/OPTIONS): localhost/admin은 허용, public 외부 요청은 public-safe/admin-only 분류
     - localhost: 자동 관리자로 모든 API 허용
     - 관리자 로그인: 모든 API 허용
     - 비관리자:
@@ -59,9 +96,11 @@ class ProductionModeMiddleware(BaseHTTPMiddleware):
     """
 
     async def dispatch(self, request: Request, call_next):
-        # 읽기 전용 메서드는 항상 허용
+        # 읽기 전용 메서드는 public-safe allowlist와 admin-only 분류를 먼저 통과한다.
         if request.method in ALWAYS_ALLOWED_METHODS:
-            if self._is_public_sensitive_read(request):
+            if self._is_admin(request):
+                return await call_next(request)
+            if self._is_public_admin_only_read(request):
                 return JSONResponse(
                     status_code=403,
                     content={
@@ -147,11 +186,8 @@ class ProductionModeMiddleware(BaseHTTPMiddleware):
                 return True
         return False
 
-    def _is_public_sensitive_read(self, request: Request) -> bool:
-        """Public 외부 요청에서 worker/process 운영 정보를 읽지 못하게 한다."""
+    def _is_public_admin_only_read(self, request: Request) -> bool:
+        """Public 외부 요청에서 admin-only read surface를 읽지 못하게 한다."""
         if get_runtime_app_mode(settings_app_mode=settings.APP_MODE) != "public":
             return False
-        if self._is_admin(request):
-            return False
-        path = request.url.path
-        return any(path.startswith(prefix) for prefix in PUBLIC_SENSITIVE_READ_PREFIXES)
+        return is_admin_only_read_path(request.url.path)
