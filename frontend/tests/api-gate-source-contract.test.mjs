@@ -162,3 +162,49 @@ test('restart-api closes frontend gate before self restart', () => {
 	assert.match(src, /http:\/\/127\.0\.0\.1:\{frontend_port\}\/__local\/api-gate\/close/);
 	assert.match(src, /_close_api_gate\(target\.api_port\)[\s\S]+if not manager\._check_wmi_health/);
 });
+
+test('vite api readiness fallback is registered before sveltekit', () => {
+	const vite = read('../vite.config.ts');
+	const fallbackIndex = vite.indexOf('apiReadinessFallbackPlugin(apiPort');
+	const sveltekitIndex = vite.indexOf('sveltekit()');
+	assert.notEqual(fallbackIndex, -1);
+	assert.notEqual(sveltekitIndex, -1);
+	assert.ok(fallbackIndex < sveltekitIndex);
+	assert.match(vite, /function apiReadinessFallbackPlugin\(apiPort: string, previewApiPort = apiPort\)/);
+	assert.match(vite, /configureServer\(server\)[\s\S]+install\(server, apiPort\)/);
+	assert.match(vite, /configurePreviewServer\(server\)[\s\S]+install\(server, previewApiPort\)/);
+});
+
+test('vite fallback excludes local api app and static asset paths', () => {
+	const vite = read('../vite.config.ts');
+	assert.match(vite, /FALLBACK_EXCLUDED_PREFIXES = \[/);
+	for (const path of ['/_app', '/__local', '/api', '/node_modules', '/@vite', '/@id', '/@fs', '/src']) {
+		assert.match(vite, new RegExp(path.replace(/[\/]/g, '\\/')));
+	}
+	assert.match(vite, /FALLBACK_STATIC_EXTENSION/);
+	assert.match(vite, /pathname === '\/favicon\.ico'/);
+	assert.match(vite, /fetchMode === 'navigate' \|\| accept\.includes\('text\/html'\)/);
+});
+
+test('vite fallback html is independent from svelte bundle and direct backend ports', () => {
+	const vite = read('../vite.config.ts');
+	const fallbackBody = extractFunctionBody(vite, 'renderApiReadinessFallback');
+	assert.match(fallbackBody, /\/__local\/api-ready/);
+	assert.doesNotMatch(fallbackBody, /\/_app\//);
+	assert.doesNotMatch(fallbackBody, /127\.0\.0\.1:\$\{apiPort\}/);
+	assert.doesNotMatch(fallbackBody, /:8000|:8001/);
+	assert.match(fallbackBody, /sessionStorage\.getItem\(reloadKey\)/);
+	assert.match(fallbackBody, /location\.replace\(location\.href\)/);
+});
+
+test('vite fallback exposes local readiness endpoint and proxy fallback responses', () => {
+	const vite = read('../vite.config.ts');
+	assert.match(vite, /server\.middlewares\.use\('\/__local\/api-ready'/);
+	assert.match(vite, /REQUIRED_FALLBACK_READY_SUCCESSES = 2/);
+	assert.match(vite, /READY_STABLE_MS = 750/);
+	assert.match(vite, /headers: \{ 'x-api-gate-bypass': '1' \}/);
+	assert.match(vite, /configureBackendUnavailableFallback\('docs'\)/);
+	assert.match(vite, /configureBackendUnavailableFallback\('redoc'\)/);
+	assert.match(vite, /configureBackendUnavailableFallback\('openapi'\)/);
+	assert.match(vite, /backend_unavailable/);
+});
