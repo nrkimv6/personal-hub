@@ -91,7 +91,7 @@ def _create_schedule(
 async def test_full_dispatch_registry_contains_all_handlers(session_factory):
     worker = _build_worker(session_factory)
 
-    assert len(worker._handlers) == 15
+    assert len(worker._handlers) == 16
     assert [handler.target_type for handler in worker._handlers] == [
         TaskSchedule.TARGET_TYPE_INSTAGRAM_FEED,
         TaskSchedule.TARGET_TYPE_GOOGLE_SEARCH,
@@ -108,6 +108,7 @@ async def test_full_dispatch_registry_contains_all_handlers(session_factory):
         TaskSchedule.TARGET_TYPE_SCHEDULE_DATE_EXPIRE,
         TaskSchedule.TARGET_TYPE_AUTO_DEV_RUNNER,
         TaskSchedule.TARGET_TYPE_WORKTREE_HYGIENE,
+        TaskSchedule.TARGET_TYPE_NIGHTLY_REPO_SYNC,
     ]
 
 
@@ -135,31 +136,30 @@ async def test_main_loop_iteration_queues_plan_archive_request(session_factory):
     worker = _build_worker(session_factory)
     worker._handlers = [PlanArchiveScheduler()]
 
-    fake_llm = MagicMock()
-    fake_llm.resolve_provider_model.return_value = ("claude", "sonnet")
-
     with patch(
         "app.modules.dev_runner.schedulers.plan_archive_schedule.should_run_cron",
         return_value=True,
-    ), patch(
-        "app.modules.dev_runner.schedulers.plan_archive_schedule.LLMService",
-        return_value=fake_llm,
-    ), patch(
-        "app.modules.dev_runner.schedulers.plan_archive_schedule.build_plan_analyze_prompt",
-        side_effect=lambda file_content, filename: f"{filename}::{file_content}",
+    ), patch.object(
+        PlanArchiveScheduler,
+        "_enqueue_unprocessed_plans_in_session",
+        return_value={
+            "queued": 1,
+            "skipped_temp": 0,
+            "skipped_empty": 0,
+            "skipped_active_request": 0,
+            "remaining_real_unprocessed": 0,
+        },
     ), patch("app.worker.scheduled_worker.SessionLocal", session_factory):
         await worker._main_loop_iteration()
         await _drain_running_tasks(worker)
 
     with session_factory() as db:
         run = db.query(TaskScheduleRun).one()
-        request = db.query(LLMRequest).filter_by(caller_type="plan_archive_analyze").one()
 
     assert run.status == TaskScheduleRun.STATUS_COMPLETED
     assert run.collected_count == 1
     assert run.saved_count == 1
-    assert request.caller_id == "plan-archive-hash"
-    assert "worker dispatch integration" in request.prompt
+    assert run.stop_reason == "completed"
 
 
 @pytest.mark.asyncio
@@ -323,18 +323,19 @@ async def test_main_loop_iteration_uses_counts_only_complete_run_for_system_hand
     worker = _build_worker(session_factory)
     worker._handlers = [PlanArchiveScheduler()]
 
-    fake_llm = MagicMock()
-    fake_llm.resolve_provider_model.return_value = ("claude", "sonnet")
-
     with patch(
         "app.modules.dev_runner.schedulers.plan_archive_schedule.should_run_cron",
         return_value=True,
-    ), patch(
-        "app.modules.dev_runner.schedulers.plan_archive_schedule.LLMService",
-        return_value=fake_llm,
-    ), patch(
-        "app.modules.dev_runner.schedulers.plan_archive_schedule.build_plan_analyze_prompt",
-        return_value="counts-only",
+    ), patch.object(
+        PlanArchiveScheduler,
+        "_enqueue_unprocessed_plans_in_session",
+        return_value={
+            "queued": 1,
+            "skipped_temp": 0,
+            "skipped_empty": 0,
+            "skipped_active_request": 0,
+            "remaining_real_unprocessed": 0,
+        },
     ), patch.object(TaskScheduleService, "complete_run", _spy_complete_run), patch(
         "app.worker.scheduled_worker.SessionLocal",
         session_factory,

@@ -994,11 +994,21 @@ class TestCollectScheduleHidesInternalSchedules:
         assert TaskSchedule.TARGET_TYPE_SCHEDULE_DATE_EXPIRE not in types, \
             f"schedule_date_expire가 collect 목록에 노출됨: {types}"
 
+    def test_list_excludes_nightly_repo_sync_right(self, client, test_db):
+        """[Right] GET /api/v1/collect/schedules 응답에 nightly_repo_sync 타입이 없다."""
+        _seed_internal_schedule(test_db, TaskSchedule.TARGET_TYPE_NIGHTLY_REPO_SYNC)
+        response = client.get(f"{API_PREFIX}/collect/schedules")
+        assert response.status_code == 200
+        types = [s.get("target_type") for s in response.json()]
+        assert TaskSchedule.TARGET_TYPE_NIGHTLY_REPO_SYNC not in types, \
+            f"nightly_repo_sync가 collect 목록에 노출됨: {types}"
+
     @pytest.mark.parametrize(
         "target_type",
         [
             TaskSchedule.TARGET_TYPE_ARCHIVE_ROTATION,
             TaskSchedule.TARGET_TYPE_SCHEDULE_DATE_EXPIRE,
+            TaskSchedule.TARGET_TYPE_NIGHTLY_REPO_SYNC,
         ],
     )
     def test_detail_internal_schedule_returns_404_right(self, client, test_db, target_type):
@@ -1013,6 +1023,7 @@ class TestCollectScheduleHidesInternalSchedules:
         [
             TaskSchedule.TARGET_TYPE_ARCHIVE_ROTATION,
             TaskSchedule.TARGET_TYPE_SCHEDULE_DATE_EXPIRE,
+            TaskSchedule.TARGET_TYPE_NIGHTLY_REPO_SYNC,
         ],
     )
     def test_update_internal_schedule_returns_404_right(self, client, test_db, target_type):
@@ -1029,6 +1040,7 @@ class TestCollectScheduleHidesInternalSchedules:
         [
             TaskSchedule.TARGET_TYPE_ARCHIVE_ROTATION,
             TaskSchedule.TARGET_TYPE_SCHEDULE_DATE_EXPIRE,
+            TaskSchedule.TARGET_TYPE_NIGHTLY_REPO_SYNC,
         ],
     )
     def test_toggle_internal_schedule_returns_404_right(self, client, test_db, target_type):
@@ -1043,6 +1055,7 @@ class TestCollectScheduleHidesInternalSchedules:
         [
             TaskSchedule.TARGET_TYPE_ARCHIVE_ROTATION,
             TaskSchedule.TARGET_TYPE_SCHEDULE_DATE_EXPIRE,
+            TaskSchedule.TARGET_TYPE_NIGHTLY_REPO_SYNC,
         ],
     )
     def test_delete_internal_schedule_returns_404_right(self, client, test_db, target_type):
@@ -1057,6 +1070,7 @@ class TestCollectScheduleHidesInternalSchedules:
         [
             TaskSchedule.TARGET_TYPE_ARCHIVE_ROTATION,
             TaskSchedule.TARGET_TYPE_SCHEDULE_DATE_EXPIRE,
+            TaskSchedule.TARGET_TYPE_NIGHTLY_REPO_SYNC,
         ],
     )
     def test_create_internal_schedule_is_unsupported_right(self, client, target_type):
@@ -1069,6 +1083,13 @@ class TestCollectScheduleHidesInternalSchedules:
         })
         assert response.status_code in (400, 422), \
             f"{target_type} create가 거부되지 않음: {response.status_code}"
+
+    def test_run_nightly_repo_sync_internal_schedule_returns_404_right(self, client, test_db):
+        """[Right] POST /api/v1/collect/schedules/{id}/run → 404 for nightly_repo_sync."""
+        internal_id = _seed_internal_schedule(test_db, TaskSchedule.TARGET_TYPE_NIGHTLY_REPO_SYNC)
+        response = client.post(f"{API_PREFIX}/collect/schedules/{internal_id}/run")
+        assert response.status_code == 404, \
+            f"nightly_repo_sync manual run이 404가 아님: {response.status_code}"
 
 
 # ============================================================

@@ -131,3 +131,23 @@ def test_tracking_list_filters_and_sorts(tracking_api_context):
 
     overdue = client.get("/api/v1/tracking/items?status=overdue")
     assert [item["title"] for item in overdue.json()["items"]] == ["Overdue"]
+
+
+def test_tracking_list_includes_nightly_repo_sync_blocker_ready(tracking_api_context):
+    client, session = tracking_api_context
+    session.add(
+        TrackingItem(
+            title="Nightly repo sync blocked",
+            description="snapshot_key: nightly_repo_sync:block:root_dirty",
+            start_at=datetime.now() - timedelta(minutes=1),
+        )
+    )
+    session.commit()
+
+    response = client.get("/api/v1/tracking/items?status=ready")
+
+    assert response.status_code == 200
+    items = response.json()["items"]
+    assert len(items) == 1
+    assert items[0]["title"] == "Nightly repo sync blocked"
+    assert items[0]["status"] == "ready"

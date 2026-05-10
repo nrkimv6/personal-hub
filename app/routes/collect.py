@@ -23,6 +23,7 @@ router = APIRouter(prefix="/collect", tags=["collect"])
 _INTERNAL_SCHEDULE_TYPES = {
     TaskSchedule.TARGET_TYPE_ARCHIVE_ROTATION,
     TaskSchedule.TARGET_TYPE_SCHEDULE_DATE_EXPIRE,
+    TaskSchedule.TARGET_TYPE_NIGHTLY_REPO_SYNC,
 }
 
 
@@ -630,6 +631,8 @@ async def trigger_schedule_run(
     """
     schedule = db.query(TaskSchedule).filter(TaskSchedule.id == schedule_id).first()
     if not schedule:
+        raise HTTPException(status_code=404, detail="Schedule not found")
+    if schedule.target_type in _INTERNAL_SCHEDULE_TYPES:
         raise HTTPException(status_code=404, detail="Schedule not found")
 
     # 이미 대기 중인 요청이 있는지 확인
