@@ -11,9 +11,15 @@ TC:
   - test_patch_workflow_cancel: PATCH cancel → status=cancelled, finished_at 설정
 """
 import pytest
+import sys
+from pathlib import Path
 from fastapi.testclient import TestClient
 
 pytestmark = pytest.mark.http
+
+_PLAN_RUNNER_DIR = Path(__file__).resolve().parents[2] / "scripts" / "plan_runner"
+if str(_PLAN_RUNNER_DIR) not in sys.path:
+    sys.path.insert(0, str(_PLAN_RUNNER_DIR))
 
 
 @pytest.fixture(scope="module")
@@ -48,6 +54,43 @@ def test_get_workflows_empty(client):
     data = resp.json()
     assert isinstance(data, list)
     # 다른 테스트에서 생성된 레코드가 있을 수 있으므로 타입만 확인
+
+
+def test_workflow_manager_uses_configured_postgres_url_R(monkeypatch):
+    import workflow_manager as wm
+
+    created = {}
+
+    def fake_create_engine(db_url, **kwargs):
+        created["db_url"] = db_url
+        created["kwargs"] = kwargs
+        return object()
+
+    monkeypatch.setattr(wm.settings, "DATABASE_URL", "postgresql://user:pass@localhost:5432/monitor")
+    monkeypatch.setattr(wm, "create_engine", fake_create_engine)
+
+    manager = wm.WorkflowManager()
+
+    assert manager.db_url == "postgresql://user:pass@localhost:5432/monitor"
+    assert created["db_url"] == manager.db_url
+    assert created["kwargs"]["pool_pre_ping"] is True
+
+
+def test_workflow_manager_runtime_rejects_monitor_db_sqlite_E(monkeypatch):
+    import workflow_manager as wm
+
+    monkeypatch.delenv("DEV_RUNNER_ALLOW_SQLITE_WORKFLOW_MANAGER", raising=False)
+    monkeypatch.delenv("PYTEST_CURRENT_TEST", raising=False)
+
+    with pytest.raises(ValueError, match="legacy SQLite data/monitor.db"):
+        wm.WorkflowManager(Path(__file__).resolve().parents[2] / "data" / "monitor.db")
+
+
+def test_dev_runner_db_service_import_does_not_fail_E():
+    from app.modules.dev_runner.services import db_service
+
+    assert db_service.db_service is not None
+    assert db_service.DBService.__name__ == "DBService"
 
 
 def test_post_create_workflow(client):

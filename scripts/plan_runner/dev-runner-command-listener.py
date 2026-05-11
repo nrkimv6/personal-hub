@@ -449,7 +449,7 @@ def _handle_running_process_heartbeat(runner_id: str, proc, redis_client: redis.
 
 def main():
     """메인 루프: Redis BRPOP으로 명령 대기 및 실행."""
-    set_wf_manager(WorkflowManager(PROJECT_ROOT / "data" / "monitor.db"))
+    set_wf_manager(WorkflowManager())
     logger.info("=" * 50)
     logger.info("Dev Runner Command Listener 시작")
     logger.info(f"Redis: {REDIS_HOST}:{REDIS_PORT}")

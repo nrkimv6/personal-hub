@@ -49,6 +49,16 @@ def test_approval_required_hides_stale_branch_badge():
     assert display.secondary is None
 
 
+def test_stopped_runner_with_approval_required_displays_approval_R():
+    display = build_display_state(
+        _model(running=False, merge_status="approval_required", exit_reason="completed")
+    )
+
+    assert display.state == "approval_required"
+    assert display.label == "승인 필요"
+    assert display.severity == "approval"
+
+
 def test_post_merge_tasks_prevent_plain_completed_label():
     display = build_display_state(
         _model(exit_reason="completed", remaining_post_merge_tasks=2)

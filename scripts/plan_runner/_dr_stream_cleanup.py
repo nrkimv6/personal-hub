@@ -920,6 +920,21 @@ def _update_workflow_status(ctx: _StreamCleanupCtx, merge_requested: bool) -> bo
         try:
             wf = ctx.wf_manager.get_by_runner_id(ctx.runner_id)
             if wf:
+                merge_status = _get_merge_status(ctx.redis_client, ctx.runner_id)
+                if merge_status == "approval_required":
+                    if wf.get("status") != "merge_pending":
+                        ctx.wf_manager.update_status(
+                            wf["id"],
+                            "merge_pending",
+                            error_message=ctx.failure_message,
+                        )
+                    _pub_and_log(
+                        ctx.runner_id,
+                        "[_stream_output] approval_required 보존 → workflow failed 전이 차단",
+                        ctx.redis_client,
+                        "CLEANUP",
+                    )
+                    return False
                 if ctx.exit_code == 0:
                     if merge_requested:
                         _pub_and_log(
@@ -1001,6 +1016,10 @@ def _execute_cleanup_action(
     if merge_requested:
         if _preserve_terminal_merge_state_if_needed(ctx, flag_present=True):
             merge_requested = False
+
+    if not merge_requested and _preserve_terminal_merge_state_if_needed(ctx, flag_present=False):
+        cleanup_process_state_fn(ctx.runner_id, ctx.redis_client)
+        return
 
     if merge_requested:
         # merge 흐름 — cleanup은 merge 완료/실패 후 _do_inline_merge 내부에서 호출

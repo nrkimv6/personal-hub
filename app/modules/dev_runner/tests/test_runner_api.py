@@ -86,6 +86,29 @@ class TestGetStatus:
         assert data["pid"] == 12345
         assert data["listener_alive"] is True
 
+    async def test_status_prefers_recent_approval_required_runner(self, client, mock_executor_redis, runner_state_db):
+        fake_async = mock_executor_redis["async"]
+        rid = "approval-status-001"
+        prefix = f"plan-runner:runners:{rid}"
+        await fake_async.set("plan-runner:listener:heartbeat", "2026-05-11T10:00:00")
+        await fake_async.zadd("plan-runner:recent_runners", {rid: 1})
+        await fake_async.set(f"{prefix}:status", "stopped")
+        await fake_async.set(f"{prefix}:trigger", "user")
+        await fake_async.set(f"{prefix}:plan_file", "docs/plan/approval.md")
+        await fake_async.set(f"{prefix}:merge_status", "approval_required")
+        await fake_async.set(f"{prefix}:merge_reason", "service_lock")
+        await fake_async.set(f"{prefix}:merge_message", "MERGE_PRECHECK_FAILED[service_lock]")
+
+        response = await client.get("/api/v1/dev-runner/status")
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["running"] is False
+        assert data["runner_id"] == rid
+        assert data["display_state"] == "approval_required"
+        assert data["display_label"] == "승인 필요"
+        assert data["display_severity"] == "approval"
+
     async def test_status_after_cleanup(self, client, mock_executor_redis):
         """TC-R (Right): 정상 종료 후 _cleanup_redis_state() → running=False"""
         from unittest.mock import patch
