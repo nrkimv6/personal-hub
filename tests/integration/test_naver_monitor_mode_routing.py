@@ -2,6 +2,7 @@
 T3 통합 TC: NaverMonitorWorker monitoring_mode 라우팅 재현
 
 근본 원인: _execute_monitoring_cycle이 monitoring_mode를 무시하고 항상 execute_with_tab 호출.
+축 분류: anonymous/legacy routing은 상태 display/override 축이 아니라 fetch path integration 축이다.
 수정 후 계약 검증 (T1 단위테스트보다 실제 코드 경로 더 많이 사용):
 1. anonymous 모드 → 실제 _run_anonymous_cycle 경로 실행, get_anonymous_monitor 호출 검증
 2. legacy 모드 → execute_with_tab 호출, check_availability 미호출
