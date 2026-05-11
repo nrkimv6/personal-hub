@@ -334,12 +334,23 @@ class TestStartRun:
         })
         assert response.status_code == 504
 
-    async def test_start_reserved_status_returns_409_not_timeout(self, client, mock_executor_redis):
-        """예약대기 blocked listener 결과는 listener timeout/500이 아니라 409로 노출한다."""
+    async def test_start_reserved_status_is_reported_via_async_command_result(self, client, mock_executor_redis):
+        """비동기 start 계약에서는 예약대기 listener 결과를 command result로 조회한다."""
         fake_async = mock_executor_redis["async"]
         await fake_async.set("plan-runner:listener:heartbeat", datetime.now().isoformat())
-        brpop_result = (
-            "plan-runner:command_results:abc123",
+
+        with patch.object(fake_async, "brpop", new=AsyncMock(return_value=None)) as mock_brpop:
+            response = await client.post("/api/v1/dev-runner/run", json={
+                "plan_file": "reserved.md"
+            })
+
+        assert response.status_code == 200
+        mock_brpop.assert_not_awaited()
+        queued = await fake_async.lrange("plan-runner:commands", 0, -1)
+        command = json.loads(queued[0])
+        command_id = command["command_id"]
+        await fake_async.lpush(
+            f"{RESULTS_KEY}:{command_id}",
             json.dumps({
                 "success": False,
                 "reason": "reserved_status",
@@ -348,13 +359,12 @@ class TestStartRun:
             }, ensure_ascii=False),
         )
 
-        with patch.object(fake_async, "brpop", new=AsyncMock(return_value=brpop_result)):
-            response = await client.post("/api/v1/dev-runner/run", json={
-                "plan_file": "reserved.md"
-            })
-
-        assert response.status_code == 409
-        assert "예약대기" in response.json()["detail"]
+        result_response = await client.get(f"/api/v1/dev-runner/commands/{command_id}")
+        assert result_response.status_code == 200
+        result = result_response.json()
+        assert result["status"] == "failed"
+        assert result["result"]["reason"] == "reserved_status"
+        assert "예약대기" in result["message"]
 
     async def test_start_run_fix_engine_stored_in_command(self, client, mock_executor_redis):
         """T4.1: fix_engine 필드가 Redis command에 포함되는지 확인"""
