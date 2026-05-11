@@ -153,6 +153,39 @@ class DiagnosticsService:
         except Exception as e:
             steps.append({"step": 7, "name": "orphan runner evidence", "ok": False, "detail": f"조회 실패: {e}"})
 
+        # 8. 로그 기반 orphan reattach 후보 요약
+        try:
+            active_ids = {
+                item.decode("utf-8", errors="replace") if isinstance(item, bytes) else str(item)
+                for item in (runner_ids or set())
+            }
+            recent_ids = {
+                item.decode("utf-8", errors="replace") if isinstance(item, bytes) else str(item)
+                for item in (self.redis_client.zrange(RECENT_RUNNERS_KEY, 0, -1) or [])
+            }
+            log_candidates = [
+                evidence for rid, evidence in self.resolver.discover_runner_log_evidence().items()
+                if rid not in active_ids and rid not in recent_ids and not evidence.get("warnings")
+            ]
+            if log_candidates:
+                newest = max(log_candidates, key=lambda item: item.get("log_mtime") or 0)
+                meta = newest.get("meta") or {}
+                steps.append({
+                    "step": 8,
+                    "name": "orphan reattach candidates",
+                    "ok": False,
+                    "detail": f"{len(log_candidates)} candidate(s), newest={meta.get('plan') or meta.get('plan_key') or newest.get('runner_id')}",
+                })
+            else:
+                steps.append({
+                    "step": 8,
+                    "name": "orphan reattach candidates",
+                    "ok": True,
+                    "detail": "candidate 없음",
+                })
+        except Exception as e:
+            steps.append({"step": 8, "name": "orphan reattach candidates", "ok": False, "detail": f"조회 실패: {e}"})
+
         return {"steps": steps}
 
 

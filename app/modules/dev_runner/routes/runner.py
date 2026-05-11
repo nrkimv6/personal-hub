@@ -8,7 +8,19 @@ import redis
 import redis.asyncio as aioredis
 from fastapi import APIRouter, HTTPException
 
-from app.modules.dev_runner.schemas import RunRequest, RunStatusResponse, RunnerListItem, MergeQueueItem, MergeStatusResponse, MergeHistoryItem, DirectMergeRequest, RetryMergeRequest
+from app.modules.dev_runner.schemas import (
+    DirectMergeRequest,
+    MergeHistoryItem,
+    MergeQueueItem,
+    MergeStatusResponse,
+    OrphanRunnerCandidate,
+    ReattachRunnerRequest,
+    ReattachRunnerResponse,
+    RetryMergeRequest,
+    RunRequest,
+    RunStatusResponse,
+    RunnerListItem,
+)
 from app.modules.dev_runner.services.executor_service import executor_service
 
 router = APIRouter()
@@ -19,6 +31,15 @@ async def list_runners():
     """모든 active runner 목록 조회"""
     try:
         return await executor_service.get_all_runners()
+    except (redis.ConnectionError, aioredis.ConnectionError):
+        raise HTTPException(status_code=503, detail="Redis 연결 실패")
+
+
+@router.get("/runners/orphans", response_model=list[OrphanRunnerCandidate])
+async def list_orphan_runners():
+    """Redis 상태가 소실된 live/log runner 후보 조회"""
+    try:
+        return await executor_service.discover_orphan_runners()
     except (redis.ConnectionError, aioredis.ConnectionError):
         raise HTTPException(status_code=503, detail="Redis 연결 실패")
 
@@ -88,6 +109,18 @@ async def restart_listener():
 async def kill_runner(runner_id: str):
     """특정 runner 강제 종료 (SIGKILL — 진행 중인 작업이 유실될 수 있음)"""
     return await executor_service.send_runner_command(runner_id, "force-kill")
+
+
+@router.post("/runners/{runner_id}/reattach", response_model=ReattachRunnerResponse)
+async def reattach_runner(runner_id: str, request: ReattachRunnerRequest = ReattachRunnerRequest()):
+    """Redis 상태 소실 runner를 사용자 승인으로 active 상태에 재연결"""
+    return await executor_service.reattach_runner(runner_id, request)
+
+
+@router.post("/runners/{runner_id}/orphans/kill")
+async def kill_orphan_runner(runner_id: str):
+    """Redis 상태 소실 runner 후보의 live PID를 evidence 재확인 후 종료"""
+    return await executor_service.kill_orphan_runner(runner_id)
 
 
 @router.post("/runners/{runner_id}/retry-merge")

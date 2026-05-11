@@ -79,6 +79,67 @@ class LogFileResolver:
             return self.select_display_log(stream_path, log_path)
         return None
 
+    @classmethod
+    def _runner_id_from_log_name(cls, path: Path) -> Optional[str]:
+        """plan-runner 로그 파일명에서 runner_id를 추출한다.
+
+        runner_id 자체에 '-'가 포함될 수 있으므로 뒤쪽 timestamp 구간을 기준으로 자른다.
+        """
+        match = re.match(
+            r"^plan-runner(?:-stream)?-(?P<runner_id>.+?)-\d{8}(?:[-_]\d{6})?\.log$",
+            path.name,
+        )
+        if not match:
+            return None
+        runner_id = match.group("runner_id").strip()
+        return runner_id or None
+
+    def discover_runner_log_evidence(self, log_dir: Optional[Path] = None) -> dict[str, dict]:
+        """runner_id별 최신 표시 로그와 header 메타를 반환한다."""
+        log_dir = log_dir or self.get_log_dir()
+        if not log_dir.exists():
+            return {}
+
+        grouped: dict[str, list[Path]] = {}
+        for pattern in ("plan-runner-stream-*.log", "plan-runner-*.log"):
+            for path in log_dir.glob(pattern):
+                runner_id = self._runner_id_from_log_name(path)
+                if not runner_id:
+                    continue
+                grouped.setdefault(runner_id, []).append(path)
+
+        result: dict[str, dict] = {}
+        for runner_id, paths in grouped.items():
+            stream_path = self._best_display_candidate(
+                p for p in paths if p.name.startswith("plan-runner-stream-")
+            )
+            log_path = self._best_display_candidate(
+                p for p in paths if not p.name.startswith("plan-runner-stream-")
+            )
+            selected = self.select_display_log(stream_path, log_path)
+            if not selected:
+                continue
+            meta = self.parse_meta_from_log(str(selected), scan_lines=30)
+            warnings: list[str] = []
+            if not meta.get("trigger") and not meta.get("started_at") and not meta.get("plan_key"):
+                warnings.append("log_header_missing")
+            log_runner_id = meta.get("runner_id")
+            if log_runner_id and str(log_runner_id) != runner_id:
+                warnings.append("runner_id_mismatch")
+            try:
+                stat = selected.stat()
+                log_mtime = stat.st_mtime
+            except OSError:
+                log_mtime = None
+            result[runner_id] = {
+                "runner_id": runner_id,
+                "log_file": str(selected),
+                "log_mtime": log_mtime,
+                "meta": meta,
+                "warnings": warnings,
+            }
+        return result
+
     @staticmethod
     def _existing_path(raw_path) -> Optional[Path]:
         if not raw_path:
@@ -236,9 +297,13 @@ class LogFileResolver:
         result: dict = {
             "trigger": None,
             "plan": None,
+            "engine": None,
+            "fix_engine": None,
+            "runner_id": None,
             "started_at": None,
             "execution_count": None,
             "plan_key": None,
+            "start_log_path": None,
         }
         try:
             with open(log_file_path, "r", encoding="utf-8", errors="ignore") as f:
@@ -254,6 +319,12 @@ class LogFileResolver:
                         for p in parts[1:]:
                             if p.startswith("plan=") and result["plan"] is None:
                                 result["plan"] = p[5:]
+                            elif p.startswith("engine=") and result["engine"] is None:
+                                result["engine"] = p[len("engine="):]
+                            elif p.startswith("fix_engine=") and result["fix_engine"] is None:
+                                result["fix_engine"] = p[len("fix_engine="):]
+                            elif p.startswith("runner_id=") and result["runner_id"] is None:
+                                result["runner_id"] = p[len("runner_id="):]
                     elif line.startswith("[RUN_META] ") and result["started_at"] is None:
                         parts = line[len("[RUN_META] "):].split(" | ")
                         for p in parts:
@@ -267,6 +338,11 @@ class LogFileResolver:
                                     pass
                             elif p.startswith("plan_key="):
                                 result["plan_key"] = p[len("plan_key="):]
+                    elif "START" in line and "log_path=" in line and result["start_log_path"] is None:
+                        marker = "log_path="
+                        start = line.find(marker)
+                        if start >= 0:
+                            result["start_log_path"] = line[start + len(marker):].strip()
                     # 두 줄 모두 파싱 완료되면 종료
                     if result["trigger"] and result["started_at"] is not None:
                         break
