@@ -350,6 +350,22 @@ export const devRunnerTaskApi = {
 		devRunnerRequest<CurrentTrackingResponse | null>('/tasks/current-tracking'),
 };
 
+export interface DevRunnerCommandAccepted {
+	success: boolean;
+	status: 'accepted';
+	command_id: string;
+	result_key?: string;
+	message: string;
+}
+
+export interface DevRunnerCommandResult {
+	success: boolean;
+	status: 'pending' | 'completed' | 'failed';
+	command_id: string;
+	message: string;
+	result?: Record<string, unknown>;
+}
+
 // ============================================================
 // Runner API
 // ============================================================
@@ -367,6 +383,9 @@ export const devRunnerRunnerApi = {
 	stopLegacy: () => devRunnerRequest<{ message: string }>('/stop', { method: 'POST' }),
 
 	status: () => devRunnerRequest<RunStatusResponse>('/status'),
+
+	commandResult: (commandId: string) =>
+		devRunnerRequest<DevRunnerCommandResult>(`/commands/${commandId}`),
 
 	runners: () => devRunnerRequest<RunnerListItem[]>('/runners'),
 
@@ -397,7 +416,7 @@ export const devRunnerRunnerApi = {
 		runnerId: string,
 		payload?: { worktree_path?: string | null; plan_file?: string | null; branch?: string | null; approve_service_lock?: boolean }
 	) =>
-		devRunnerRequest<{ success: boolean; message: string; conflict?: boolean }>(
+		devRunnerRequest<DevRunnerCommandAccepted>(
 			`/runners/${runnerId}/retry-merge`,
 			{
 				method: 'POST',
@@ -413,13 +432,13 @@ export const devRunnerRunnerApi = {
 		),
 
 	cleanupWorktree: (runnerId: string) =>
-		devRunnerRequest<{ success: boolean; message: string }>(
+		devRunnerRequest<DevRunnerCommandAccepted>(
 			`/runners/${runnerId}/worktree`,
 			{ method: 'DELETE' }
 		),
 
 	directMerge: (branch: string, worktreePath?: string, planFile?: string, approveServiceLock?: boolean) =>
-		devRunnerRequest<{ success: boolean; message: string; runner_id?: string }>(
+		devRunnerRequest<DevRunnerCommandAccepted>(
 			'/merge/direct',
 			{
 				method: 'POST',
@@ -444,7 +463,7 @@ export const devRunnerRunnerApi = {
 		),
 
 	kill: (runnerId: string) =>
-		devRunnerRequest<{ success: boolean; message: string }>(
+		devRunnerRequest<DevRunnerCommandAccepted>(
 			`/runners/${runnerId}/kill`,
 			{ method: 'POST' }
 		),

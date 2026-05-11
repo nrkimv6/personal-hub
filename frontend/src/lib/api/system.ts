@@ -42,6 +42,23 @@ interface UrlImportTask<T> {
   error?: string | null;
 }
 
+interface AcceptedCommandResponse {
+  success: boolean;
+  message: string;
+  pid: number | null;
+  status?: 'accepted' | string | null;
+  command_id?: string | null;
+}
+
+interface CommandResultResponse {
+  success: boolean;
+  status: 'pending' | 'completed' | 'failed';
+  command_id: string;
+  message: string;
+  pid?: number | null;
+  result?: Record<string, unknown>;
+}
+
 function wait(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -238,19 +255,21 @@ export const workerApi = {
   }>('/worker/status', options),
 
   // 시작
-  start: () => request<{ success: boolean; message: string; pid: number | null }>('/worker/start', {
+  start: () => request<AcceptedCommandResponse>('/worker/start', {
     method: 'POST'
   }),
 
   // 중지
-  stop: () => request<{ success: boolean; message: string; pid: number | null }>('/worker/stop', {
+  stop: () => request<AcceptedCommandResponse>('/worker/stop', {
     method: 'POST'
   }),
 
   // 재시작
-  restart: () => request<{ success: boolean; message: string; pid: number | null }>('/worker/restart', {
+  restart: () => request<AcceptedCommandResponse>('/worker/restart', {
     method: 'POST'
   }),
+
+  commandResult: (commandId: string) => request<CommandResultResponse>(`/worker/commands/${commandId}`),
 
   // 전체 모니터링 일시중지
   pause: () => request<{ success: boolean; message: string; pid: number | null }>('/worker/pause', {
