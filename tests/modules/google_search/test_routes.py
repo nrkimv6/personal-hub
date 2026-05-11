@@ -14,6 +14,9 @@ import pytest
 from datetime import datetime
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
+from sqlalchemy.pool import StaticPool
 from unittest.mock import AsyncMock, patch
 
 from app.database import get_db
@@ -23,6 +26,7 @@ from app.models.google_search import (
     GoogleSearchResult,
     GoogleSearchQueue,
 )
+from app.models.task_schedule import TaskSchedule
 from app.modules.google_search.routes.search import router as google_search_router
 
 
@@ -33,6 +37,30 @@ def _build_google_test_app() -> FastAPI:
     routes = {route.path for route in app.routes}
     assert "/api/v1/google/saved/{saved_id}/run" in routes
     return app
+
+
+@pytest.fixture
+def test_db_session():
+    """Google route 테스트에 필요한 테이블만 가진 경량 DB 세션."""
+    engine = create_engine(
+        "sqlite:///:memory:",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    for table in (
+        TaskSchedule.__table__,
+        GoogleSavedSearch.__table__,
+        GoogleSearchHistory.__table__,
+        GoogleSearchQueue.__table__,
+        GoogleSearchResult.__table__,
+    ):
+        table.create(bind=engine, checkfirst=True)
+
+    Session = sessionmaker(bind=engine)
+    session = Session()
+    yield session
+    session.close()
+    engine.dispose()
 
 
 @pytest.fixture
