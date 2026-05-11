@@ -17,6 +17,10 @@ def _make_svc(**overrides) -> DiagnosticsService:
     for k, v in overrides.items():
         setattr(mock, k, v)
     svc.redis_client = mock
+    svc.resolver = MagicMock()
+    svc.resolver.find_current_log = MagicMock(return_value=None)
+    svc.resolver.find_filesystem_log = MagicMock(return_value=None)
+    svc.resolver.discover_runner_log_evidence = MagicMock(return_value={})
     return svc
 
 
@@ -27,6 +31,7 @@ def test_run_diagnostics_right_all_ok(tmp_path):
     log_file.write_text("log content")
 
     svc = _make_svc()
+    svc.resolver.find_current_log = MagicMock(return_value=log_file)
     svc.redis_client.get = MagicMock(side_effect=lambda key: {
         "plan-runner:listener:heartbeat": "1",
         "plan-runner:runners:runner1:stream_log_path": str(log_file),
@@ -37,12 +42,16 @@ def test_run_diagnostics_right_all_ok(tmp_path):
     with _patch(
         "app.modules.dev_runner.services.event_service.get_pmsg_count_last5min",
         return_value=5,
+    ), _patch("app.database.SessionLocal") as session_local, _patch(
+        "app.modules.dev_runner.services.dev_runner_state_repository.list_runner_states",
+        return_value=[],
     ):
+        session_local.return_value.close = MagicMock()
         result = svc.run_diagnostics()
 
     steps = result["steps"]
 
-    assert len(steps) == 7
+    assert len(steps) == 9
     assert all(s["ok"] for s in steps), [s for s in steps if not s["ok"]]
 
 
