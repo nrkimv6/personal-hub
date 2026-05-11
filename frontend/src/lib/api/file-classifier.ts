@@ -11,7 +11,7 @@ export const FILE_CLASSIFIER_TIMEOUT_MS = {
 export function fileClassifierFetch(
 	endpoint: string,
 	options: RequestInit = {},
-	timeout = FILE_CLASSIFIER_TIMEOUT_MS.read
+	timeout: number = FILE_CLASSIFIER_TIMEOUT_MS.read
 ): Promise<Response> {
 	const path = endpoint.startsWith('/') ? endpoint : `/${endpoint}`;
 	return fetchWithTimeout(`${BASE}${path}`, { ...options, credentials: 'include' }, timeout);
