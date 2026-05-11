@@ -51,6 +51,23 @@ def test_popup_parser_handles_missing_apollo():
     assert result.items == []
 
 
+def test_popup_parser_apollo_parse_error_keeps_partial_diff_empty():
+    result = parse_popup_items_from_html(
+        '<html><body><script>window.__APOLLO_STATE__ = {"ROOT_QUERY": ]}</script></body></html>'
+    )
+
+    assert result.has_apollo_state is True
+    assert result.parse_error.startswith("apollo_json_decode_error:")
+    assert result.items == []
+
+    diff = calculate_popup_diff([], [item.to_dict() for item in result.items])
+    assert diff.new_items == []
+    assert diff.updated_items == []
+    assert diff.removed_items == []
+    assert diff.new_count == 0
+    assert diff.has_new is False
+
+
 def test_diff_service_new_updated_removed():
     previous = [
         {

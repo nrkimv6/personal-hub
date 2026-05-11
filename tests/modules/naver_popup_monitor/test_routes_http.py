@@ -1,3 +1,14 @@
+"""Popup monitor route lifecycle tests.
+
+6-axis mapping:
+- creator: POST /monitors and POST /check-now create monitor/run rows.
+- preserver: disable keeps latest snapshot and run history.
+- overwrite-block: disable must not create or erase a run.
+- override: enable/disable own PopupUrlMonitor.is_enabled.
+- display: latest/runs expose run id, status, error, and snapshot fields.
+- late-writer ordering: check-now run id is reflected by latest last_run.
+"""
+
 import json
 import uuid
 from types import SimpleNamespace
@@ -262,3 +273,101 @@ def test_popup_monitor_http_error_responses(popup_http_context):
     ]:
         response = getattr(client, method)(path)
         assert response.status_code == 404
+
+
+def test_disable_preserves_latest_run_payload_without_new_run(popup_http_context):
+    client, _factory = popup_http_context
+
+    create_res = client.post(
+        "/api/v1/naver-popup/monitors",
+        json={
+            "name": "disable-preserve",
+            "url": "https://pcmap.place.naver.com/popupstore/list",
+            "is_enabled": True,
+        },
+    )
+    assert create_res.status_code == 201
+    monitor_id = create_res.json()["id"]
+
+    check_res = client.post(f"/api/v1/naver-popup/monitors/{monitor_id}/check-now")
+    assert check_res.status_code == 202
+    run_id = check_res.json()["run_id"]
+
+    latest_before = client.get(f"/api/v1/naver-popup/monitors/{monitor_id}/latest").json()
+    runs_before = client.get(f"/api/v1/naver-popup/monitors/{monitor_id}/runs").json()
+    assert latest_before["last_run"]["id"] == run_id
+    assert len(runs_before) == 1
+
+    disable_res = client.post(f"/api/v1/naver-popup/monitors/{monitor_id}/disable")
+    assert disable_res.status_code == 200
+    assert disable_res.json()["is_enabled"] is False
+
+    latest_after = client.get(f"/api/v1/naver-popup/monitors/{monitor_id}/latest").json()
+    runs_after = client.get(f"/api/v1/naver-popup/monitors/{monitor_id}/runs").json()
+    assert latest_after["last_run"]["id"] == run_id
+    assert latest_after["latest_snapshot_hash"] == latest_before["latest_snapshot_hash"]
+    assert len(runs_after) == 1
+    assert runs_after[0]["id"] == run_id
+
+
+def test_check_now_response_run_id_matches_latest_last_run_after_manual_trigger(
+    popup_http_context,
+):
+    client, _factory = popup_http_context
+
+    create_res = client.post(
+        "/api/v1/naver-popup/monitors",
+        json={
+            "name": "manual-trigger",
+            "url": "https://pcmap.place.naver.com/popupstore/list",
+            "is_enabled": True,
+        },
+    )
+    assert create_res.status_code == 201
+    monitor_id = create_res.json()["id"]
+
+    check_res = client.post(f"/api/v1/naver-popup/monitors/{monitor_id}/check-now")
+    assert check_res.status_code == 202
+    run_id = check_res.json()["run_id"]
+
+    latest_res = client.get(f"/api/v1/naver-popup/monitors/{monitor_id}/latest")
+    assert latest_res.status_code == 200
+    assert latest_res.json()["last_run"]["id"] == run_id
+
+
+def test_runs_response_preserves_error_status_and_message(
+    popup_http_context,
+):
+    client, factory = popup_http_context
+    create_res = client.post(
+        "/api/v1/naver-popup/monitors",
+        json={
+            "name": "error-display",
+            "url": "https://pcmap.place.naver.com/popupstore/list",
+        },
+    )
+    assert create_res.status_code == 201
+    monitor_id = create_res.json()["id"]
+
+    db = factory()
+    try:
+        db.add(
+            PopupUrlMonitorRun(
+                monitor_id=monitor_id,
+                status="error",
+                new_count=0,
+                has_new=False,
+                fallback_applied=False,
+                error_message="HTTP 503",
+            )
+        )
+        db.commit()
+    finally:
+        db.close()
+
+    runs_res = client.get(f"/api/v1/naver-popup/monitors/{monitor_id}/runs")
+    assert runs_res.status_code == 200
+    runs = runs_res.json()
+    assert runs[0]["status"] == "error"
+    assert runs[0]["error_message"] == "HTTP 503"
+    assert runs[0]["snapshot"] is None

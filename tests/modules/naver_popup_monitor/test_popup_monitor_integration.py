@@ -2,6 +2,10 @@
 통합 테스트 — 실서버/Playwright 없는 통합 테스트
 
 SQLAlchemy in-memory + 서비스 직접 호출을 통한 팝업 모니터링 로직 검증.
+
+Lifecycle axis: scheduled worker loop owns the is_enabled override boundary.
+It must select enabled monitors, then re-check enablement immediately before
+creating a run so manual disable is an overwrite-block.
 """
 import json
 from types import SimpleNamespace
@@ -187,4 +191,94 @@ async def test_popup_monitor_worker_loop_accumulates_runs_and_detects_new(
 
     verify_db.close()
     await worker._cleanup()
+
+
+@pytest.mark.asyncio
+async def test_worker_loop_skips_monitor_disabled_after_selection(
+    worker_session_factory,
+    monkeypatch,
+):
+    db = worker_session_factory()
+    monitor = PopupUrlMonitor(
+        name="disabled-after-selection",
+        url="https://pcmap.place.naver.com/popupstore/list",
+        request_profile="A",
+        fallback_strategy="reinforce",
+        proxy_enabled=False,
+        notify_on_new=True,
+        min_new_count=1,
+        monitoring_mode="anonymous",
+        is_enabled=True,
+    )
+    db.add(monitor)
+    db.commit()
+    monitor_id = monitor.id
+    db.close()
+
+    fetcher = SequenceFetcher(
+        [
+            PopupFetchResult(
+                success=True,
+                html=_build_apollo_html(
+                    [
+                        {
+                            "popupId": "should-not-run",
+                            "title": "실행되면 안 되는 팝업",
+                        }
+                    ]
+                ),
+                status=200,
+                final_url="https://pcmap.place.naver.com/popupstore/list",
+                request_profile="A",
+                proxy_url=None,
+                fallback_applied=False,
+            )
+        ]
+    )
+    service = PopupMonitorService(
+        fetcher=fetcher,
+        notification_service=SimpleNamespace(should_notify=lambda state: False),
+    )
+
+    worker = PopupMonitorWorker(browser_manager=None)
+    worker._monitor_service = service
+    monkeypatch.setattr("app.worker.popup_monitor_worker.SessionLocal", worker_session_factory)
+
+    async def _disable_then_execute(_name, action):
+        disable_db = worker_session_factory()
+        try:
+            selected_monitor = (
+                disable_db.query(PopupUrlMonitor)
+                .filter(PopupUrlMonitor.id == monitor_id)
+                .first()
+            )
+            selected_monitor.is_enabled = False
+            disable_db.commit()
+        finally:
+            disable_db.close()
+
+        await action()
+
+    monkeypatch.setattr(worker, "_safe_execute", _disable_then_execute)
+
+    await worker._main_loop_iteration()
+
+    verify_db = worker_session_factory()
+    try:
+        run_count = (
+            verify_db.query(PopupUrlMonitorRun)
+            .filter(PopupUrlMonitorRun.monitor_id == monitor_id)
+            .count()
+        )
+        refreshed_monitor = (
+            verify_db.query(PopupUrlMonitor)
+            .filter(PopupUrlMonitor.id == monitor_id)
+            .first()
+        )
+        assert run_count == 0
+        assert refreshed_monitor.is_enabled is False
+        assert fetcher.calls == 0
+    finally:
+        verify_db.close()
+        await worker._cleanup()
 

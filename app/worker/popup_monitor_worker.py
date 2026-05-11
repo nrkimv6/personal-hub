@@ -50,9 +50,16 @@ class PopupMonitorWorker(BaseWorker):
     async def _run_single(self, monitor_id: int) -> None:
         db = SessionLocal()
         try:
-            await self._monitor_service.run_monitor_by_id(
+            monitor = db.query(PopupUrlMonitor).filter(PopupUrlMonitor.id == monitor_id).first()
+            if not monitor:
+                return
+            if not monitor.is_enabled:
+                logger.info("[popup-monitor] skip disabled monitor_id=%s", monitor_id)
+                return
+
+            await self._monitor_service.run_monitor_once(
                 db,
-                monitor_id,
+                monitor,
                 trigger="worker",
             )
         finally:
