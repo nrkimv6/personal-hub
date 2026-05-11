@@ -175,6 +175,27 @@ class TestSavedSearchCreateAPI:
         assert data["is_favorite"] is False
         assert data["notify_on_new"] is False
 
+    def test_create_saved_search_normalizes_google_search_url(self, client):
+        """Right: Google 검색 URL 입력은 q/tbs만 저장 모델 값으로 정규화."""
+        google_url = (
+            "https://www.google.com/search?"
+            "q=%EC%9B%90%EB%8D%94%EB%9F%AC%EC%8A%A4%ED%8A%B8+%EC%B4%88%EB%8C%80%EA%B6%8C"
+            "&sca_esv=ignored&sxsrf=ignored&source=lnt&tbs=qdr:d&ved=ignored&biw=2275"
+        )
+        response = client.post("/api/v1/google/saved", json={
+            "name": "URL 정규화",
+            "query": google_url,
+            "max_pages": 1,
+            "notify_on_new": True,
+        })
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["query"] == "원더러스트 초대권"
+        assert data["date_filter"] == "24h"
+        assert data["search_params"] is None
+        assert data["notify_on_new"] is True
+
 
 class TestSavedSearchDetailAPI:
     """GET /api/v1/google/saved/{id} 테스트"""

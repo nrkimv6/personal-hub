@@ -21,6 +21,7 @@ from sqlalchemy.pool import StaticPool
 
 from app.models.google_search import GoogleSavedSearch, GoogleSearchQueue
 from app.models.task_schedule import TaskSchedule
+from app.modules.google_search.routes.search import _normalize_google_search_input
 
 
 # ============================================================
@@ -413,3 +414,27 @@ class TestScheduleTriggerSiteRestrictionIntegration:
         assert queue_item.status == "pending"
         assert queue_item.saved_search_id == saved.id
         assert queue_item.schedule_id == schedule.id
+
+
+class TestGoogleSearchUrlNormalization:
+    """T3: 사용자 Google URL에서 저장 검색에 필요한 값만 정규화."""
+
+    def test_google_search_url_keeps_query_and_date_filter_only(self):
+        google_url = (
+            "https://www.google.com/search?"
+            "q=%EC%9B%90%EB%8D%94%EB%9F%AC%EC%8A%A4%ED%8A%B8+%EC%B4%88%EB%8C%80%EA%B6%8C"
+            "&sca_esv=ignored&sxsrf=ignored&source=lnt&tbs=qdr:d&ved=ignored&biw=2275&bih=1130"
+        )
+
+        query, date_filter = _normalize_google_search_input(google_url)
+
+        assert query == "원더러스트 초대권"
+        assert date_filter == "24h"
+
+    def test_google_search_url_preserves_explicit_date_filter(self):
+        google_url = "https://www.google.com/search?q=%EC%9B%90%EB%8D%94&tbs=qdr:d"
+
+        query, date_filter = _normalize_google_search_input(google_url, date_filter="1w")
+
+        assert query == "원더"
+        assert date_filter == "1w"
