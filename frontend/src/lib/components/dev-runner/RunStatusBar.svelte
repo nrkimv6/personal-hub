@@ -32,6 +32,8 @@
 		display_label?: string | null;
 		display_secondary?: string | null;
 		hide_stale_branch_badge?: boolean;
+		orphan_alive?: boolean;
+		redis_missing?: boolean;
 	}
 
 	function resolveFullLabel(runner: RunnerTab): string {
