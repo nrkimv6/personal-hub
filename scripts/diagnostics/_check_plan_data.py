@@ -1,5 +1,21 @@
+"""plan_records / plan_events 진단 스크립트 (SQLite 전용 레거시 read-only).
+
+⚠️ LEGACY: 이 스크립트는 SQLite data/monitor.db 직접 접근을 사용합니다.
+   2026-04-10 PostgreSQL 전환 이후에는 data/monitor.db가 운영 DB가 아닙니다.
+   DB 파일이 존재하지 않으면 스크립트가 종료됩니다.
+   현재 운영 DB 조회는 Admin API 또는 SQLAlchemy 세션 기반으로 수행하세요.
+"""
 import sqlite3
-conn = sqlite3.connect('D:/work/project/tools/monitor-page/data/monitor.db')
+import sys
+from pathlib import Path
+
+_DB_PATH = Path("D:/work/project/tools/monitor-page/data/monitor.db")
+if not _DB_PATH.exists():
+    print(f"❌ SQLite DB를 찾을 수 없습니다: {_DB_PATH}")
+    print("이 스크립트는 SQLite 전용 레거시입니다. 운영 DB 조회는 Admin API를 사용하세요.")
+    sys.exit(1)
+
+conn = sqlite3.connect(str(_DB_PATH))
 conn.row_factory = sqlite3.Row
 
 print('=== plan_records (최근 30개) ===')
