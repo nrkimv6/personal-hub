@@ -5,11 +5,11 @@ Business 라우트 - 업체 API
 """
 from datetime import datetime
 from typing import List
-from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
+from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks, status
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from app.database import get_db
+from app.database import SessionLocal, get_db
 from app.schemas.business import (
     Business,
     BusinessCreate,
@@ -31,6 +31,11 @@ from app.modules.naver_booking.services.graphql_client import (
 from app.modules.naver_booking.utils.parsers import parse_naver_booking_url
 from app.utils.parsers import extract_date_only
 from app.config import logger
+from app.services.import_task_store import (
+    create_import_task,
+    get_import_task,
+    run_import_task,
+)
 
 router = APIRouter(prefix="/api/v1/businesses", tags=["businesses"])
 
@@ -100,6 +105,40 @@ def get_business_items(business_id: int, db: Session = Depends(get_db)):
 
 @router.post("/import-url", response_model=UrlImportResponse)
 async def import_from_url(data: UrlImportRequest, db: Session = Depends(get_db)):
+    return await _import_from_url_core(data, db)
+
+
+async def _run_business_import_url_task(task_id: str, data: UrlImportRequest) -> None:
+    db = SessionLocal()
+    try:
+        await run_import_task(task_id, lambda: _import_from_url_core(data, db))
+    finally:
+        db.close()
+
+
+@router.post("/import-url/tasks", status_code=status.HTTP_202_ACCEPTED)
+async def start_import_from_url_task(
+    data: UrlImportRequest,
+    background_tasks: BackgroundTasks,
+):
+    task = create_import_task("business_url_import", data.url)
+    background_tasks.add_task(_run_business_import_url_task, task["task_id"], data)
+    return {
+        "task_id": task["task_id"],
+        "status": task["status"],
+        "phase": task["phase"],
+    }
+
+
+@router.get("/import-url/tasks/{task_id}")
+def get_import_from_url_task(task_id: str):
+    task = get_import_task(task_id)
+    if not task or task.get("kind") != "business_url_import":
+        raise HTTPException(status_code=404, detail="Import task not found")
+    return task
+
+
+async def _import_from_url_core(data: UrlImportRequest, db: Session):
     """
     URL에서 업체/아이템/일정을 자동 생성합니다.
 

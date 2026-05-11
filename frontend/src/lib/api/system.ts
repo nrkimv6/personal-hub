@@ -34,6 +34,36 @@ import type {
   VideoDownloadBatchResponse
 } from '../types';
 
+interface UrlImportTask<T> {
+  task_id: string;
+  status: 'pending' | 'running' | 'completed' | 'failed';
+  phase?: string;
+  result?: T | null;
+  error?: string | null;
+}
+
+function wait(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function pollUrlImportTask<T>(
+  taskPath: string,
+  taskId: string,
+  fallbackError: string,
+): Promise<T> {
+  for (let attempt = 0; attempt < 120; attempt += 1) {
+    const task = await request<UrlImportTask<T>>(`${taskPath}/${taskId}`);
+    if (task.status === 'completed' && task.result) {
+      return task.result;
+    }
+    if (task.status === 'failed') {
+      throw new Error(task.error || fallbackError);
+    }
+    await wait(1000);
+  }
+  throw new Error(fallbackError);
+}
+
 // ============================================================
 // 시스템 API
 // ============================================================
@@ -372,11 +402,28 @@ export const eventApi = {
   },
 
   // URL에서 이벤트 가져오기
-  importFromUrl: (url: string, autoSave: boolean = false) =>
-    request<EventImportFromUrlResponse>('/events/import-from-url', {
+  importFromUrl: async (url: string, autoSave: boolean = false) => {
+    const duplicate = await eventApi.checkDuplicateUrl(url);
+    if (duplicate) {
+      return {
+        success: false,
+        is_event: true,
+        page_type: 'unknown',
+        extraction_method: 'skipped',
+        error: `동일 URL로 등록된 이벤트가 있습니다 (ID: ${duplicate.id})`,
+      } satisfies EventImportFromUrlResponse;
+    }
+
+    const task = await request<UrlImportTask<EventImportFromUrlResponse>>('/events/import-from-url/tasks', {
       method: 'POST',
       body: JSON.stringify({ url, auto_save: autoSave })
-    })
+    });
+    return pollUrlImportTask<EventImportFromUrlResponse>(
+      '/events/import-from-url/tasks',
+      task.task_id,
+      '이벤트 URL 가져오기 작업이 완료되지 않았습니다.',
+    );
+  }
 };
 
 // ============================================================
