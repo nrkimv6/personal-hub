@@ -103,6 +103,7 @@ class PopupMonitorService:
         finished_at = datetime.now()
 
         if not fetch_result.success:
+            db.refresh(monitor)
             run = PopupUrlMonitorRun(
                 monitor_id=monitor.id,
                 status="error",
@@ -117,8 +118,9 @@ class PopupMonitorService:
                 finished_at=finished_at,
             )
             db.add(run)
-            monitor.latest_checked_at = finished_at
-            monitor.updated_at = finished_at
+            if self._should_update_latest(monitor, started_at):
+                monitor.latest_checked_at = finished_at
+                monitor.updated_at = finished_at
             db.commit()
             db.refresh(run)
             db.refresh(monitor)
@@ -134,6 +136,7 @@ class PopupMonitorService:
                 error_message=run.error_message,
             )
 
+        db.refresh(monitor)
         parse_result = parse_popup_items_from_html(fetch_result.html)
         current_items = [item.to_dict() for item in parse_result.items]
         previous_items = _load_snapshot_items(monitor.latest_snapshot_json)
@@ -175,10 +178,11 @@ class PopupMonitorService:
         )
         db.add(run)
 
-        monitor.latest_snapshot_json = snapshot_json
-        monitor.latest_snapshot_hash = snapshot_hash
-        monitor.latest_checked_at = finished_at
-        monitor.updated_at = finished_at
+        if self._should_update_latest(monitor, started_at):
+            monitor.latest_snapshot_json = snapshot_json
+            monitor.latest_snapshot_hash = snapshot_hash
+            monitor.latest_checked_at = finished_at
+            monitor.updated_at = finished_at
 
         db.commit()
         db.refresh(run)
@@ -249,7 +253,7 @@ class PopupMonitorService:
         last_run = (
             db.query(PopupUrlMonitorRun)
             .filter(PopupUrlMonitorRun.monitor_id == monitor_id)
-            .order_by(PopupUrlMonitorRun.id.desc())
+            .order_by(PopupUrlMonitorRun.started_at.desc(), PopupUrlMonitorRun.id.desc())
             .first()
         )
 
@@ -314,4 +318,10 @@ class PopupMonitorService:
             "created_at": run.created_at,
             "snapshot": snapshot,
         }
+
+    @staticmethod
+    def _should_update_latest(monitor: PopupUrlMonitor, started_at: datetime) -> bool:
+        if monitor.latest_checked_at is None:
+            return True
+        return started_at >= monitor.latest_checked_at
 
