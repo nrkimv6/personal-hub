@@ -13,6 +13,7 @@ import json
 import sys
 import os
 import psutil
+import uuid
 from pathlib import Path
 
 from app.config import settings, logger
@@ -55,6 +56,8 @@ class WorkerActionResponse(BaseModel):
     success: bool
     message: str
     pid: Optional[int] = None
+    status: Optional[str] = None
+    command_id: Optional[str] = None
 
 
 class WorkerLogsResponse(BaseModel):
@@ -187,7 +190,6 @@ def get_process_memory(pid: int) -> Optional[float]:
 
 REDIS_WORKER_COMMANDS_KEY = "worker:commands"
 REDIS_WORKER_RESULTS_KEY = "worker:command_results"
-REDIS_COMMAND_RESULT_TIMEOUT = 60  # 결과 대기 타임아웃 (초)
 
 
 def _manual_worker_command_hint(action: str, **options: Any) -> str:
@@ -200,7 +202,7 @@ def _manual_worker_command_hint(action: str, **options: Any) -> str:
 
 
 async def _send_worker_command(action: str, **options: Any) -> dict:
-    """Redis를 통해 워커 명령을 전송하고 결과를 대기합니다.
+    """Redis를 통해 워커 명령을 전송하고 command id를 즉시 반환합니다.
 
     Session 1에서 실행 중인 worker-command-listener가 명령을 수신하고 실행합니다.
 
@@ -209,7 +211,7 @@ async def _send_worker_command(action: str, **options: Any) -> dict:
         options: command JSON에 포함할 optional payload
 
     Returns:
-        dict: {success: bool, message: str}
+        dict: {success: bool, message: str, command_id: str, status: accepted}
     """
     from app.shared.redis.client import RedisClient
 
@@ -221,7 +223,11 @@ async def _send_worker_command(action: str, **options: Any) -> dict:
             + _manual_worker_command_hint(action, **options),
         }
 
+    command_id = uuid.uuid4().hex[:12]
+    result_key = f"{REDIS_WORKER_RESULTS_KEY}:{command_id}"
     payload = {
+        "command_id": command_id,
+        "result_key": result_key,
         "action": action,
         "timestamp": datetime.now().isoformat(),
         "source": "api",
@@ -230,27 +236,49 @@ async def _send_worker_command(action: str, **options: Any) -> dict:
     command = json.dumps(payload)
 
     try:
-        # 이전 결과 비우기
-        await redis_client.delete(REDIS_WORKER_RESULTS_KEY)
+        await redis_client.delete(result_key)
 
         # 명령 전송
         await redis_client.lpush(REDIS_WORKER_COMMANDS_KEY, command)
         logger.info(f"[WorkerAPI] Redis 워커 명령 전송: {action}")
 
-        # 결과 대기 (BRPOP - 블로킹)
-        result = await redis_client.brpop(REDIS_WORKER_RESULTS_KEY, timeout=REDIS_COMMAND_RESULT_TIMEOUT)
-
-        if result:
-            _, result_data = result
-            result_json = json.loads(result_data) if isinstance(result_data, str) else json.loads(result_data.decode())
-            logger.info(f"[WorkerAPI] 워커 명령 결과: {result_json}")
-            return result_json
-        else:
-            return {"success": False, "message": f"명령 '{action}' 전송됨, 리스너 응답 타임아웃 ({REDIS_COMMAND_RESULT_TIMEOUT}초). 리스너가 실행 중인지 확인하세요."}
+        return {
+            "success": True,
+            "status": "accepted",
+            "command_id": command_id,
+            "message": f"명령 '{action}'이 접수되었습니다.",
+        }
 
     except Exception as e:
         logger.error(f"[WorkerAPI] Redis 워커 명령 전송 실패: {e}")
         return {"success": False, "message": f"Redis 명령 전송 실패: {str(e)}"}
+
+
+async def _get_worker_command_result(command_id: str) -> dict:
+    from app.shared.redis.client import RedisClient
+
+    redis_client = await RedisClient.get_client()
+    if not redis_client:
+        raise HTTPException(status_code=503, detail="Redis에 연결할 수 없습니다.")
+
+    key = f"{REDIS_WORKER_RESULTS_KEY}:{command_id}"
+    raw = await redis_client.lindex(key, 0)
+    if raw is None:
+        return {
+            "success": True,
+            "status": "pending",
+            "command_id": command_id,
+            "message": "명령 처리 대기 중입니다.",
+        }
+    result_json = json.loads(raw) if isinstance(raw, str) else json.loads(raw.decode())
+    return {
+        "success": bool(result_json.get("success", False)),
+        "status": "completed" if result_json.get("success", False) else "failed",
+        "command_id": command_id,
+        "message": result_json.get("message", "완료"),
+        "pid": result_json.get("pid"),
+        "result": result_json,
+    }
 
 
 # ============= API Endpoints =============
@@ -293,7 +321,9 @@ async def start_worker():
     return WorkerActionResponse(
         success=result["success"],
         message=result["message"],
-        pid=result.get("pid")
+        pid=result.get("pid"),
+        status=result.get("status"),
+        command_id=result.get("command_id")
     )
 
 
@@ -314,7 +344,9 @@ async def stop_worker():
     return WorkerActionResponse(
         success=result["success"],
         message=result["message"],
-        pid=result.get("pid")
+        pid=result.get("pid"),
+        status=result.get("status"),
+        command_id=result.get("command_id")
     )
 
 
@@ -325,7 +357,9 @@ async def restart_worker():
     return WorkerActionResponse(
         success=result["success"],
         message=result["message"],
-        pid=result.get("pid")
+        pid=result.get("pid"),
+        status=result.get("status"),
+        command_id=result.get("command_id")
     )
 
 
@@ -336,8 +370,16 @@ async def restart_frontend(public: bool = False):
     return WorkerActionResponse(
         success=result["success"],
         message=result["message"],
-        pid=result.get("pid")
+        pid=result.get("pid"),
+        status=result.get("status"),
+        command_id=result.get("command_id")
     )
+
+
+@router.get("/commands/{command_id}")
+async def get_worker_command_result(command_id: str):
+    """워커 명령 결과를 non-blocking으로 조회합니다."""
+    return await _get_worker_command_result(command_id)
 
 
 @router.get("/logs", response_model=WorkerLogsResponse)

@@ -10,6 +10,8 @@ from .services.worker_service import WorkerService
 from .services.redis_service import RedisService
 from .services.cleanup_stats_service import CleanupStatsService
 from .services.system_service import SystemService
+from .services.system_utils import get_redis_command_result
+from app.shared.redis.client import RedisClient
 
 router = APIRouter(prefix="/api/v1/system", tags=["system"])
 
@@ -179,6 +181,15 @@ async def start_watchdogs():
     """Start watchdog processes via Redis Command Listener"""
     result = await _worker.start_watchdogs()
     return result
+
+
+@router.get("/services/commands/{command_id}")
+async def get_service_command_result(command_id: str):
+    """Poll an accepted Redis service command without blocking the start request."""
+    redis_client = await RedisClient.get_client()
+    if not redis_client:
+        raise HTTPException(status_code=503, detail="Redis에 연결할 수 없습니다.")
+    return await get_redis_command_result(redis_client, "worker:command_results", command_id)
 
 
 # ===== Nightly Cleanup Stats =====

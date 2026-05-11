@@ -427,11 +427,15 @@ def main():
                 action_result = execute_worker_action(action, public=public, target=target)
                 action_result["action"] = action
                 action_result["executed_at"] = datetime.now().isoformat()
+                command_id = command.get("command_id")
+                result_key = command.get("result_key") or (f"{RESULTS_KEY}:{command_id}" if command_id else RESULTS_KEY)
+                if command_id:
+                    action_result["command_id"] = command_id
 
-                # 결과 반환 (API가 BRPOP으로 대기 중)
-                r.lpush(RESULTS_KEY, json.dumps(action_result, ensure_ascii=False))
+                # 결과 반환 (API가 command-specific status endpoint로 조회)
+                r.lpush(result_key, json.dumps(action_result, ensure_ascii=False))
                 # 결과 키 만료 설정 (30초 후 자동 삭제, 누적 방지)
-                r.expire(RESULTS_KEY, 30)
+                r.expire(result_key, 30)
 
                 logger.info(f"명령 결과 반환: {action_result}")
 
