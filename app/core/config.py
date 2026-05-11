@@ -260,6 +260,7 @@ class Settings(BaseSettings):
     # MP4 -> GIF 도구 설정
     MP4_GIF_WORK_ROOT: str = "data/mp4_gif"
     MP4_GIF_MAX_UPLOAD_MB: int = 100
+    IMAGE_PDF_WORK_ROOT: str = "data/image_pdf"
 
     # Health Monitor 설정
     HEALTH_MONITOR_ENABLED: bool = True  # 헬스 모니터링 활성화 여부

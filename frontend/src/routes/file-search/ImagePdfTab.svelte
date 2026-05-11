@@ -1,12 +1,16 @@
 <script lang="ts">
-	import { onMount } from 'svelte';
+	import { onDestroy, onMount } from 'svelte';
 	import { AlertTriangle, Download, FileText, Loader2, Trash2, Upload } from 'lucide-svelte';
 
 	import {
-		convertToPdf,
+		createTask,
 		getHealth,
+		getResultUrl,
+		getTask,
 		type ImagePdfConvertOptions,
-		type ImagePdfHealthResponse
+		type ImagePdfHealthResponse,
+		type ImagePdfTaskStatus,
+		type ImagePdfTaskStatusResponse
 	} from '$lib/api/image-pdf';
 	import { toast } from '$lib/stores/toast';
 
@@ -26,8 +30,24 @@
 	let errorMessage = $state('');
 	let dragActive = $state(false);
 	let lastDownloadName = $state('');
+	let tasks: ImagePdfTaskStatusResponse[] = $state([]);
+	let pollTimer: ReturnType<typeof setInterval> | null = null;
 
 	const canConvert = $derived(selectedFiles.length > 0 && !loading);
+
+	const STATUS_LABELS: Record<ImagePdfTaskStatus, string> = {
+		queued: '대기 중',
+		running: '변환 중',
+		completed: '완료',
+		failed: '실패'
+	};
+
+	const STATUS_CLASSES: Record<ImagePdfTaskStatus, string> = {
+		queued: 'bg-muted text-muted-foreground',
+		running: 'bg-primary/10 text-primary',
+		completed: 'bg-success/10 text-success',
+		failed: 'bg-destructive/10 text-destructive'
+	};
 
 	function formatBytes(bytes: number): string {
 		if (bytes >= 1024 * 1024) return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
@@ -73,15 +93,60 @@
 		options.quality = Math.max(1, Math.min(100, Number(options.quality)));
 	}
 
-	function downloadBlob(blob: Blob, filename: string) {
-		const url = URL.createObjectURL(blob);
+	function hasActiveTasks() {
+		return tasks.some((task) => task.status === 'queued' || task.status === 'running');
+	}
+
+	async function pollTasks() {
+		const activeTaskIds = tasks
+			.filter((task) => task.status === 'queued' || task.status === 'running')
+			.map((task) => task.task_id);
+		if (activeTaskIds.length === 0) {
+			clearPolling();
+			return;
+		}
+
+		try {
+			const updatedTasks = await Promise.all(activeTaskIds.map((taskId) => getTask(taskId)));
+			for (const updatedTask of updatedTasks) {
+				tasks = tasks.map((task) => (task.task_id === updatedTask.task_id ? updatedTask : task));
+				if (updatedTask.status === 'completed' && updatedTask.download_filename) {
+					lastDownloadName = updatedTask.download_filename;
+				}
+			}
+			if (!hasActiveTasks()) {
+				clearPolling();
+			}
+		} catch (error) {
+			clearPolling();
+			errorMessage = error instanceof Error ? error.message : 'PDF 변환 상태를 확인하지 못했습니다.';
+			toast.error(errorMessage);
+		}
+	}
+
+	function startPolling() {
+		if (pollTimer !== null) return;
+		pollTimer = setInterval(() => {
+			void pollTasks();
+		}, 1000);
+	}
+
+	function clearPolling() {
+		if (pollTimer !== null) {
+			clearInterval(pollTimer);
+			pollTimer = null;
+		}
+	}
+
+	function downloadTask(task: ImagePdfTaskStatusResponse) {
 		const link = document.createElement('a');
-		link.href = url;
-		link.download = filename;
+		link.href = getResultUrl(task.task_id);
+		link.download = task.download_filename ?? 'image-pdf.pdf';
+		link.target = '_blank';
+		link.rel = 'noreferrer';
 		document.body.appendChild(link);
 		link.click();
 		link.remove();
-		URL.revokeObjectURL(url);
 	}
 
 	async function handleSubmit() {
@@ -96,10 +161,12 @@
 		errorMessage = '';
 		lastDownloadName = '';
 		try {
-			const result = await convertToPdf(selectedFiles, options);
-			downloadBlob(result.blob, result.filename);
-			lastDownloadName = result.filename;
-			toast.success('PDF 변환이 완료되었습니다.');
+			const accepted = await createTask(selectedFiles, options);
+			const initialTask = await getTask(accepted.task_id);
+			tasks = [initialTask, ...tasks.filter((task) => task.task_id !== initialTask.task_id)];
+			selectedFiles = [];
+			startPolling();
+			toast.success('PDF 변환 작업을 시작했습니다.');
 		} catch (error) {
 			errorMessage = error instanceof Error ? error.message : 'PDF 변환에 실패했습니다.';
 			toast.error(errorMessage);
@@ -116,6 +183,10 @@
 				errorMessage = error instanceof Error ? error.message : 'image-pdf 상태를 불러오지 못했습니다.';
 			}
 		})();
+	});
+
+	onDestroy(() => {
+		clearPolling();
 	});
 </script>
 
@@ -288,5 +359,69 @@
 				{/each}
 			</div>
 		{/if}
+
+		<div class="mt-6 border-t border-border pt-4">
+			<div class="flex items-center justify-between gap-3">
+				<div>
+					<h3 class="text-sm font-semibold">변환 작업</h3>
+					<p class="mt-1 text-xs text-muted-foreground">queued / running / completed / failed 상태를 자동으로 갱신합니다.</p>
+				</div>
+			</div>
+
+			{#if tasks.length === 0}
+				<div class="mt-3 rounded-xl border border-dashed border-border p-4 text-sm text-muted-foreground">
+					아직 시작한 변환 작업이 없습니다.
+				</div>
+			{:else}
+				<div class="mt-3 space-y-3">
+					{#each tasks as task (task.task_id)}
+						<article class="rounded-xl border border-border p-3">
+							<div class="flex items-start justify-between gap-3">
+								<div class="min-w-0">
+									<div class="truncate text-sm font-semibold">
+										{task.download_filename ?? 'image-pdf.pdf'}
+									</div>
+									<div class="mt-1 text-xs text-muted-foreground">
+										{task.file_count}개 파일 · 품질 {task.quality}
+										{#if task.bw}
+											· 흑백 {task.black}-{task.white}
+										{/if}
+									</div>
+								</div>
+								<div class="flex items-center gap-2">
+									{#if task.status === 'running'}
+										<Loader2 size={16} class="animate-spin text-primary" />
+									{/if}
+									<span class={`rounded-full px-3 py-1 text-xs font-medium ${STATUS_CLASSES[task.status]}`}>
+										{STATUS_LABELS[task.status]}
+									</span>
+								</div>
+							</div>
+
+							<div class="mt-2 truncate text-xs text-muted-foreground">
+								{task.source_names.join(', ')}
+							</div>
+
+							{#if task.status === 'completed'}
+								<div class="mt-3 flex items-center gap-2">
+									<button
+										type="button"
+										class="inline-flex items-center rounded-lg border border-border px-3 py-2 text-sm font-medium hover:bg-muted/40"
+										onclick={() => downloadTask(task)}
+									>
+										<Download size={16} class="mr-2" />
+										PDF 다운로드
+									</button>
+								</div>
+							{:else if task.status === 'failed'}
+								<div class="mt-3 rounded-lg border border-destructive/30 bg-destructive/5 p-3 text-sm text-destructive">
+									{task.error_message ?? 'PDF 변환에 실패했습니다.'}
+								</div>
+							{/if}
+						</article>
+					{/each}
+				</div>
+			{/if}
+		</div>
 	</div>
 </section>
