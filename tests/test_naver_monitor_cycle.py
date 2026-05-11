@@ -1,4 +1,7 @@
-"""NaverMonitorCycleRunner 단위 TC (RIGHT-BICEP)."""
+"""NaverMonitorCycleRunner 단위 TC (RIGHT-BICEP).
+
+event status/hash assertions are fetch-cycle outputs, not MonitorSchedule.run_status transitions.
+"""
 import json
 from datetime import datetime, timedelta
 from unittest.mock import AsyncMock, MagicMock, patch
