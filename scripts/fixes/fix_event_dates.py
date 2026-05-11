@@ -1,4 +1,4 @@
-"""이벤트 날짜 수정 스크립트.
+"""이벤트 날짜 수정 스크립트 (SQLite 전용 레거시).
 
 2026년에 생성된 이벤트 중 날짜가 2025년으로 잘못 저장된 것들을 수정합니다.
 
@@ -6,6 +6,11 @@
 - created_at이 2026년인 데이터 중
 - event_end가 created_at보다 과거 (11개월 이상 차이)
 - → event_start, event_end에 1년 추가
+
+⚠️ LEGACY: 이 스크립트는 SQLite data/monitor.db 직접 접근을 사용합니다.
+   2026-04-10 PostgreSQL 전환 이후에는 data/monitor.db가 운영 DB가 아닙니다.
+   DB 파일이 존재하지 않으면 스크립트가 종료됩니다.
+   PostgreSQL 환경에서 동일 작업이 필요하면 SQLAlchemy 세션 기반으로 재작성이 필요합니다.
 """
 
 import re

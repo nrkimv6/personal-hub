@@ -1,11 +1,16 @@
 """
-Kiwi 형태소 분석기를 사용한 키워드 추출 스크립트.
+Kiwi 형태소 분석기를 사용한 키워드 추출 스크립트 (SQLite 전용 레거시).
+
+⚠️ LEGACY: 이 스크립트는 SQLite data/monitor.db 직접 접근을 사용합니다.
+   2026-04-10 PostgreSQL 전환 이후에는 실행하기 전 --sqlite-path 옵션으로
+   별도 SQLite 파일 경로를 명시해야 합니다.
+   기본값(data/monitor.db)이 없으면 스크립트가 종료됩니다.
 
 Usage:
-    python scripts/extract_keywords.py
-    python scripts/extract_keywords.py --min-freq 5     # 최소 빈도 5 이상만
-    python scripts/extract_keywords.py --min-length 2   # 최소 2글자 이상
-    python scripts/extract_keywords.py --pos NNG,NNP    # 일반명사, 고유명사만
+    python scripts/fixes/extract_keywords.py --sqlite-path data/monitor.db
+    python scripts/fixes/extract_keywords.py --sqlite-path data/monitor.db --min-freq 5
+    python scripts/fixes/extract_keywords.py --sqlite-path data/monitor.db --min-length 2
+    python scripts/fixes/extract_keywords.py --sqlite-path data/monitor.db --pos NNG,NNP
 """
 
 import re
@@ -17,8 +22,7 @@ from pathlib import Path
 from kiwipiepy import Kiwi
 
 # 프로젝트 루트
-PROJECT_ROOT = Path(__file__).parent.parent
-DB_PATH = PROJECT_ROOT / "data" / "monitor.db"
+PROJECT_ROOT = Path(__file__).parent.parent.parent
 
 # Kiwi 품사 태그 (추출할 것들)
 # NNG: 일반명사, NNP: 고유명사, NNB: 의존명사
@@ -61,19 +65,26 @@ def analyze_keywords(
     min_length: int = 2,
     pos_tags: set[str] | None = None,
     batch_size: int = 1000,
+    sqlite_path: Path | None = None,
 ):
     """Kiwi로 형태소 분석 후 키워드 추출."""
     if pos_tags is None:
         pos_tags = DEFAULT_POS_TAGS
 
-    conn = sqlite3.connect(DB_PATH)
+    db_path = sqlite_path or (PROJECT_ROOT / "data" / "monitor.db")
+    if not db_path.exists():
+        print(f"❌ SQLite DB를 찾을 수 없습니다: {db_path}")
+        print("이 스크립트는 SQLite 전용 레거시입니다. --sqlite-path 옵션으로 경로를 명시하세요.")
+        return
+
+    conn = sqlite3.connect(db_path)
     cursor = conn.cursor()
 
     # 기존 데이터 삭제 (재분석 시)
     cursor.execute("DELETE FROM keyword_stats WHERE category IS NULL")
     conn.commit()
 
-    print(f"DB: {DB_PATH}")
+    print(f"DB: {db_path}")
     print(f"설정: min_freq={min_freq}, min_length={min_length}, pos={pos_tags}")
     print("-" * 50)
 
@@ -197,14 +208,16 @@ def analyze_keywords(
 if __name__ == "__main__":
     import argparse
 
-    parser = argparse.ArgumentParser(description="Kiwi 형태소 분석 기반 키워드 추출")
+    parser = argparse.ArgumentParser(description="Kiwi 형태소 분석 기반 키워드 추출 (SQLite 레거시)")
     parser.add_argument("--min-freq", type=int, default=3, help="최소 빈도수 (기본: 3)")
     parser.add_argument("--min-length", type=int, default=2, help="최소 글자수 (기본: 2)")
     parser.add_argument(
         "--pos", type=str, default="NNG,NNP",
         help="추출할 품사 (기본: NNG,NNP = 일반명사,고유명사)"
     )
+    parser.add_argument("--sqlite-path", type=str, default=None, help="SQLite DB 경로 (기본: data/monitor.db)")
 
     args = parser.parse_args()
     pos_tags = set(args.pos.split(","))
-    analyze_keywords(min_freq=args.min_freq, min_length=args.min_length, pos_tags=pos_tags)
+    sqlite_path = Path(args.sqlite_path) if args.sqlite_path else None
+    analyze_keywords(min_freq=args.min_freq, min_length=args.min_length, pos_tags=pos_tags, sqlite_path=sqlite_path)

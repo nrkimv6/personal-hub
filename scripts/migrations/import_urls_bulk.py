@@ -4,11 +4,13 @@ URL 목록을 크롤링 요청 큐에 일괄 추가하는 스크립트
 실행 방법:
     cd D:\work\project\tools\monitor-page
     .\.venv\Scripts\Activate.ps1
-    python scripts/import_urls_bulk.py
+    python scripts/migrations/import_urls_bulk.py
 
 옵션:
-    --dry-run    실제 삽입 없이 파싱 결과만 확인
-    --file PATH  입력 파일 경로 (기본: data/2025-12-24_original_files.md)
+    --dry-run        실제 삽입 없이 파싱 결과만 확인
+    --file PATH      입력 파일 경로 (기본: data/2025-12-24_original_files.md)
+    --sqlite-path P  레거시 SQLite DB 경로 (기본: 앱 settings.DATABASE_URL 사용)
+                     예: --sqlite-path data/monitor.db (SQLite 전용 legacy 모드)
 """
 
 import re
@@ -68,12 +70,16 @@ def extract_instagram_urls(file_path: Path) -> list[dict]:
     return results
 
 
-def import_urls(urls: list[dict], dry_run: bool = False):
+def import_urls(urls: list[dict], dry_run: bool = False, sqlite_path: str | None = None):
     """URL들을 크롤링 요청 테이블에 삽입"""
 
-    # DB 연결
-    db_path = project_root / "data" / "monitor.db"
-    engine = create_engine(f"sqlite:///{db_path}")
+    # DB 연결: --sqlite-path 명시 시 SQLite legacy 모드, 기본은 앱 설정 사용
+    if sqlite_path:
+        db_url = f"sqlite:///{sqlite_path}"
+        print(f"[LEGACY] SQLite 경로 사용: {sqlite_path}")
+    else:
+        db_url = settings.DATABASE_URL
+    engine = create_engine(db_url)
     Session = sessionmaker(bind=engine)
     session = Session()
 
@@ -131,6 +137,7 @@ def main():
     parser = argparse.ArgumentParser(description="URL 목록을 크롤링 요청 큐에 일괄 추가")
     parser.add_argument("--dry-run", action="store_true", help="실제 삽입 없이 파싱 결과만 확인")
     parser.add_argument("--file", type=str, default="data/2025-12-24_original_files.md", help="입력 파일 경로")
+    parser.add_argument("--sqlite-path", type=str, default=None, help="레거시 SQLite DB 경로 (미지정 시 settings.DATABASE_URL)")
     args = parser.parse_args()
 
     file_path = project_root / args.file
@@ -155,7 +162,7 @@ def main():
         print(f"  - {url_type}: {count}개")
 
     # 삽입
-    import_urls(urls, dry_run=args.dry_run)
+    import_urls(urls, dry_run=args.dry_run, sqlite_path=args.sqlite_path)
 
 
 if __name__ == "__main__":

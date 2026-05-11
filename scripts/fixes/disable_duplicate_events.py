@@ -5,21 +5,22 @@
 가장 오래된 레코드만 활성 유지
 
 실행:
-    python D:\work\project\tools\monitor-page\scripts\disable_duplicate_events.py
+    python D:\work\project\tools\monitor-page\scripts\fixes\disable_duplicate_events.py
+
+⚠️ 2026-04-10 PostgreSQL 전환 이후에는 settings.DATABASE_URL을 사용한다.
+   data/monitor.db는 더 이상 운영 DB가 아니다.
 """
 import sys
 from pathlib import Path
 
 # 프로젝트 루트를 path에 추가
-project_root = Path(__file__).parent.parent
+project_root = Path(__file__).parent.parent.parent
 sys.path.insert(0, str(project_root))
 
-from collections import defaultdict
 from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker
 
-
-DB_PATH = project_root / "data" / "monitor.db"
+from app.config import settings
 
 
 def find_duplicate_urls(session) -> dict:
@@ -77,10 +78,11 @@ def disable_duplicate_events(session, url: str, events: list) -> int:
 
 
 def main():
-    print(f"DB: {DB_PATH}")
+    db_url = settings.DATABASE_URL
+    print(f"DB: {db_url}")
     print("-" * 60)
 
-    engine = create_engine(f"sqlite:///{DB_PATH}")
+    engine = create_engine(db_url)
     Session = sessionmaker(bind=engine)
     session = Session()
 
