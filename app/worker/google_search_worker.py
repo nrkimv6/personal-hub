@@ -535,8 +535,8 @@ class GoogleSearchWorker(BaseWorker):
 
         # 신규 결과 알림 발송
         if new_result_count > 0 and queue_item.saved_search_id:
-            self._send_new_result_notification(
-                db, queue_item.saved_search_id, query, new_result_count
+            await self._send_new_result_notification(
+                db, queue_item.saved_search_id, query, new_result_count, search_id
             )
 
         return CrawlResult(
@@ -652,12 +652,13 @@ class GoogleSearchWorker(BaseWorker):
         text = ((result.title or "") + " " + (result.snippet or "")).lower()
         return any(kw and kw.lower() in text for kw in exclude_keywords)
 
-    def _send_new_result_notification(
+    async def _send_new_result_notification(
         self,
         db,
         saved_search_id: int,
         query: str,
         new_count: int,
+        search_id: str,
     ):
         """신규 결과 알림 발송.
 
@@ -666,21 +667,30 @@ class GoogleSearchWorker(BaseWorker):
             saved_search_id: 저장된 검색 ID
             query: 검색 키워드
             new_count: 신규 결과 수
+            search_id: 검색 세션 ID
         """
         try:
             saved = db.query(GoogleSavedSearch).filter_by(id=saved_search_id).first()
             if not saved or not saved.notify_on_new:
                 return
 
-            # 알림 발송 (텔레그램 등)
-            from app.core.notification import send_notification
+            from app.shared.notification import NotificationService
 
-            message = f"🔍 [{saved.name}] 신규 검색 결과 {new_count}건 발견\n검색어: {query}"
-            asyncio.create_task(send_notification(message))
+            message = (
+                f"[Google 검색] {saved.name} 신규 결과 {new_count}건\n"
+                f"검색어: {query}\n"
+                f"search_id: {search_id}"
+            )
+            await NotificationService().send_notification_message(
+                message,
+                send_desktop=False,
+                force_send=True,
+                send_telegram=True,
+            )
 
             logger.info(
                 f"[{self.name}] New result notification sent: "
-                f"saved_search={saved.name}, new_count={new_count}"
+                f"saved_search={saved.name}, new_count={new_count}, search_id={search_id}"
             )
 
         except Exception as e:

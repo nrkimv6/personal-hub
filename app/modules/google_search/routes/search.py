@@ -362,6 +362,7 @@ async def create_saved_search(
         max_pages=data.max_pages,
         service_account_id=data.service_account_id,
         is_favorite=data.is_favorite,
+        notify_on_new=data.notify_on_new,
         search_params=search_params_json,
     )
     db.add(saved)
@@ -568,6 +569,7 @@ def _saved_to_response(saved: GoogleSavedSearch) -> SavedSearchResponse:
         max_pages=saved.max_pages,
         service_account_id=saved.service_account_id,
         is_favorite=saved.is_favorite,
+        notify_on_new=bool(saved.notify_on_new),
         search_params=search_params,
         last_search_id=saved.last_search_id,
         last_run_at=saved.last_run_at,

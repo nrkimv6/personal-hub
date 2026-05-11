@@ -606,6 +606,102 @@ class TestGoogleSearchWorkerProcessing:
         recover_mock.assert_awaited_once_with(mock_db)
         mock_db.close.assert_called_once()
 
+    @pytest.mark.asyncio
+    async def test_send_new_result_notification_uses_shared_telegram_service(self, db_session):
+        """신규 결과 알림은 공용 NotificationService를 텔레그램 강제 발송 옵션으로 호출한다."""
+        from app.worker.google_search_worker import GoogleSearchWorker
+
+        saved = GoogleSavedSearch(
+            name="알림 검색",
+            query="원더러스트 초대권",
+            notify_on_new=True,
+        )
+        db_session.add(saved)
+        db_session.commit()
+        db_session.refresh(saved)
+
+        worker = GoogleSearchWorker(browser_manager=None)
+
+        with patch("app.shared.notification.NotificationService") as service_cls:
+            service = service_cls.return_value
+            service.send_notification_message = AsyncMock()
+
+            await worker._send_new_result_notification(
+                db_session,
+                saved.id,
+                "원더러스트 초대권",
+                2,
+                "search-123",
+            )
+
+        service.send_notification_message.assert_awaited_once()
+        call_kwargs = service.send_notification_message.call_args.kwargs
+        assert call_kwargs == {
+            "send_desktop": False,
+            "force_send": True,
+            "send_telegram": True,
+        }
+        message = service.send_notification_message.call_args.args[0]
+        assert "원더러스트 초대권" in message
+        assert "search_id: search-123" in message
+
+    @pytest.mark.asyncio
+    async def test_send_new_result_notification_skips_when_disabled(self, db_session):
+        """notify_on_new=False인 저장 검색은 신규 결과가 있어도 알림을 보내지 않는다."""
+        from app.worker.google_search_worker import GoogleSearchWorker
+
+        saved = GoogleSavedSearch(
+            name="알림 꺼짐",
+            query="원더러스트 초대권",
+            notify_on_new=False,
+        )
+        db_session.add(saved)
+        db_session.commit()
+        db_session.refresh(saved)
+
+        worker = GoogleSearchWorker(browser_manager=None)
+
+        with patch("app.shared.notification.NotificationService") as service_cls:
+            await worker._send_new_result_notification(
+                db_session,
+                saved.id,
+                "원더러스트 초대권",
+                2,
+                "search-123",
+            )
+
+        service_cls.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_send_new_result_notification_failure_is_swallowed(self, db_session):
+        """알림 전송 실패는 검색 완료 흐름을 예외로 끌어올리지 않는다."""
+        from app.worker.google_search_worker import GoogleSearchWorker
+
+        saved = GoogleSavedSearch(
+            name="알림 실패",
+            query="원더러스트 초대권",
+            notify_on_new=True,
+        )
+        db_session.add(saved)
+        db_session.commit()
+        db_session.refresh(saved)
+
+        worker = GoogleSearchWorker(browser_manager=None)
+
+        with patch("app.shared.notification.NotificationService") as service_cls:
+            service = service_cls.return_value
+            service.send_notification_message = AsyncMock(side_effect=RuntimeError("telegram down"))
+
+            await worker._send_new_result_notification(
+                db_session,
+                saved.id,
+                "원더러스트 초대권",
+                2,
+                "search-123",
+            )
+
+        service.send_notification_message.assert_awaited_once()
+
 
 class TestGoogleSearchWorkerExecuteSearch:
     """execute_with_tab 기반 managed-tab 경로 TC (Phase T1 item 6)."""

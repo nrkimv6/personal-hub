@@ -25,6 +25,7 @@ class GoogleSearchScheduleCreate(BaseModel):
     display_name: Optional[str] = Field(None, description="표시 이름")
     schedule_type: str = Field(default="time_window", description="스케줄 타입 (time_window 또는 cron)")
     schedule_value: ScheduleValue = Field(..., description="스케줄 설정")
+    expires_at: Optional[datetime] = Field(None, description="스케줄 만료 시각")
     enabled: bool = Field(default=True, description="활성화 여부")
 
 
@@ -32,6 +33,7 @@ class GoogleSearchScheduleUpdate(BaseModel):
     """Google 검색 스케줄 수정 요청."""
     display_name: Optional[str] = None
     schedule_value: Optional[ScheduleValue] = None
+    expires_at: Optional[datetime] = None
     enabled: Optional[bool] = None
 
 
@@ -47,6 +49,7 @@ class GoogleSearchScheduleResponse(BaseModel):
     enabled: bool
     last_run_at: Optional[datetime]
     next_run_at: Optional[datetime]
+    expires_at: Optional[datetime] = None
     created_at: datetime
     updated_at: datetime
 

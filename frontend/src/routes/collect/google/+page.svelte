@@ -40,6 +40,7 @@
 		max_pages: number;
 		service_account_id?: number;
 		is_favorite: boolean;
+		notify_on_new: boolean;
 		last_search_id?: string;
 		last_run_at?: string;
 		last_result_count?: number;
@@ -70,6 +71,7 @@
 		enabled: boolean;
 		next_run_at?: string;
 		last_run_at?: string;
+		expires_at?: string | null;
 	}
 
 	interface ScheduleRun {
@@ -140,6 +142,7 @@
 	let showSaveModal = $state(false);
 	let saveName = $state('');
 	let saveAsFavorite = $state(false);
+	let saveNotifyOnNew = $state(false);
 	let editingSavedSearch: SavedSearch | null = $state(null);
 	let subTab: 'saved' | 'history' | 'schedule-results' = $state('saved');
 
@@ -148,6 +151,7 @@
 	let showScheduleModal = $state(false);
 	let selectedSavedSearch: SavedSearch | null = $state(null);
 	let scheduleTime = $state('09:00');
+	let scheduleExpiresAt = $state('');
 	let scheduleEnabled = $state(true);
 	let editingSchedule: Schedule | null = $state(null);
 	let showRunsModal = $state(false);
@@ -315,6 +319,7 @@
 						date_filter: dateFilter || undefined,
 						max_pages: maxPages,
 						is_favorite: saveAsFavorite,
+						notify_on_new: saveNotifyOnNew,
 						search_params: buildSearchParams()
 					})
 				});
@@ -329,6 +334,7 @@
 						date_filter: dateFilter || undefined,
 						max_pages: maxPages,
 						is_favorite: saveAsFavorite,
+						notify_on_new: saveNotifyOnNew,
 						search_params: buildSearchParams()
 					})
 				});
@@ -336,6 +342,7 @@
 			showSaveModal = false;
 			saveName = '';
 			saveAsFavorite = false;
+			saveNotifyOnNew = false;
 			editingSavedSearch = null;
 			await loadSavedSearches();
 		} catch (e) {
@@ -426,6 +433,7 @@
 		dateFilter = saved.date_filter || '';
 		maxPages = saved.max_pages;
 		saveAsFavorite = saved.is_favorite;
+		saveNotifyOnNew = saved.notify_on_new ?? false;
 		// search_params 복원
 		if (saved.search_params) {
 			searchLang = saved.search_params.lr || '';
@@ -475,6 +483,18 @@
 		});
 	}
 
+	function formatDateTimeLocal(dateStr: string | undefined | null): string {
+		if (!dateStr) return '';
+		const date = new Date(dateStr);
+		if (Number.isNaN(date.getTime())) return '';
+		const offsetMs = date.getTimezoneOffset() * 60_000;
+		return new Date(date.getTime() - offsetMs).toISOString().slice(0, 16);
+	}
+
+	function scheduleExpiresPayload(): string | null {
+		return scheduleExpiresAt ? new Date(scheduleExpiresAt).toISOString() : null;
+	}
+
 	function handleKeypress(event: KeyboardEvent) {
 		if (event.key === 'Enter') {
 			search();
@@ -503,10 +523,12 @@
 			editingSchedule = existing;
 			const tw = existing.schedule_value.time_windows[0];
 			scheduleTime = tw?.start || '09:00';
+			scheduleExpiresAt = formatDateTimeLocal(existing.expires_at);
 			scheduleEnabled = existing.enabled;
 		} else {
 			editingSchedule = null;
 			scheduleTime = '09:00';
+			scheduleExpiresAt = '';
 			scheduleEnabled = true;
 		}
 
@@ -527,6 +549,7 @@
 							daily_runs: 1,
 							min_interval_hours: 1
 						},
+						expires_at: scheduleExpiresPayload(),
 						enabled: scheduleEnabled
 					})
 				});
@@ -543,6 +566,7 @@
 							daily_runs: 1,
 							min_interval_hours: 1
 						},
+						expires_at: scheduleExpiresPayload(),
 						enabled: scheduleEnabled
 					})
 				});
@@ -592,7 +616,8 @@
 
 	function formatScheduleTime(schedule: Schedule): string {
 		const tw = schedule.schedule_value.time_windows[0];
-		return tw ? tw.start : '-';
+		const time = tw ? tw.start : '-';
+		return schedule.expires_at ? `${time} · ${formatDate(schedule.expires_at)}까지` : time;
 	}
 
 	// 스케줄 결과 기능
@@ -721,6 +746,7 @@
 			<button
 				onclick={() => {
 					editingSavedSearch = null;
+					saveNotifyOnNew = false;
 					showSaveModal = true;
 				}}
 				disabled={!query.trim()}
@@ -1209,6 +1235,11 @@
 					<input type="checkbox" bind:checked={saveAsFavorite} />
 					<span class="text-sm">즐겨찾기에 추가</span>
 				</label>
+
+				<label class="flex items-center gap-2">
+					<input type="checkbox" bind:checked={saveNotifyOnNew} />
+					<span class="text-sm">신규 결과 텔레그램 알림</span>
+				</label>
 			</div>
 
 			<div class="mt-6 flex justify-end gap-2">
@@ -1216,6 +1247,7 @@
 					onclick={() => {
 						showSaveModal = false;
 						editingSavedSearch = null;
+						saveNotifyOnNew = false;
 					}}
 					class="rounded-lg px-4 py-2 text-muted-foreground hover:bg-muted"
 				>
@@ -1253,6 +1285,16 @@
 						id="schedule-time"
 						type="time"
 						bind:value={scheduleTime}
+						class="w-full rounded-lg border px-3 py-2"
+					/>
+				</div>
+
+				<div>
+					<label for="schedule-expires-at" class="mb-1 block text-sm font-medium">만료 시각</label>
+					<input
+						id="schedule-expires-at"
+						type="datetime-local"
+						bind:value={scheduleExpiresAt}
 						class="w-full rounded-lg border px-3 py-2"
 					/>
 				</div>

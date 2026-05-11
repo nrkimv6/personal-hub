@@ -29,6 +29,21 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/v1/google/schedule", tags=["google-search-schedule"])
 
 
+def _parse_datetime(value: object) -> Optional[datetime]:
+    """target_config에 저장된 ISO datetime 문자열을 응답용 datetime으로 변환."""
+    if not value:
+        return None
+    if isinstance(value, datetime):
+        return value
+    if isinstance(value, str):
+        try:
+            return datetime.fromisoformat(value.replace("Z", "+00:00"))
+        except ValueError:
+            logger.warning("Invalid Google search schedule expires_at: %s", value)
+            return None
+    return None
+
+
 def _schedule_to_response(
     schedule: TaskSchedule,
     saved_search: Optional[GoogleSavedSearch] = None
@@ -48,6 +63,7 @@ def _schedule_to_response(
         enabled=schedule.enabled,
         last_run_at=schedule.last_run_at,
         next_run_at=schedule.next_run_at,
+        expires_at=_parse_datetime(config.get("expires_at")),
         created_at=schedule.created_at,
         updated_at=schedule.updated_at,
         saved_search_name=saved_search.name if saved_search else None,
@@ -99,7 +115,10 @@ async def create_google_search_schedule(
         display_name=data.display_name or f"{saved_search.name} 자동 검색",
         target_type=TaskSchedule.TARGET_TYPE_GOOGLE_SEARCH,
         schedule_type=data.schedule_type,
-        target_config={"saved_search_id": data.saved_search_id},
+        target_config={
+            "saved_search_id": data.saved_search_id,
+            "expires_at": data.expires_at.isoformat() if data.expires_at else None,
+        },
         schedule_value=data.schedule_value.model_dump_json(),
         enabled=data.enabled,
     )
@@ -272,6 +291,10 @@ async def update_google_search_schedule(
         updates["enabled"] = data.enabled
     if data.schedule_value is not None:
         updates["schedule_value"] = data.schedule_value.model_dump_json()
+    if "expires_at" in data.model_fields_set:
+        updates["target_config"] = {
+            "expires_at": data.expires_at.isoformat() if data.expires_at else None
+        }
 
     schedule = schedule_service.update_schedule(schedule_id, **updates)
 

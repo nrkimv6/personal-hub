@@ -151,6 +151,7 @@ class TestSavedSearchCreateAPI:
             "date_filter": "1m",
             "max_pages": 3,
             "is_favorite": False,
+            "notify_on_new": True,
         })
         assert response.status_code == 200
         data = response.json()
@@ -158,6 +159,7 @@ class TestSavedSearchCreateAPI:
         assert data["query"] == "fastapi tutorial"
         assert data["date_filter"] == "1m"
         assert data["max_pages"] == 3
+        assert data["notify_on_new"] is True
         assert data["id"] is not None
 
     def test_create_saved_search_minimal(self, client):
@@ -171,6 +173,7 @@ class TestSavedSearchCreateAPI:
         assert data["name"] == "최소 검색"
         assert data["max_pages"] == 1
         assert data["is_favorite"] is False
+        assert data["notify_on_new"] is False
 
 
 class TestSavedSearchDetailAPI:
@@ -198,11 +201,13 @@ class TestSavedSearchUpdateAPI:
         response = client.put(f"/api/v1/google/saved/{sample_saved_search.id}", json={
             "name": "수정된 검색",
             "max_pages": 5,
+            "notify_on_new": True,
         })
         assert response.status_code == 200
         data = response.json()
         assert data["name"] == "수정된 검색"
         assert data["max_pages"] == 5
+        assert data["notify_on_new"] is True
         # 기존 값은 유지
         assert data["query"] == "python tutorial"
 
