@@ -244,6 +244,12 @@
 		display_secondary?: string | null;
 		hide_stale_branch_badge?: boolean;
 		gate_evidence_summary?: Record<string, unknown> | null;
+		pid_kind?: 'parent' | 'child_engine' | 'none';
+		confidence?: 'high' | 'medium' | 'low';
+		reattach_mode?: 'full' | 'log_only_child' | 'log_only';
+		can_reattach?: boolean;
+		can_force_kill?: boolean;
+		warnings?: string[];
 	}
 
 	interface RunnerSource {
@@ -283,6 +289,12 @@
 		display_secondary?: string | null;
 		hide_stale_branch_badge?: boolean;
 		gate_evidence_summary?: Record<string, unknown> | null;
+		pid_kind?: 'parent' | 'child_engine' | 'none';
+		confidence?: 'high' | 'medium' | 'low';
+		reattach_mode?: 'full' | 'log_only_child' | 'log_only';
+		can_reattach?: boolean;
+		can_force_kill?: boolean;
+		warnings?: string[];
 	}
 
 	function createRunnerTab(runner: RunnerSource): RunnerTab {
@@ -319,6 +331,12 @@
 			display_secondary: runner.display_secondary ?? null,
 			hide_stale_branch_badge: runner.hide_stale_branch_badge ?? false,
 			gate_evidence_summary: runner.gate_evidence_summary ?? null,
+			pid_kind: runner.pid_kind,
+			confidence: runner.confidence,
+			reattach_mode: runner.reattach_mode,
+			can_reattach: runner.can_reattach ?? false,
+			can_force_kill: runner.can_force_kill ?? false,
+			warnings: runner.warnings ?? [],
 		};
 	}
 
@@ -443,6 +461,43 @@
 			display_secondary: runner.display_secondary ?? tab.display_secondary ?? null,
 			hide_stale_branch_badge: runner.hide_stale_branch_badge ?? tab.hide_stale_branch_badge ?? false,
 			gate_evidence_summary: runner.gate_evidence_summary ?? tab.gate_evidence_summary ?? null,
+			pid_kind: runner.pid_kind ?? tab.pid_kind,
+			confidence: runner.confidence ?? tab.confidence,
+			reattach_mode: runner.reattach_mode ?? tab.reattach_mode,
+			can_reattach: runner.can_reattach ?? tab.can_reattach ?? false,
+			can_force_kill: runner.can_force_kill ?? tab.can_force_kill ?? false,
+			warnings: runner.warnings ?? tab.warnings ?? [],
+		};
+	}
+
+	function orphanCandidateToRunner(candidate: Awaited<ReturnType<typeof devRunnerRunnerApi.discoverOrphanRunners>>[number]): RunnerSource {
+		return {
+			runner_id: candidate.runner_id,
+			plan_file: candidate.plan_file,
+			engine: candidate.engine,
+			running: false,
+			status: 'orphan',
+			pid: candidate.pid,
+			start_time: candidate.start_time,
+			branch: candidate.branch,
+			worktree_path: candidate.worktree_path,
+			trigger: candidate.trigger ?? 'user',
+			orphan_alive: true,
+			redis_missing: true,
+			log_file_found: !!candidate.log_file,
+			visible: true,
+			display_plan_name: candidate.plan_file ? candidate.plan_file.split(/[\\/]/).pop() ?? candidate.plan_file : null,
+			execution_count: candidate.execution_count,
+			display_state: 'orphan',
+			display_label: '상태 소실',
+			display_severity: 'warn',
+			display_secondary: candidate.confidence,
+			pid_kind: candidate.pid_kind,
+			confidence: candidate.confidence,
+			reattach_mode: candidate.reattach_mode,
+			can_reattach: candidate.can_reattach,
+			can_force_kill: candidate.can_force_kill,
+			warnings: candidate.warnings,
 		};
 	}
 
@@ -504,7 +559,10 @@
 	async function syncRunnerTabs(opts: { selectActive?: boolean } = {}): Promise<RunnerSource[]> {
 		try {
 			const allRunners = await devRunnerRunnerApi.runners();
-			return applyRunnersSync(allRunners, opts);
+			const orphanRunners = await devRunnerRunnerApi.discoverOrphanRunners()
+				.then(candidates => candidates.map(orphanCandidateToRunner))
+				.catch(() => []);
+			return applyRunnersSync([...allRunners, ...orphanRunners], opts);
 		} catch (e) {
 			console.warn('[DevRunner] runners API 호출 실패', e);
 			return [];
@@ -788,6 +846,29 @@
 	function handleTabStop(runnerId: string) {
 		runnerTabs = runnerTabs.map(t => t.id === runnerId ? { ...t, running: false } : t);
 		void pollStatus();
+	}
+
+	async function handleReattachRunner(runnerId: string) {
+		try {
+			await devRunnerRunnerApi.reattachRunner(runnerId);
+			await syncRunnerTabs({ selectActive: true });
+			activeTabId = runnerId;
+		} catch (e) {
+			console.warn('[DevRunner] orphan reattach 실패', e);
+		}
+	}
+
+	async function handleKillOrphanRunner(runnerId: string) {
+		try {
+			await devRunnerRunnerApi.killOrphanRunner(runnerId);
+			runnerTabs = runnerTabs.filter(t => t.id !== runnerId);
+			if (activeTabId === runnerId) {
+				activeTabId = runnerTabs.length > 0 ? runnerTabs[runnerTabs.length - 1].id : null;
+			}
+			await syncRunnerTabs({ selectActive: true });
+		} catch (e) {
+			console.warn('[DevRunner] orphan 강제 종료 실패', e);
+		}
 	}
 
 	async function handleRestart(tab: RunnerTab) {
@@ -1226,9 +1307,15 @@
 										displaySecondary={tab.display_secondary}
 										hideStaleBranchBadge={tab.hide_stale_branch_badge}
 										gateEvidenceSummary={tab.gate_evidence_summary}
+										reattachMode={tab.reattach_mode}
+										canReattach={tab.can_reattach}
+										canForceKill={tab.can_force_kill}
+										orphanWarnings={tab.warnings}
 										onStop={() => handleTabStop(tab.id)}
 										onClose={() => handleCloseTab(tab.id)}
 										onRestart={() => handleRestart(tab)}
+										onReattach={() => handleReattachRunner(tab.id)}
+										onKillOrphan={() => handleKillOrphanRunner(tab.id)}
 										onBatchPlansChange={(plans) => { batchPlans = plans; }}
 										logRef={(ref) => {
 											logRefs.set(tab.id, ref);

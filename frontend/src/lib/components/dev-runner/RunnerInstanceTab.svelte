@@ -43,14 +43,20 @@
 		displaySecondary?: string | null;
 		hideStaleBranchBadge?: boolean;
 		gateEvidenceSummary?: Record<string, unknown> | null;
+		reattachMode?: 'full' | 'log_only_child' | 'log_only';
+		canReattach?: boolean;
+		canForceKill?: boolean;
+		orphanWarnings?: string[];
 		onStop: () => void;
 		onClose: () => void;
 		onRestart?: () => void;
+		onReattach?: () => void;
+		onKillOrphan?: () => void;
 		onBatchPlansChange?: (plans: { name: string; status: 'pending' | 'running' | 'done' }[]) => void;
 		logRef?: (ref: LogViewerRef) => void;
 	}
 
-	let { runnerId, planFile, running, engine, startTime, worktreePath = null, branch = null, mergeStatus = null, mergeReason = null, mergeMessage = null, trigger = null, orphan = false, orphanAlive = false, redisMissing = false, logFileFound = false, exitReason = null, error = null, displayPlanName = null, remainingPostMergeTasks = null, mergeEvidenceMissing = null, executionCount = null, worktreeExists = 'unknown', branchExists = 'unknown', branchMergedToMain = 'unknown', metadataCheckedAt = 'unknown', displayLabel = null, displaySecondary = null, hideStaleBranchBadge = false, gateEvidenceSummary = null, onStop, onClose, onRestart, onBatchPlansChange, logRef }: Props = $props();
+	let { runnerId, planFile, running, engine, startTime, worktreePath = null, branch = null, mergeStatus = null, mergeReason = null, mergeMessage = null, trigger = null, orphan = false, orphanAlive = false, redisMissing = false, logFileFound = false, exitReason = null, error = null, displayPlanName = null, remainingPostMergeTasks = null, mergeEvidenceMissing = null, executionCount = null, worktreeExists = 'unknown', branchExists = 'unknown', branchMergedToMain = 'unknown', metadataCheckedAt = 'unknown', displayLabel = null, displaySecondary = null, hideStaleBranchBadge = false, gateEvidenceSummary = null, reattachMode = 'log_only', canReattach = false, canForceKill = false, orphanWarnings = [], onStop, onClose, onRestart, onReattach, onKillOrphan, onBatchPlansChange, logRef }: Props = $props();
 
 	let logViewer:
 		| {
@@ -282,6 +288,10 @@
 			`orphan_alive: ${orphanAlive}`,
 			`redis_missing: ${redisMissing}`,
 			`log_file_found: ${logFileFound}`,
+			`reattach_mode: ${reattachMode}`,
+			`can_reattach: ${canReattach}`,
+			`can_force_kill: ${canForceKill}`,
+			orphanWarnings.length > 0 ? `warnings: ${orphanWarnings.join(', ')}` : null,
 			`remaining_post_merge_tasks: ${remainingPostMergeTasks ?? 0}`,
 			`merge_evidence_missing: ${mergeEvidenceMissing ?? false}`,
 			gateEvidenceLabel() ? `gate_evidence_summary: ${gateEvidenceLabel()}` : null,
@@ -517,8 +527,31 @@
 	{/if}
 
 	{#if orphanAlive}
-		<div class="px-3 py-1.5 text-xs text-orange-700 bg-orange-50 border-b border-orange-200">
-			Redis runner 상태는 소실됐지만 heartbeat와 로그 파일이 남아 있습니다.
+		<div class="flex items-center gap-2 px-3 py-1.5 text-xs text-orange-700 bg-orange-50 border-b border-orange-200">
+			<span class="font-medium">상태 소실</span>
+			<span class="min-w-0 flex-1 truncate" title={metaTitle}>
+				Redis runner 상태는 소실됐지만 로그 또는 live process 근거가 남아 있습니다.
+			</span>
+			{#if onReattach}
+				<button
+					class="px-2 py-0.5 rounded border border-orange-300 text-orange-800 hover:bg-orange-100 disabled:opacity-50 transition-colors"
+					onclick={onReattach}
+					disabled={!canReattach}
+					title="Redis active runner 상태로 재연결"
+				>
+					재연결
+				</button>
+			{/if}
+			{#if onKillOrphan}
+				<button
+					class="px-2 py-0.5 rounded border border-red-300 text-red-700 hover:bg-red-100 disabled:opacity-50 transition-colors"
+					onclick={onKillOrphan}
+					disabled={!canForceKill}
+					title="재연결하지 않고 live child를 강제 종료"
+				>
+					강제 종료
+				</button>
+			{/if}
 		</div>
 	{:else if redisMissing && logFileFound}
 		<div class="px-3 py-1.5 text-xs text-sky-700 bg-sky-50 border-b border-sky-200">

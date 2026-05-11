@@ -108,6 +108,34 @@ export interface RunnerListItem {
 	gate_evidence_summary?: Record<string, unknown> | null;
 }
 
+export interface OrphanRunnerCandidate {
+	runner_id: string;
+	plan_file: string | null;
+	engine: string | null;
+	trigger: string | null;
+	pid: number | null;
+	pid_kind: 'parent' | 'child_engine' | 'none';
+	log_file: string | null;
+	log_mtime: string | null;
+	start_time: string | null;
+	execution_count: number | null;
+	worktree_path: string | null;
+	branch: string | null;
+	confidence: 'high' | 'medium' | 'low';
+	reattach_mode: 'full' | 'log_only_child' | 'log_only';
+	can_reattach: boolean;
+	can_force_kill: boolean;
+	warnings: string[];
+}
+
+export interface ReattachRunnerResponse {
+	success: boolean;
+	runner_id: string;
+	message: string;
+	candidate: OrphanRunnerCandidate;
+	reattach_mode: 'full' | 'log_only_child' | 'log_only';
+}
+
 export interface PlanProgressResponse {
 	done: number;
 	total: number;
@@ -341,6 +369,23 @@ export const devRunnerRunnerApi = {
 	status: () => devRunnerRequest<RunStatusResponse>('/status'),
 
 	runners: () => devRunnerRequest<RunnerListItem[]>('/runners'),
+
+	discoverOrphanRunners: () => devRunnerRequest<OrphanRunnerCandidate[]>('/runners/orphans'),
+
+	reattachRunner: (runnerId: string, payload?: { force?: boolean; expected_plan_file?: string | null; expected_log_file?: string | null }) =>
+		devRunnerRequest<ReattachRunnerResponse>(
+			`/runners/${runnerId}/reattach`,
+			{
+				method: 'POST',
+				body: JSON.stringify(payload ?? {})
+			}
+		),
+
+	killOrphanRunner: (runnerId: string) =>
+		devRunnerRequest<{ success: boolean; message: string; pid?: number }>(
+			`/runners/${runnerId}/orphans/kill`,
+			{ method: 'POST' }
+		),
 
 	resetState: (fullReset: boolean = false) =>
 		devRunnerRequest<{ success: boolean; reset_count: number; full_reset: boolean }>(

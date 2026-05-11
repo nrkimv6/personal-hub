@@ -125,6 +125,7 @@
 	}: Props = $props();
 
 	let runningCount = $derived(runners.filter(r => r.running).length);
+	let orphanCount = $derived(runners.filter(r => r.orphan_alive || r.redis_missing).length);
 	let anyRunning = $derived(runningCount > 0);
 	let anyCrashed = $derived(!anyRunning && !!runStatus?.crashed);
 	let stoppedCount = $derived(runners.length - runningCount);
@@ -153,6 +154,11 @@
 					{#if stoppedCount > 0}
 						<span class="hidden rounded bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground sm:inline-flex">
 							{stoppedCount} stopped
+						</span>
+					{/if}
+					{#if orphanCount > 0}
+						<span class="hidden rounded bg-orange-100 px-1.5 py-0.5 text-[10px] text-orange-700 sm:inline-flex">
+							{orphanCount} orphan
 						</span>
 					{/if}
 				</div>

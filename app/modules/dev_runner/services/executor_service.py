@@ -29,7 +29,13 @@ from app.modules.dev_runner.services.plan_path_resolver import is_archive_or_his
 from app.modules.dev_runner.services.settings_service import settings_service
 from app.modules.dev_runner.services.visibility import is_visible_runner
 from app.modules.dev_runner.services.log_file_resolver import LogFileResolver
-from app.modules.dev_runner.schemas import RunRequest, RunStatusResponse
+from app.modules.dev_runner.schemas import (
+    OrphanRunnerCandidate,
+    ReattachRunnerRequest,
+    ReattachRunnerResponse,
+    RunRequest,
+    RunStatusResponse,
+)
 from app.modules.dev_runner.services.state import get_state
 from app.modules.dev_runner.services.runner_display_state import build_display_state
 from app.modules.dev_runner.services.runner_read_model import build_runner_read_model
@@ -52,6 +58,8 @@ __all__ = [
     "RECENT_RUNNERS_TTL", "RUNNER_KEY_SUFFIXES",
     "COMMANDS_KEY", "RESULTS_KEY", "COMMAND_TIMEOUT",
 ]
+
+DISMISSED_RUNNERS_KEY = "plan-runner:dismissed_runners"
 
 
 def _decode_runner_value(value: Any) -> Any:
@@ -906,6 +914,326 @@ class ExecutorService:
             await self._cleanup_runner_state(runner_id, reason="stop_exception")
             raise HTTPException(status_code=500, detail=f"Failed to stop: {str(e)}")
 
+    @staticmethod
+    def _parse_process_cmdline(cmdline: list[str]) -> dict[str, Any]:
+        joined = " ".join(str(part) for part in cmdline)
+        lowered = joined.lower()
+        plan_file: str | None = None
+        engine: str | None = None
+        runner_id: str | None = None
+
+        for idx, part in enumerate(cmdline):
+            text_part = str(part)
+            if text_part == "--plan-file" and idx + 1 < len(cmdline):
+                plan_file = str(cmdline[idx + 1])
+            elif text_part.startswith("--plan-file="):
+                plan_file = text_part.split("=", 1)[1]
+            elif text_part == "--engine" and idx + 1 < len(cmdline):
+                engine = str(cmdline[idx + 1])
+            elif text_part.startswith("--engine="):
+                engine = text_part.split("=", 1)[1]
+            elif text_part == "--runner-id" and idx + 1 < len(cmdline):
+                runner_id = str(cmdline[idx + 1])
+            elif text_part.startswith("--runner-id="):
+                runner_id = text_part.split("=", 1)[1]
+            elif text_part.startswith("PLAN_RUNNER_RUNNER_ID="):
+                runner_id = text_part.split("=", 1)[1]
+
+        pid_kind: str | None = None
+        if "plan_runner" in lowered and " run" in f" {lowered} ":
+            pid_kind = "parent"
+        elif any(token in lowered for token in ("claude", "gemini", "codex")):
+            pid_kind = "child_engine"
+            if engine is None:
+                if "gemini" in lowered:
+                    engine = "gemini"
+                elif "codex" in lowered:
+                    engine = "codex"
+                else:
+                    engine = "claude"
+
+        return {
+            "cmdline": joined,
+            "pid_kind": pid_kind,
+            "plan_file": plan_file,
+            "engine": engine,
+            "runner_id": runner_id,
+        }
+
+    def _list_live_runner_processes(self) -> list[dict[str, Any]]:
+        """실행 중인 plan-runner parent/engine child 프로세스 evidence를 수집한다."""
+        try:
+            import psutil
+        except Exception:
+            return []
+
+        processes: list[dict[str, Any]] = []
+        try:
+            iterator = psutil.process_iter(["pid", "name", "cmdline", "create_time"])
+        except Exception:
+            return processes
+
+        for proc in iterator:
+            try:
+                info = getattr(proc, "info", {}) or {}
+                cmdline = info.get("cmdline") or []
+                if not cmdline and hasattr(proc, "cmdline"):
+                    cmdline = proc.cmdline()
+                parsed = self._parse_process_cmdline([str(part) for part in cmdline])
+                if not parsed.get("pid_kind"):
+                    continue
+                processes.append({
+                    **parsed,
+                    "pid": int(info.get("pid") or getattr(proc, "pid")),
+                    "name": info.get("name"),
+                    "create_time": info.get("create_time"),
+                })
+            except Exception:
+                continue
+        return processes
+
+    @staticmethod
+    def _normalized_path_text(value: str | None) -> str:
+        return str(value or "").replace("\\", "/").lower()
+
+    def _match_process_for_log_candidate(self, runner_id: str, meta: dict, processes: list[dict[str, Any]]) -> dict[str, Any] | None:
+        plan_file = meta.get("plan") or meta.get("plan_key")
+        engine = meta.get("engine")
+        candidates: list[tuple[int, dict[str, Any]]] = []
+        for proc in processes:
+            score = 0
+            if proc.get("runner_id") and proc.get("runner_id") == runner_id:
+                score += 100
+            cmdline_text = self._normalized_path_text(proc.get("cmdline"))
+            if runner_id and runner_id.lower() in cmdline_text:
+                score += 40
+            if plan_file:
+                process_plan = proc.get("plan_file")
+                if process_plan and self._normalized_path_text(process_plan) == self._normalized_path_text(plan_file):
+                    score += 35
+                elif self._normalized_path_text(plan_file) in cmdline_text:
+                    score += 25
+            if engine and proc.get("engine") == engine:
+                score += 10
+            if proc.get("pid_kind") == "parent":
+                score += 5
+            if score > 0:
+                candidates.append((score, proc))
+        if not candidates:
+            return None
+        candidates.sort(key=lambda item: item[0], reverse=True)
+        return candidates[0][1]
+
+    @staticmethod
+    def _coerce_log_datetime(raw: Any, mtime: float | None = None) -> datetime | None:
+        if raw:
+            try:
+                return datetime.fromisoformat(str(raw))
+            except (TypeError, ValueError):
+                pass
+        if mtime is not None:
+            try:
+                return datetime.fromtimestamp(float(mtime))
+            except (TypeError, ValueError, OSError):
+                return None
+        return None
+
+    @staticmethod
+    def _read_plan_header_metadata(plan_file: str | None) -> dict[str, str | None]:
+        if not plan_file or plan_file in {"__ALL_PLANS__", "ALL"}:
+            return {"branch": None, "worktree_path": None}
+        path = Path(str(plan_file))
+        if not path.is_absolute():
+            path = PROJECT_ROOT / path
+        result: dict[str, str | None] = {"branch": None, "worktree_path": None}
+        try:
+            with path.open("r", encoding="utf-8", errors="replace") as handle:
+                for _ in range(80):
+                    line = handle.readline()
+                    if not line:
+                        break
+                    stripped = line.strip()
+                    if stripped.startswith("> branch:"):
+                        result["branch"] = stripped.split(":", 1)[1].strip() or None
+                    elif stripped.startswith("> worktree:"):
+                        result["worktree_path"] = stripped.split(":", 1)[1].strip() or None
+                    if result["branch"] and result["worktree_path"]:
+                        break
+        except OSError:
+            pass
+        return result
+
+    async def discover_orphan_runners(self) -> list[OrphanRunnerCandidate]:
+        """Redis active/recent 밖에 있는 runner 로그/프로세스 evidence를 후보로 반환한다."""
+        active_ids = self._normalize_runner_id_set(await self.async_redis.smembers(ACTIVE_RUNNERS_KEY))
+        recent_ids = self._normalize_runner_id_set(await self.async_redis.zrange(RECENT_RUNNERS_KEY, 0, -1))
+        dismissed_ids = self._normalize_runner_id_set(await self.async_redis.smembers(DISMISSED_RUNNERS_KEY))
+        registered_ids = active_ids | recent_ids | dismissed_ids
+
+        log_evidence = LogFileResolver(config, self.redis_client).discover_runner_log_evidence()
+        processes = self._list_live_runner_processes()
+        candidates: list[OrphanRunnerCandidate] = []
+
+        for runner_id, evidence in log_evidence.items():
+            if runner_id in registered_ids:
+                continue
+            meta = evidence.get("meta") or {}
+            warnings = list(evidence.get("warnings") or [])
+            if "runner_id_mismatch" in warnings:
+                continue
+            if "log_header_missing" in warnings:
+                continue
+
+            process = self._match_process_for_log_candidate(runner_id, meta, processes)
+            pid = int(process["pid"]) if process and process.get("pid") is not None else None
+            pid_kind = process.get("pid_kind") if process else "none"
+            if pid_kind not in {"parent", "child_engine", "none"}:
+                pid_kind = "none"
+
+            plan_file = meta.get("plan") or meta.get("plan_key")
+            engine = meta.get("engine") or (process.get("engine") if process else None)
+            trigger = meta.get("trigger")
+            header = self._read_plan_header_metadata(plan_file)
+            confidence = "low"
+            mode = "log_only"
+            if pid_kind == "parent":
+                confidence = "high"
+                mode = "full"
+            elif pid_kind == "child_engine":
+                confidence = "medium"
+                mode = "log_only_child"
+                warnings.append("parent_process_missing")
+            else:
+                warnings.append("live_process_missing")
+
+            log_mtime_raw = evidence.get("log_mtime")
+            log_mtime = self._coerce_log_datetime(None, log_mtime_raw)
+            start_time = self._coerce_log_datetime(meta.get("started_at"), log_mtime_raw)
+            execution_count = self._coerce_int(meta.get("execution_count"))
+
+            candidates.append(OrphanRunnerCandidate(
+                runner_id=runner_id,
+                plan_file=plan_file,
+                engine=engine,
+                trigger=trigger,
+                pid=pid,
+                pid_kind=pid_kind,  # type: ignore[arg-type]
+                log_file=evidence.get("log_file"),
+                log_mtime=log_mtime,
+                start_time=start_time,
+                execution_count=execution_count,
+                worktree_path=header.get("worktree_path"),
+                branch=header.get("branch"),
+                confidence=confidence,  # type: ignore[arg-type]
+                reattach_mode=mode,  # type: ignore[arg-type]
+                can_reattach=confidence in {"high", "medium"},
+                can_force_kill=pid is not None,
+                warnings=warnings,
+            ))
+
+        candidates.sort(key=lambda c: ({"high": 2, "medium": 1, "low": 0}[c.confidence], c.log_mtime or datetime.min), reverse=True)
+        return candidates
+
+    async def _get_orphan_candidate(self, runner_id: str) -> OrphanRunnerCandidate | None:
+        for candidate in await self.discover_orphan_runners():
+            if candidate.runner_id == runner_id:
+                return candidate
+        return None
+
+    async def reattach_runner(self, runner_id: str, request: ReattachRunnerRequest) -> ReattachRunnerResponse:
+        """사용자가 승인한 orphan runner를 Redis active 상태로 복원한다."""
+        if runner_id in self._normalize_runner_id_set(await self.async_redis.smembers(ACTIVE_RUNNERS_KEY)):
+            raise HTTPException(status_code=409, detail="runner is already active")
+        if runner_id in self._normalize_runner_id_set(await self.async_redis.smembers(DISMISSED_RUNNERS_KEY)):
+            raise HTTPException(status_code=409, detail="runner was dismissed")
+
+        candidate = await self._get_orphan_candidate(runner_id)
+        if candidate is None:
+            raise HTTPException(status_code=404, detail=f"orphan candidate not found for runner {runner_id}")
+        if request.expected_plan_file and request.expected_plan_file != candidate.plan_file:
+            raise HTTPException(status_code=422, detail={"message": "plan evidence mismatch", "warnings": candidate.warnings})
+        if request.expected_log_file and request.expected_log_file != candidate.log_file:
+            raise HTTPException(status_code=422, detail={"message": "log evidence mismatch", "warnings": candidate.warnings})
+        if not request.force and not candidate.can_reattach:
+            raise HTTPException(status_code=422, detail={"message": "candidate confidence is too low", "warnings": candidate.warnings})
+
+        now = datetime.now().isoformat()
+        key_values = {
+            "status": "running",
+            "plan_file": candidate.plan_file or "__ALL_PLANS__",
+            "engine": candidate.engine or "claude",
+            "start_time": (candidate.start_time.isoformat() if candidate.start_time else now),
+            "started_at": (candidate.start_time.isoformat() if candidate.start_time else now),
+            "stream_log_path": candidate.log_file or "",
+            "log_file_path": candidate.log_file or "",
+            "trigger": candidate.trigger or "user",
+            "reattach_mode": candidate.reattach_mode,
+            "metadata_checked_at": now,
+        }
+        if candidate.pid is not None:
+            key_values["pid"] = str(candidate.pid)
+        if candidate.execution_count is not None:
+            key_values["execution_count"] = str(candidate.execution_count)
+        if candidate.worktree_path:
+            key_values["worktree_path"] = candidate.worktree_path
+        if candidate.branch:
+            key_values["branch"] = candidate.branch
+
+        for suffix, value in key_values.items():
+            await self.async_redis.set(self._runner_key(runner_id, suffix), value)
+        await self.async_redis.sadd(ACTIVE_RUNNERS_KEY, runner_id)
+        await self.async_redis.zrem(RECENT_RUNNERS_KEY, runner_id)
+        await self.async_redis.srem(DISMISSED_RUNNERS_KEY, runner_id)
+
+        try:
+            recent_meta = {
+                "runner_id": runner_id,
+                "plan_file": candidate.plan_file,
+                "engine": candidate.engine,
+                "trigger": candidate.trigger,
+                "stream_log_path": candidate.log_file,
+                "log_file_path": candidate.log_file,
+                "started_at": key_values["started_at"],
+                "worktree_path": candidate.worktree_path,
+                "branch": candidate.branch,
+                "reattach_mode": candidate.reattach_mode,
+            }
+            await self.async_redis.set(f"plan-runner:recent-meta:{runner_id}", json.dumps(recent_meta, ensure_ascii=False))
+        except Exception:
+            pass
+
+        return ReattachRunnerResponse(
+            success=True,
+            runner_id=runner_id,
+            message="Reattached runner state",
+            candidate=candidate,
+            reattach_mode=candidate.reattach_mode,
+        )
+
+    async def kill_orphan_runner(self, runner_id: str) -> dict:
+        """orphan 후보 PID를 evidence 재확인 후 직접 강제 종료한다."""
+        candidate = await self._get_orphan_candidate(runner_id)
+        if candidate is None:
+            raise HTTPException(status_code=404, detail=f"orphan candidate not found for runner {runner_id}")
+        if not candidate.pid:
+            raise HTTPException(status_code=409, detail="orphan candidate has no live pid")
+        try:
+            import psutil
+            proc = psutil.Process(candidate.pid)
+            children = proc.children(recursive=True)
+            for child in children:
+                child.terminate()
+            proc.terminate()
+            gone, alive = psutil.wait_procs([*children, proc], timeout=3)
+            for live_proc in alive:
+                live_proc.kill()
+            await self.async_redis.sadd(DISMISSED_RUNNERS_KEY, runner_id)
+            return {"success": True, "message": f"Force killed orphan runner {runner_id}", "pid": candidate.pid}
+        except HTTPException:
+            raise
+        except Exception as exc:
+            raise HTTPException(status_code=500, detail=f"Failed to kill orphan runner: {exc}")
+
     async def get_runner_status(self, runner_id: str) -> RunStatusResponse:
         """특정 runner 상태 조회 (per-runner Redis 키 기반)"""
         data = await self._get_runner_fields(
@@ -1212,7 +1540,13 @@ class ExecutorService:
 
     async def dismiss_runner(self, runner_id: str) -> bool:
         self._sync_state()
-        return await self.state.dismiss_runner(runner_id)
+        success = await self.state.dismiss_runner(runner_id)
+        if success:
+            try:
+                await self.async_redis.sadd(DISMISSED_RUNNERS_KEY, runner_id)
+            except Exception:
+                pass
+        return success
 
     def _is_pid_alive(self, pid: int) -> bool:
         return self.state._is_pid_alive(pid)

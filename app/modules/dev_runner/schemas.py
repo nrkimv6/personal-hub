@@ -132,6 +132,43 @@ class RunnerListItem(BaseModel):
     gate_evidence_summary: Optional[dict[str, Any]] = None
 
 
+class OrphanRunnerCandidate(BaseModel):
+    """Redis registry에서 빠진 dev-runner 재연결 후보."""
+    runner_id: str
+    plan_file: Optional[str] = None
+    engine: Optional[str] = None
+    trigger: Optional[str] = None
+    pid: Optional[int] = None
+    pid_kind: Literal["parent", "child_engine", "none"] = "none"
+    log_file: Optional[str] = None
+    log_mtime: Optional[datetime] = None
+    start_time: Optional[datetime] = None
+    execution_count: Optional[int] = None
+    worktree_path: Optional[str] = None
+    branch: Optional[str] = None
+    confidence: Literal["high", "medium", "low"] = "low"
+    reattach_mode: Literal["full", "log_only_child", "log_only"] = "log_only"
+    can_reattach: bool = False
+    can_force_kill: bool = False
+    warnings: List[str] = Field(default_factory=list)
+
+
+class ReattachRunnerRequest(BaseModel):
+    """상태 소실 runner 수동 재연결 요청."""
+    force: bool = False
+    expected_plan_file: Optional[str] = None
+    expected_log_file: Optional[str] = None
+
+
+class ReattachRunnerResponse(BaseModel):
+    """상태 소실 runner 수동 재연결 응답."""
+    success: bool
+    runner_id: str
+    message: str
+    candidate: OrphanRunnerCandidate
+    reattach_mode: Literal["full", "log_only_child", "log_only"]
+
+
 class PlanProgressResponse(BaseModel):
     """Plan 진행률 스키마"""
     done: int
@@ -1475,6 +1512,9 @@ __all__ = [
     'RunRequest',
     'RunStatusResponse',
     'RunnerListItem',
+    'OrphanRunnerCandidate',
+    'ReattachRunnerRequest',
+    'ReattachRunnerResponse',
     'PlanFileResponse',
     'PlanProgressResponse',
     'RegisteredPathResponse',
