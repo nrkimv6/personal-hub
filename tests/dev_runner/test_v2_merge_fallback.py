@@ -1075,3 +1075,22 @@ def test_stream_output_merge_requested_post_review_stopped_keeps_inline_merge_R(
     mock_inline_merge.assert_not_called()
     mock_cleanup.assert_called_once()
 
+
+def test_cleanup_decision_blocks_terminal_approval_with_post_merge_leftover_R():
+    """R: terminal approval_required + leftover merge flag never re-enters inline merge."""
+    from _dr_merge_state import MergeCleanupAction
+    from _dr_merge_persistence import MergeState
+    from _dr_stream_cleanup import decide_cleanup_action
+
+    decision = decide_cleanup_action(
+        MergeState(merge_status="approval_required", merge_requested=True),
+        exit_code=0,
+        exit_reason="completed",
+        stop_stage=None,
+        completed_for_flow=True,
+        has_worktree_commits=True,
+    )
+
+    assert decision.action == MergeCleanupAction.BLOCKED_TERMINAL
+    assert decision.reason == "approval_required"
+

@@ -192,3 +192,203 @@ def test_patch_cancel_already_cancelled(client):
     # 두 번째 취소 → 400 (이미 terminal 상태 — planned/running이 아님)
     resp2 = client.patch(f"{BASE}/{wf_id}/cancel")
     assert resp2.status_code == 400
+
+
+# ── T3: 통합 — WorkflowManager DB source 정합성 ─────────────────────────────
+
+def test_workflow_manager_row_visible_to_orm_session_Co(tmp_path):
+    """T3: WorkflowManager-created workflow row가 ORM session과 HTTP에서 조회됨.
+
+    Phase 1 fix: WorkflowManager()는 settings.DATABASE_URL(앱 ORM과 동일 source)을
+    사용하므로 listener-created row가 앱 ORM session에서 그대로 조회된다.
+    """
+    import workflow_manager as wm
+    from app.models.workflow import Workflow
+    from app.main import app
+    from app.database import get_db
+    from sqlalchemy import create_engine
+    from sqlalchemy import text
+    from sqlalchemy.orm import sessionmaker
+
+    db_path = tmp_path / "workflow-http-t3.db"
+    db_url = f"sqlite:///{db_path.as_posix()}"
+    engine = create_engine(db_url, connect_args={"check_same_thread": False})
+    Workflow.__table__.create(bind=engine)
+    SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+
+    def override_get_db():
+        db = SessionLocal()
+        try:
+            yield db
+        finally:
+            db.close()
+
+    manager = wm.WorkflowManager(db_url)
+
+    slug = "t3-orm-integration-Co"
+    try:
+        wf_id = manager.create(slug=slug, plan_file="test/t3-plan.md")
+        assert wf_id > 0
+
+        # ORM session(test_db_session)으로 같은 row 조회
+        db = SessionLocal()
+        try:
+            wf = db.query(Workflow).filter_by(id=wf_id).first()
+        finally:
+            db.close()
+
+        assert wf is not None, (
+            f"WorkflowManager(slug={slug})가 생성한 row {wf_id}가 ORM session에서 "
+            "조회되지 않습니다. WorkflowManager가 다른 DB source를 사용하고 있을 수 있습니다."
+        )
+        assert wf.slug == slug
+        assert wf.status == "planned"
+
+        app.dependency_overrides[get_db] = override_get_db
+        try:
+            with TestClient(app) as local_client:
+                resp = local_client.get(f"{BASE}/{wf_id}")
+                assert resp.status_code == 200
+                data = resp.json()
+                assert data["id"] == wf_id
+                assert data["slug"] == slug
+                assert data["status"] == "planned"
+        finally:
+            app.dependency_overrides.pop(get_db, None)
+    finally:
+        with engine.begin() as conn:
+            conn.execute(text("DELETE FROM workflows WHERE slug = :slug"), {"slug": slug})
+        engine.dispose()
+
+
+# ── T5: HTTP — listener 경로·conflict resolution DB split 없음 ────────────────
+
+def test_listener_workflow_http_visible_R(tmp_path):
+    """T5: WorkflowManager(listener 경로)로 생성된 workflow가 GET /{id}로 404 없이 반환됨.
+
+    PostgreSQL single-source: listener가 PG에 쓴 row를 HTTP API가 동일 DB에서 읽는다.
+    """
+    import workflow_manager as wm
+    from app.models.workflow import Workflow
+    from app.main import app
+    from app.database import get_db
+    from sqlalchemy import create_engine, text
+    from sqlalchemy.orm import sessionmaker
+
+    db_path = tmp_path / "t5-listener.db"
+    db_url = f"sqlite:///{db_path.as_posix()}"
+    engine = create_engine(db_url, connect_args={"check_same_thread": False})
+    Workflow.__table__.create(bind=engine)
+    Session = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+
+    def override_get_db():
+        db = Session()
+        try:
+            yield db
+        finally:
+            db.close()
+
+    manager = wm.WorkflowManager(db_url)
+    slug = "t5-listener-R"
+    try:
+        wf_id = manager.create(slug=slug, plan_file="test/t5.md")
+        assert wf_id > 0
+
+        app.dependency_overrides[get_db] = override_get_db
+        try:
+            with TestClient(app) as c:
+                resp = c.get(f"{BASE}/{wf_id}")
+            assert resp.status_code == 200
+            data = resp.json()
+            assert data["id"] == wf_id
+            assert data["slug"] == slug
+            assert data["status"] == "planned"
+        finally:
+            app.dependency_overrides.pop(get_db, None)
+    finally:
+        engine.dispose()
+
+
+def test_no_sqlite_split_workflow_conflict_R(tmp_path):
+    """T5: workflow과 conflict_resolutions가 동일 DB에 기록되고 HTTP 엔드포인트가 정상 응답함.
+
+    split-brain 없음 검증: WorkflowManager와 ConflictResolver가 같은 DB source를 사용하여
+    data/monitor.db SQLite 파일이 새로 생성되지 않는다.
+    """
+    import sys
+    from pathlib import Path as _Path
+    from unittest.mock import patch
+    import workflow_manager as wm
+    from app.models.workflow import Workflow
+    from app.main import app
+    from app.database import get_db
+    from sqlalchemy import create_engine, text
+    from sqlalchemy.orm import sessionmaker
+
+    plan_runner_dir = _Path(__file__).resolve().parents[2] / "scripts" / "plan_runner"
+    if str(plan_runner_dir) not in sys.path:
+        sys.path.insert(0, str(plan_runner_dir))
+    from conflict_resolver import ConflictResolver, ResolveResult
+
+    db_path = tmp_path / "t5-split.db"
+    db_url = f"sqlite:///{db_path.as_posix()}"
+    engine = create_engine(db_url, connect_args={"check_same_thread": False})
+
+    Workflow.__table__.create(bind=engine)
+    with engine.begin() as conn:
+        conn.execute(text(
+            "CREATE TABLE IF NOT EXISTS conflict_resolutions ("
+            "id INTEGER PRIMARY KEY AUTOINCREMENT, "
+            "runner_id TEXT NOT NULL, "
+            "branch TEXT NOT NULL, "
+            "conflict_files TEXT NOT NULL, "
+            "resolved_files TEXT, "
+            "failed_files TEXT, "
+            "strategy TEXT, "
+            "success BOOLEAN NOT NULL DEFAULT 0, "
+            "duration_ms INTEGER, "
+            "error_message TEXT, "
+            "created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP"
+            ")"
+        ))
+
+    Session = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+
+    def override_get_db():
+        db = Session()
+        try:
+            yield db
+        finally:
+            db.close()
+
+    monitor_db = _Path(__file__).resolve().parents[2] / "data" / "monitor.db"
+    existed_before = monitor_db.exists()
+
+    manager = wm.WorkflowManager(db_url)
+    wf_id = manager.create(slug="t5-nosplit-R", plan_file="test/t5-split.md")
+    assert wf_id > 0
+
+    with patch("app.database.SessionLocal", Session):
+        resolver = ConflictResolver(project_root=tmp_path)
+        result = ResolveResult(success=True, resolved_files=["z.py"], failed_files=[], reason="")
+        resolver._record_resolution("t5-rid-R", "feat", ["z.py"], result, 20)
+
+    assert existed_before or not monitor_db.exists(), (
+        "data/monitor.db가 존재하지 않았는데 새로 생성됐습니다. SQLite split 가능성 있음."
+    )
+
+    with engine.begin() as conn:
+        row = conn.execute(
+            text("SELECT runner_id FROM conflict_resolutions WHERE runner_id = 't5-rid-R'")
+        ).fetchone()
+    assert row is not None, "conflict_resolutions가 test DB에 기록되지 않았습니다."
+
+    app.dependency_overrides[get_db] = override_get_db
+    try:
+        with TestClient(app) as c:
+            resp = c.get(f"{BASE}/{wf_id}")
+        assert resp.status_code == 200
+        assert resp.json()["id"] == wf_id
+    finally:
+        app.dependency_overrides.pop(get_db, None)
+        engine.dispose()

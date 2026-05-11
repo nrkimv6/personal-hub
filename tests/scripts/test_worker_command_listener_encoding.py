@@ -101,3 +101,14 @@ def test_execute_worker_action_restart_frontend_public_T3_executes_temp_script(l
 
     assert result["success"] is True
     assert args_file.read_text(encoding="utf-8-sig").strip() == "restart-frontend|True"
+
+
+def test_dev_runner_subprocess_streaming_uses_utf8_replace_source_contract():
+    """T3: dev-runner subprocess/log drain은 Windows cp949 decode에 의존하지 않는다."""
+    plan_runner = Path(__file__).resolve().parent.parent.parent / "scripts" / "plan_runner"
+    subprocess_source = (plan_runner / "_dr_subprocess.py").read_text(encoding="utf-8")
+    runner_source = (plan_runner / "_dr_plan_runner.py").read_text(encoding="utf-8")
+
+    for source in (subprocess_source, runner_source):
+        assert 'encoding="utf-8"' in source
+        assert 'errors="replace"' in source

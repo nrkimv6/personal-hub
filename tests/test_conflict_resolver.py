@@ -334,3 +334,69 @@ def test_get_base_content_nonexistent_file_returns_empty_E(tmp_path):
     repo = make_conflict_repo(tmp_path)
     base = ConflictAnalyzer.get_base_content(repo, "totally_wrong_path/nothing.py")
     assert base == ""
+
+
+# ── T3: 통합 — _record_resolution() DB session 정합성 ────────────────────────
+
+def test_record_resolution_writes_to_session_not_sqlite_file_Co(tmp_path):
+    """T3: 실제 conflict repo의 resolution 기록이 ORM DB에 남고
+    data/monitor.db SQLite 파일을 별도로 생성하지 않음.
+
+    Phase 1 fix: conflict_resolver._record_resolution()은 이제 SessionLocal을 통해
+    앱 ORM DB에 쓴다. row가 test session에서 조회됨 = 올바른 DB source 사용 증명.
+    """
+    from unittest.mock import patch
+    from sqlalchemy import create_engine, text
+    from sqlalchemy.orm import sessionmaker
+    from conflict_resolver import ConflictAnalyzer, ConflictResolver, ResolveResult
+
+    engine = create_engine("sqlite:///:memory:")
+    with engine.begin() as conn:
+        conn.execute(text("""
+            CREATE TABLE conflict_resolutions (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                runner_id TEXT,
+                branch TEXT,
+                conflict_files TEXT,
+                resolved_files TEXT,
+                failed_files TEXT,
+                strategy TEXT,
+                success BOOLEAN,
+                duration_ms INTEGER,
+                error_message TEXT
+            )
+        """))
+
+    Session = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+    rid = "t3-conflict-runner-Co"
+    repo = make_conflict_repo(tmp_path)
+    conflict_files = ConflictAnalyzer.get_conflict_files(repo)
+    assert conflict_files == ["a.py"]
+
+    with patch("app.database.SessionLocal", Session):
+        resolver = ConflictResolver(project_root=repo)
+        result = ResolveResult(success=True, resolved_files=conflict_files, failed_files=[], reason="")
+        resolver._record_resolution(rid, "feat", conflict_files, result, 50)
+
+    db = Session()
+    try:
+        row = db.execute(
+            text("SELECT * FROM conflict_resolutions WHERE runner_id = :rid"),
+            {"rid": rid},
+        ).fetchone()
+        assert row is not None, (
+            "_record_resolution()이 conflict_resolutions row를 기록하지 않았습니다. "
+            "SessionLocal 패치가 올바르게 적용되지 않았거나 write 경로가 다를 수 있습니다."
+        )
+        # SQLite: success=1(int), PG: success=True(bool) — 둘 다 truthy
+        assert row.success
+        assert row.runner_id == rid
+        assert not (repo / "data" / "monitor.db").exists()
+        assert not (repo / "monitor.db").exists()
+        db.execute(
+            text("DELETE FROM conflict_resolutions WHERE runner_id = :rid"),
+            {"rid": rid},
+        )
+        db.commit()
+    finally:
+        db.close()
