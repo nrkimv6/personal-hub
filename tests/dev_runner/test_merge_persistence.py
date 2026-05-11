@@ -125,3 +125,59 @@ def test_result_metadata_preserves_terminal_approval_after_rejected_late_writer(
     assert redis.get(f"{prefix}:merge_message") == "MERGE_PRECHECK_FAILED[service_lock]: blocked"
     history = json.loads(redis.get("plan-runner:merge-results")[0])
     assert history["status"] == APPROVAL_REQUIRED
+
+
+def test_extract_service_lock_details_parses_changed_and_running_R():
+    from _dr_merge_persistence import MergePersistence
+
+    msg = (
+        "MERGE_PRECHECK_FAILED[service_lock]: Running 서비스와 겹치는 변경이 감지되어 승인 대기 상태로 전환합니다.\n"
+        "- changed: scripts/services/service_run.py\n"
+        "- running: MonitorPage-Admin, MonitorPage-Public"
+    )
+    details = MergePersistence._extract_service_lock_details(msg)
+    assert details["service_lock_changed"] == ["scripts/services/service_run.py"]
+    assert details["service_lock_running"] == ["MonitorPage-Admin", "MonitorPage-Public"]
+
+
+def test_extract_service_lock_details_empty_message_R():
+    from _dr_merge_persistence import MergePersistence
+
+    assert MergePersistence._extract_service_lock_details("") == {}
+    assert MergePersistence._extract_service_lock_details(None) == {}
+
+
+def test_build_gate_evidence_summary_includes_service_lock_details_R():
+    from _dr_merge_persistence import MergePersistence
+
+    msg = (
+        "MERGE_PRECHECK_FAILED[service_lock]: blocked\n"
+        "- changed: scripts/services/service_run.py\n"
+        "- running: MonitorPage-Admin"
+    )
+    result = {
+        "success": False,
+        "merge_status": "approval_required",
+        "reason": "service_lock",
+        "message": msg,
+    }
+    summary = MergePersistence.build_gate_evidence_summary(result)
+    assert summary is not None
+    assert summary["service_lock_changed"] == ["scripts/services/service_run.py"]
+    assert summary["service_lock_running"] == ["MonitorPage-Admin"]
+    assert summary["reason"] == "service_lock"
+
+
+def test_build_gate_evidence_summary_no_service_lock_details_when_reason_differs_R():
+    from _dr_merge_persistence import MergePersistence
+
+    result = {
+        "success": False,
+        "merge_status": "error",
+        "reason": "test_failed",
+        "message": "- changed: something\n- running: nope",
+    }
+    summary = MergePersistence.build_gate_evidence_summary(result)
+    assert summary is not None
+    assert "service_lock_changed" not in summary
+    assert "service_lock_running" not in summary

@@ -307,6 +307,8 @@
 						<div class="w-1.5 h-1.5 rounded-full bg-status-failed shrink-0" title={resolveRunnerStateTitle(runner)}></div>
 					{:else if runner.merge_status === 'conflict' || runner.merge_status === 'test_failed'}
 						<div class="w-1.5 h-1.5 rounded-full bg-status-failed shrink-0" title={resolveRunnerStateTitle(runner)}></div>
+					{:else if runner.merge_status === 'approval_required'}
+						<div class="w-1.5 h-1.5 rounded-full bg-status-queued shrink-0" title={resolveRunnerStateTitle(runner)}></div>
 					{:else}
 						{@const exitDisplay = getExitReasonDisplay(runner.exit_reason)}
 						<div class="w-1.5 h-1.5 rounded-full {exitDisplay.dotClass} shrink-0" title={resolveRunnerStateTitle(runner)}></div>
