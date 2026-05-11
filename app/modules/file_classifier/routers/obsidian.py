@@ -1,10 +1,11 @@
 """옵시디언 노트 관련 API"""
 import json
-from fastapi import APIRouter, BackgroundTasks, Depends
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
 from sqlalchemy import text
 from typing import Optional, List
+from app.services.import_task_store import create_import_task, get_import_task, run_import_task
 from ..database import get_db, SessionLocal
 from ..config import settings
 from ..workers.obsidian.scanner import ObsidianScanner
@@ -156,12 +157,7 @@ async def obsidian_notes(
     }
 
 
-@router.post("/obsidian/classify/sample")
-async def obsidian_classify_sample(
-    sample_size: int = 30,
-    db: Session = Depends(get_db)
-):
-    """랜덤 샘플 30개 LLM 분류 (분류 기준 초안 확정용)"""
+def _classify_obsidian_sample(db: Session, sample_size: int) -> dict:
     import subprocess
 
     rows = db.execute(text(
@@ -202,6 +198,34 @@ JSON 응답: {{"note_type": "...", "confidence": 0.0~1.0}}"""
             results.append({"note_id": note_id, "file_name": fname, "note_type": "unknown", "error": str(e)})
 
     return {"sample_count": len(results), "results": results}
+
+
+async def _run_obsidian_classify_sample_task(task_id: str, sample_size: int) -> None:
+    db = SessionLocal()
+    try:
+        await run_import_task(task_id, lambda: _classify_obsidian_sample(db, sample_size))
+    finally:
+        db.close()
+
+
+@router.post("/obsidian/classify/sample")
+async def obsidian_classify_sample(background_tasks: BackgroundTasks, sample_size: int = 30):
+    """랜덤 샘플 LLM 분류를 백그라운드 task로 접수한다."""
+    task = create_import_task("obsidian_classify_sample", f"obsidian:classify-sample:{sample_size}")
+    background_tasks.add_task(_run_obsidian_classify_sample_task, task["task_id"], sample_size)
+    return {
+        "task_id": task["task_id"],
+        "status": task["status"],
+        "phase": task["phase"],
+    }
+
+
+@router.get("/obsidian/classify/sample/tasks/{task_id}")
+async def get_obsidian_classify_sample_task(task_id: str):
+    task = get_import_task(task_id)
+    if not task or task.get("kind") != "obsidian_classify_sample":
+        raise HTTPException(status_code=404, detail="Obsidian classify sample task not found")
+    return task
 
 
 @router.post("/obsidian/classify/start")

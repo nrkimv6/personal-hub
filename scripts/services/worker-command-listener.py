@@ -387,8 +387,9 @@ def main():
                         logger.info(f"launch-cli 수신: engine={payload.get('engine')}, profile={payload.get('name')}")
                         cli_result = execute_launch_cli(payload)
                         cli_result["executed_at"] = datetime.now().isoformat()
-                        r.lpush(LAUNCH_CLI_RESULTS_KEY, json.dumps(cli_result, ensure_ascii=False))
-                        r.expire(LAUNCH_CLI_RESULTS_KEY, 30)
+                        result_key = payload.get("result_key") or LAUNCH_CLI_RESULTS_KEY
+                        r.lpush(result_key, json.dumps(cli_result, ensure_ascii=False))
+                        r.expire(result_key, 120)
                     except json.JSONDecodeError:
                         logger.warning(f"잘못된 launch-cli 페이로드: {raw_data}")
                     continue
