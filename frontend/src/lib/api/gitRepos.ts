@@ -19,6 +19,12 @@ import type {
 
 const BASE = '/git-repos';
 
+type GenerateMessageResponse = { message: string; request_id: number; status?: string; error?: string | null };
+
+function wait(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 export const gitReposApi = {
   // ─────────────────────────────────────────────
   // CRUD
@@ -169,12 +175,28 @@ export const gitReposApi = {
   generateMessage(
     id: number,
     opts?: { provider?: string; model?: string }
-  ): Promise<{ message: string; request_id: number; status?: string }> {
-    return request(`${BASE}/${id}/generate-message`, {
+  ): Promise<GenerateMessageResponse> {
+    return request<GenerateMessageResponse>(`${BASE}/${id}/generate-message`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(opts ?? {}),
+    }).then(async (accepted) => {
+      if (accepted.message || !accepted.request_id) {
+        return accepted;
+      }
+      for (let attempt = 0; attempt < 30; attempt += 1) {
+        await wait(1000);
+        const result = await gitReposApi.getGenerateMessageResult(id, accepted.request_id);
+        if (result.status === 'completed' || result.status === 'failed') {
+          return result;
+        }
+      }
+      return accepted;
     });
+  },
+
+  getGenerateMessageResult(id: number, requestId: number): Promise<GenerateMessageResponse> {
+    return request<GenerateMessageResponse>(`${BASE}/${id}/generate-message/${requestId}`);
   },
 
   /** 작업 이력 조회 */
