@@ -73,6 +73,9 @@ def _build_recent_runner_meta(
         ("branch_merged_to_main", redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:branch_merged_to_main")),
         ("metadata_checked_at", redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:metadata_checked_at")),
         ("gate_evidence_summary", redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:gate_evidence_summary")),
+        ("merge_status", redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_status")),
+        ("merge_reason", redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_reason")),
+        ("merge_message", redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_message")),
     ):
         if value is not None:
             meta[field] = _decode_recent_meta_value(value)
@@ -429,23 +432,37 @@ def _cleanup_process_state(runner_id: str, redis_client: redis.Redis, reason: st
         except Exception as _guard_err:
             logger.debug(f"[cleanup] merge guard check failed (ignoring): {_guard_err}")
 
-    # release merge turn if process died
-    _repo_id = None
+    # approval_required universal guard: read merge_status early to protect queue position
+    _ar_guard_ms = None
     try:
-        from merge_queue import release_merge_turn, _get_repo_id
-        _repo_id = _get_repo_id(PROJECT_ROOT)
-        release_merge_turn(redis_client, runner_id, repo_id=_repo_id)
+        _raw = redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_status")
+        _ar_guard_ms = _raw.decode("utf-8", errors="replace") if isinstance(_raw, bytes) else (_raw or "")
     except Exception:
         pass
 
-    # remove from queue
-    try:
-        from merge_queue import get_queue_key, _get_repo_id
-        if _repo_id is None:
+    # release merge turn if process died (skip for approval_required — user must act first)
+    _repo_id = None
+    if _ar_guard_ms != "approval_required":
+        try:
+            from merge_queue import release_merge_turn, _get_repo_id
             _repo_id = _get_repo_id(PROJECT_ROOT)
-        redis_client.lrem(get_queue_key(_repo_id), 0, runner_id)
-    except Exception:
-        pass
+            release_merge_turn(redis_client, runner_id, repo_id=_repo_id)
+        except Exception:
+            pass
+    else:
+        logger.warning(
+            f"[cleanup] approval_required: preserving merge turn position (runner={runner_id}, reason={reason})"
+        )
+
+    # remove from queue (skip for approval_required)
+    if _ar_guard_ms != "approval_required":
+        try:
+            from merge_queue import get_queue_key, _get_repo_id
+            if _repo_id is None:
+                _repo_id = _get_repo_id(PROJECT_ROOT)
+            redis_client.lrem(get_queue_key(_repo_id), 0, runner_id)
+        except Exception:
+            pass
 
     _running_processes.pop(runner_id, None)
     _running_log_files.pop(runner_id, None)
@@ -461,24 +478,31 @@ def _cleanup_process_state(runner_id: str, redis_client: redis.Redis, reason: st
     # Capture state before possible key deletion
     try:
         merge_status = redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_status")
+        merge_status = _decode_recent_meta_value(merge_status)
         claim_id_val = redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:claim_id")
         if isinstance(claim_id_val, bytes):
             claim_id_val = claim_id_val.decode("utf-8", errors="replace")
         if claim_id_val == "":
             claim_id_val = None
         plan_file_val = redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:plan_file")
+        plan_file_val = _decode_recent_meta_value(plan_file_val)
         if plan_file_val in (PLAN_FILE_ALL, _LEGACY_ALL):
             plan_file_val = None
         _trigger_val = redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:trigger")
+        _trigger_val = _decode_recent_meta_value(_trigger_val)
         if _trigger_val is None:
             _trigger_val = _parse_trigger_from_runner_log(
                 redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:stream_log_path")
                 or redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:log_file_path")
             )
         merge_requested = redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_requested")
+        merge_requested = _decode_recent_meta_value(merge_requested)
         test_source_val = redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:test_source")
+        test_source_val = _decode_recent_meta_value(test_source_val)
         branch_val = redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:branch")
+        branch_val = _decode_recent_meta_value(branch_val)
         worktree_path_val = redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:worktree_path")
+        worktree_path_val = _decode_recent_meta_value(worktree_path_val)
         force_test_cleanup = bool(test_source_val) and (
             (isinstance(branch_val, str) and branch_val.startswith("runner/t-"))
             or (
@@ -595,9 +619,17 @@ def _cleanup_process_state(runner_id: str, redis_client: redis.Redis, reason: st
     # Invisible runner final cleanup
     if _trigger_val not in ("user", "user:all"):
         try:
+            _ar_preserve_suffixes = frozenset()
+            if merge_status == "approval_required":
+                _ar_preserve_suffixes = frozenset({
+                    "merge_status", "merge_reason", "merge_message",
+                    "worktree_path", "branch", "plan_file", "exit_reason",
+                })
             for _suffix in RUNNER_KEY_SUFFIXES:
+                if _suffix in _ar_preserve_suffixes:
+                    continue
                 redis_client.delete(f"{RUNNER_KEY_PREFIX}:{runner_id}:{_suffix}")
-            logger.debug(f"[cleanup] invisible runner ??deleting keys: {runner_id} (trigger={_trigger_val!r})")
+            logger.debug(f"[cleanup] invisible runner deleting keys: {runner_id} (trigger={_trigger_val!r})")
         except Exception:
             pass
 
@@ -606,8 +638,19 @@ def _cleanup_process_state(runner_id: str, redis_client: redis.Redis, reason: st
         if _wf_manager:
             wf = _wf_manager.get_by_runner_id(runner_id)
             if wf and wf["status"] in ("running", "merge_pending", "merging"):
-                _wf_manager.update_status(wf["id"], "failed", error_message=f"Cleanup: {reason}")
-                logger.info(f"[cleanup] workflow {wf['id']} -> failed (reason: {reason})")
+                if merge_status == "approval_required":
+                    if wf["status"] != "merge_pending":
+                        _wf_manager.update_status(
+                            wf["id"],
+                            "merge_pending",
+                            error_message=f"Cleanup preserved approval_required: {reason}",
+                        )
+                    logger.info(
+                        f"[cleanup] workflow {wf['id']} preserved for approval_required (reason: {reason})"
+                    )
+                else:
+                    _wf_manager.update_status(wf["id"], "failed", error_message=f"Cleanup: {reason}")
+                    logger.info(f"[cleanup] workflow {wf['id']} -> failed (reason: {reason})")
     except Exception as e:
         logger.warning(f"[cleanup] workflow DB update failed (ignoring): {e}")
 

@@ -476,6 +476,49 @@ class TestCleanupProcessStatePersistSuffixes:
                 f"'{suffix}' 키 TTL이 설정되지 않음 (ttl={ttl})."
             )
 
+    def test_cleanup_preserves_approval_required_workflow_R(self):
+        """R: approval_required cleanup must not mark the workflow failed."""
+        pu = self._import_process_utils()
+        import _dr_state
+
+        class FakeWorkflowManager:
+            def __init__(self):
+                self.updates = []
+
+            def get_by_runner_id(self, runner_id):
+                return {"id": 123, "status": "running"}
+
+            def update_status(self, workflow_id, status, **kwargs):
+                self.updates.append((workflow_id, status, kwargs))
+
+        wf_manager = FakeWorkflowManager()
+        _dr_state.set_wf_manager(wf_manager)
+        r = make_fake_redis()
+        runner_id = "t-approval-preserve"
+
+        from app.modules.dev_runner.services.executor_service import (
+            RUNNER_KEY_PREFIX, ACTIVE_RUNNERS_KEY,
+        )
+
+        r.sadd(ACTIVE_RUNNERS_KEY, runner_id)
+        r.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:status", "stopped")
+        r.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:trigger", "user")
+        r.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_status", "approval_required")
+        r.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_reason", "service_lock")
+        r.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_message", "MERGE_PRECHECK_FAILED[service_lock]")
+
+        try:
+            pu._cleanup_process_state(runner_id, r, reason="process_cleanup")
+        finally:
+            _dr_state.set_wf_manager(None)
+
+        assert wf_manager.updates
+        assert all(update[1] != "failed" for update in wf_manager.updates)
+        assert wf_manager.updates[-1][1] == "merge_pending"
+        recent_meta = r.get(f"plan-runner:recent-meta:{runner_id}")
+        assert recent_meta is not None
+        assert "approval_required" in recent_meta
+
 
 # ──────────────────────────────────────────────
 # 키 상수 동기화 테스트

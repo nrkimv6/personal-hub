@@ -18,7 +18,6 @@ del _sys_inject, _Path_inject
 import json
 import logging
 import re
-import sqlite3
 import subprocess
 import time
 from dataclasses import dataclass, field
@@ -26,7 +25,15 @@ from pathlib import Path
 import traceback as _tb
 from typing import Optional
 
+from sqlalchemy import text
+
 logger = logging.getLogger(__name__)
+
+
+def _session_local():
+    from app.database import SessionLocal
+
+    return SessionLocal()
 
 
 @dataclass
@@ -219,29 +226,42 @@ class ConflictResolver:
         result: ResolveResult,
         duration_ms: int,
     ) -> None:
+        db = None
         try:
-            db_path = self.project_root / "data" / "monitor.db"
-            conn = sqlite3.connect(str(db_path))
-            conn.execute(
-                """INSERT INTO conflict_resolutions
+            db = _session_local()
+            db.execute(
+                text(
+                    """INSERT INTO conflict_resolutions
                    (runner_id, branch, conflict_files, resolved_files, failed_files,
                     strategy, success, duration_ms, error_message)
-                   VALUES (?, ?, ?, ?, ?, 'auto', ?, ?, ?)""",
-                (
-                    runner_id,
-                    branch,
-                    json.dumps(conflict_files, ensure_ascii=False),
-                    json.dumps(result.resolved_files, ensure_ascii=False),
-                    json.dumps(result.failed_files, ensure_ascii=False),
-                    int(result.success),
-                    duration_ms,
-                    result.reason or None,
+                   VALUES (:runner_id, :branch, :conflict_files, :resolved_files, :failed_files,
+                           'auto', :success, :duration_ms, :error_message)"""
                 ),
+                {
+                    "runner_id": runner_id,
+                    "branch": branch,
+                    "conflict_files": json.dumps(conflict_files, ensure_ascii=False),
+                    "resolved_files": json.dumps(result.resolved_files, ensure_ascii=False),
+                    "failed_files": json.dumps(result.failed_files, ensure_ascii=False),
+                    "success": bool(result.success),
+                    "duration_ms": duration_ms,
+                    "error_message": result.reason or None,
+                },
             )
-            conn.commit()
-            conn.close()
+            db.commit()
         except Exception as e:
+            if db is not None:
+                try:
+                    db.rollback()
+                except Exception:
+                    pass
             self.logger.warning(f"[ConflictResolver] 이력 기록 실패 (무시): {e}")
+        finally:
+            if db is not None:
+                try:
+                    db.close()
+                except Exception:
+                    pass
 
     def try_resolve(self, runner_id: str, branch: str) -> ResolveResult:
         """[DEPRECATED] claude --print 모드는 tool(Read/Edit/Bash) 사용 불가.

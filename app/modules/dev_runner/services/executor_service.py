@@ -1539,7 +1539,9 @@ class ExecutorService:
                     # trigger 미존재 시 recent-meta fallback (cleanup 후 타이밍 이슈 방어)
                     if trigger is None:
                         trigger = recent_meta.get("trigger")
-                    exit_reason = d["exit_reason"] or getattr(db_row, "exit_reason", None) or recent_meta.get("exit_reason")
+                    exit_reason = d["exit_reason"] or recent_meta.get("exit_reason")
+                    if exit_reason is None:
+                        exit_reason = getattr(db_row, "exit_reason", None)
                     stop_stage = d["stop_stage"]
                     error = d["error"] or db_meta.get("error")
                     worktree_exists = _coerce_runner_metadata_state(d["worktree_exists"], recent_meta.get("worktree_exists"))
@@ -1731,6 +1733,43 @@ class ExecutorService:
                 r = await self.get_runner_status(first_id)
                 r.listener_alive = listener_alive
                 return r
+
+            recent_ids = await self.async_redis.zrange(RECENT_RUNNERS_KEY, 0, -1)
+            approval_runner = None
+            if recent_ids:
+                recent_runners = await self.get_all_runners()
+                approval_runner = next(
+                    (
+                        runner
+                        for runner in recent_runners
+                        if runner.visible and runner.display_state == "approval_required"
+                    ),
+                    None,
+                )
+            if approval_runner:
+                return RunStatusResponse(
+                    runner_id=approval_runner.runner_id,
+                    running=False,
+                    engine=approval_runner.engine or "claude",
+                    listener_alive=listener_alive,
+                    redis_connected=True,
+                    pid=approval_runner.pid,
+                    plan_file=approval_runner.plan_file,
+                    start_time=approval_runner.start_time,
+                    execution_count=approval_runner.execution_count,
+                    exit_reason=approval_runner.exit_reason,
+                    error=approval_runner.error,
+                    worktree_exists=approval_runner.worktree_exists,
+                    branch_exists=approval_runner.branch_exists,
+                    branch_merged_to_main=approval_runner.branch_merged_to_main,
+                    metadata_checked_at=approval_runner.metadata_checked_at,
+                    display_state=approval_runner.display_state,
+                    display_label=approval_runner.display_label,
+                    display_severity=approval_runner.display_severity,
+                    display_secondary=approval_runner.display_secondary,
+                    hide_stale_branch_badge=approval_runner.hide_stale_branch_badge,
+                    gate_evidence_summary=approval_runner.gate_evidence_summary,
+                )
 
             # 실행 중인 runner 없음
             return RunStatusResponse(running=False, engine="claude", listener_alive=listener_alive, redis_connected=True, pid=None, plan_file=None)

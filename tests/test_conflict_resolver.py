@@ -218,6 +218,53 @@ def test_try_resolve_traceback_in_error_log_R(tmp_path, monkeypatch, caplog):
     assert any("Traceback" in r.message for r in caplog.records)
 
 
+def test_record_resolution_writes_pg_not_sqlite_R(tmp_path, monkeypatch):
+    """R: conflict resolution history uses SQLAlchemy session, not data/monitor.db sqlite."""
+    from conflict_resolver import ConflictResolver, ResolveResult
+
+    class FakeSession:
+        def __init__(self):
+            self.executed = []
+            self.committed = False
+            self.closed = False
+            self.rolled_back = False
+
+        def execute(self, stmt, params):
+            self.executed.append((str(stmt), params))
+
+        def commit(self):
+            self.committed = True
+
+        def rollback(self):
+            self.rolled_back = True
+
+        def close(self):
+            self.closed = True
+
+    fake_session = FakeSession()
+
+    import conflict_resolver
+
+    monkeypatch.setattr(conflict_resolver, "_session_local", lambda: fake_session)
+
+    resolver = ConflictResolver(tmp_path)
+    resolver._record_resolution(
+        "runner-1",
+        "impl/test",
+        ["a.py"],
+        ResolveResult(success=True, resolved_files=["a.py"]),
+        42,
+    )
+
+    assert fake_session.committed is True
+    assert fake_session.closed is True
+    assert fake_session.rolled_back is False
+    sql, params = fake_session.executed[0]
+    assert "INSERT INTO conflict_resolutions" in sql
+    assert params["runner_id"] == "runner-1"
+    assert params["success"] is True
+
+
 # ---- T1-2: agent 프롬프트 내용 검증 TC ----
 
 def _agent_md_path() -> Path:

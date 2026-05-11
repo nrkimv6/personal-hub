@@ -15,6 +15,7 @@ if str(_repo_root) not in _sys_inject.path:
 del _sys_inject, _Path_inject
 
 import logging
+import os
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
@@ -37,6 +38,7 @@ class WorkflowManager:
         source = settings.DATABASE_URL if db_source is None else db_source
         self.db_source = str(source)
         self.db_url = self._normalize_db_url(self.db_source)
+        self._validate_runtime_source(self.db_url)
         engine_kwargs = self._engine_kwargs(self.db_url)
         self._engine = create_engine(self.db_url, **engine_kwargs)
 
@@ -49,6 +51,26 @@ class WorkflowManager:
         if not path.is_absolute():
             path = Path.cwd() / path
         return f"sqlite:///{path.resolve().as_posix()}"
+
+    @staticmethod
+    def _validate_runtime_source(db_url: str) -> None:
+        if not db_url.startswith("sqlite"):
+            return
+
+        normalized = db_url.split("?", 1)[0].replace("\\", "/").lower()
+        legacy_monitor_db = normalized.endswith("/data/monitor.db")
+        explicit_legacy_ok = os.environ.get("DEV_RUNNER_ALLOW_SQLITE_WORKFLOW_MANAGER") == "1"
+        pytest_ok = bool(os.environ.get("PYTEST_CURRENT_TEST"))
+        if legacy_monitor_db and not explicit_legacy_ok and not pytest_ok:
+            raise ValueError(
+                "WorkflowManager must not use legacy SQLite data/monitor.db in runtime; "
+                "use settings.DATABASE_URL/PostgreSQL instead"
+            )
+        if legacy_monitor_db:
+            logger.warning(
+                "[WorkflowManager] legacy SQLite monitor.db source allowed only for explicit legacy/test mode: %s",
+                db_url,
+            )
 
     @staticmethod
     def _engine_kwargs(db_url: str) -> dict:
