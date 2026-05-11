@@ -190,13 +190,23 @@ REDIS_WORKER_RESULTS_KEY = "worker:command_results"
 REDIS_COMMAND_RESULT_TIMEOUT = 60  # 결과 대기 타임아웃 (초)
 
 
-async def _send_worker_command(action: str) -> dict:
+def _manual_worker_command_hint(action: str, **options: Any) -> str:
+    command = f"browser-workers.ps1 -Action {action}"
+    if action == "restart-frontend" and bool(options.get("public")):
+        command += " -Public"
+    elif action == "restart-frontend":
+        command += " [-Public]"
+    return command
+
+
+async def _send_worker_command(action: str, **options: Any) -> dict:
     """Redis를 통해 워커 명령을 전송하고 결과를 대기합니다.
 
     Session 1에서 실행 중인 worker-command-listener가 명령을 수신하고 실행합니다.
 
     Args:
-        action: 워커 명령 (start, stop, restart)
+        action: 워커 명령 (start, stop, restart, restart-frontend)
+        options: command JSON에 포함할 optional payload
 
     Returns:
         dict: {success: bool, message: str}
@@ -205,13 +215,19 @@ async def _send_worker_command(action: str) -> dict:
 
     redis_client = await RedisClient.get_client()
     if not redis_client:
-        return {"success": False, "message": "Redis 연결 없음. 워커는 Session 1에서 수동 관리하세요: browser-workers.ps1 -Action " + action}
+        return {
+            "success": False,
+            "message": "Redis 연결 없음. 워커는 Session 1에서 수동 관리하세요: "
+            + _manual_worker_command_hint(action, **options),
+        }
 
-    command = json.dumps({
+    payload = {
         "action": action,
         "timestamp": datetime.now().isoformat(),
         "source": "api",
-    })
+    }
+    payload.update(options)
+    command = json.dumps(payload)
 
     try:
         # 이전 결과 비우기
@@ -306,6 +322,17 @@ async def stop_worker():
 async def restart_worker():
     """워커 프로세스를 재시작합니다. (Redis → Session 1 리스너)"""
     result = await _send_worker_command("restart")
+    return WorkerActionResponse(
+        success=result["success"],
+        message=result["message"],
+        pid=result.get("pid")
+    )
+
+
+@router.post("/restart-frontend", response_model=WorkerActionResponse)
+async def restart_frontend(public: bool = False):
+    """프론트엔드를 재시작합니다. (Redis → Session 1 리스너)"""
+    result = await _send_worker_command("restart-frontend", public=bool(public))
     return WorkerActionResponse(
         success=result["success"],
         message=result["message"],
