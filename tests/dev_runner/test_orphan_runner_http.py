@@ -3,11 +3,14 @@
 from datetime import datetime
 from unittest.mock import AsyncMock, patch
 
+import pytest
 from fastapi import FastAPI, HTTPException
 from fastapi.testclient import TestClient
 
 from app.modules.dev_runner.routes.runner import router
 from app.modules.dev_runner.schemas import OrphanRunnerCandidate, ReattachRunnerResponse
+
+pytestmark = pytest.mark.http
 
 
 def _client() -> TestClient:
