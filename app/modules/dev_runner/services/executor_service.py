@@ -186,7 +186,7 @@ class ExecutorService:
         self.async_redis = self.conn.async_redis
         self.state = RunnerState(self.async_redis, self._runner_key,
                                   self._is_pid_alive, self._force_cleanup_state)
-        self.merge = MergeService(self.async_redis, self._runner_key, self._send_command)
+        self.merge = MergeService(self.async_redis, self._runner_key, self._enqueue_command)
 
     def reconnect(self):
         """환경변수를 반영하여 Redis 클라이언트를 재연결합니다."""
@@ -195,7 +195,7 @@ class ExecutorService:
         self.async_redis = self.conn.async_redis
         self.state = RunnerState(self.async_redis, self._runner_key,
                                   self._is_pid_alive, self._force_cleanup_state)
-        self.merge = MergeService(self.async_redis, self._runner_key, self._send_command)
+        self.merge = MergeService(self.async_redis, self._runner_key, self._enqueue_command)
 
     async def _check_redis_and_listener(self):
         """Redis 연결 + command listener 존재 여부 사전 확인"""
@@ -517,6 +517,40 @@ class ExecutorService:
             return None
         _, raw = result
         return json.loads(raw)
+
+    async def _enqueue_command(self, command: dict, timeout: int = COMMAND_TIMEOUT) -> dict:
+        """Redis command를 enqueue하고 command result key를 즉시 반환한다."""
+        if "command_id" not in command:
+            command = {**command, "command_id": uuid.uuid4().hex[:8]}
+        result_key = f"{RESULTS_KEY}:{command['command_id']}"
+        await self.async_redis.delete(result_key)
+        await self.async_redis.lpush(COMMANDS_KEY, json.dumps(command, ensure_ascii=False))
+        return {
+            "success": True,
+            "status": "accepted",
+            "command_id": command["command_id"],
+            "result_key": result_key,
+            "message": "Command accepted",
+        }
+
+    async def get_command_result(self, command_id: str) -> dict:
+        result_key = f"{RESULTS_KEY}:{command_id}"
+        raw = await self.async_redis.lindex(result_key, 0)
+        if raw is None:
+            return {
+                "success": True,
+                "status": "pending",
+                "command_id": command_id,
+                "message": "Command pending",
+            }
+        data = json.loads(raw)
+        return {
+            "success": bool(data.get("success", False)),
+            "status": "completed" if data.get("success", False) else "failed",
+            "command_id": command_id,
+            "message": data.get("message", "Completed"),
+            "result": data,
+        }
 
     async def start_dev_runner(self, request: RunRequest) -> RunStatusResponse:
         """plan-runner 실행 시작 - Redis 명령 전송 (비동기, 멀티 runner 지원)"""
@@ -907,12 +941,12 @@ class ExecutorService:
     def _sync_merge(self):
         """merge를 on-demand 생성하고 async_redis/fn들을 현재 값으로 동기화 (테스트 mock 지원)."""
         if not hasattr(self, "merge") or self.merge is None:
-            self.merge = MergeService(self.async_redis, self._runner_key, self._send_command)
+            self.merge = MergeService(self.async_redis, self._runner_key, self._enqueue_command)
         else:
             if self.merge.async_redis is not self.async_redis:
                 self.merge.async_redis = self.async_redis
             self.merge._runner_key = self._runner_key
-            self.merge._send_command = self._send_command
+            self.merge._send_command = self._enqueue_command
 
     async def _correct_pid_state(
         self, rid: str, status: str, pid_str: str | None, caller: str = ""
@@ -1771,8 +1805,8 @@ class ExecutorService:
         """runner에 명령 전송 (retry-merge, cleanup-worktree 등)
 
         extra: 추가 payload — command dict에 병합되어 Redis에 전송됨 (retry-merge Redis 키 재발급 등에 활용)
-        Redis command write remains authoritative in this mirror stage; DB is updated only after
-        the command response so queue control cannot drift because of a DB write failure.
+        Redis command write remains authoritative in this mirror stage. The route returns an
+        accepted command id and result polling reads the command-specific result key.
         """
         try:
             await self.async_redis.ping()
@@ -1787,9 +1821,7 @@ class ExecutorService:
         }
         if extra:
             command.update(extra)
-        result_data = await self._send_command(command)
-        if result_data is None:
-            return {"success": False, "message": "Command timeout"}
+        result_data = await self._enqueue_command(command)
         if action in {"retry-merge", "resolve-conflict"}:
             payload = extra or {}
             self._best_effort_upsert_runner_state(
