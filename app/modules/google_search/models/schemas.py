@@ -117,6 +117,7 @@ class SavedSearchCreate(BaseModel):
     max_pages: int = Field(1, ge=1, le=10, description="페이지 수")
     service_account_id: Optional[int] = Field(None, description="브라우저 프로필 ID")
     is_favorite: bool = Field(False, description="즐겨찾기 여부")
+    notify_on_new: bool = Field(False, description="신규 결과 알림 여부")
     search_params: Optional[Dict[str, Any]] = Field(None, description="추가 검색 파라미터")
 
 
@@ -129,6 +130,7 @@ class SavedSearchUpdate(BaseModel):
     max_pages: Optional[int] = Field(None, ge=1, le=10)
     service_account_id: Optional[int] = None
     is_favorite: Optional[bool] = None
+    notify_on_new: Optional[bool] = None
     search_params: Optional[Dict[str, Any]] = None
 
 
@@ -142,6 +144,7 @@ class SavedSearchResponse(BaseModel):
     max_pages: int
     service_account_id: Optional[int]
     is_favorite: bool
+    notify_on_new: bool
     search_params: Optional[Dict[str, Any]] = None
     last_search_id: Optional[str]
     last_run_at: Optional[datetime]

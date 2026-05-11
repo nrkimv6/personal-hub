@@ -367,6 +367,7 @@ class TestGoogleScheduleAPI:
 
     def test_create_schedule(self, test_client, db_session, sample_saved_search):
         """스케줄 생성 API."""
+        expires_at = (datetime.now() + timedelta(days=7)).replace(microsecond=0).isoformat()
         response = test_client.post(
             "/api/v1/google/schedule/",
             json={
@@ -378,6 +379,7 @@ class TestGoogleScheduleAPI:
                     "daily_runs": 2,
                     "min_interval_hours": 1
                 },
+                "expires_at": expires_at,
                 "enabled": True
             }
         )
@@ -387,6 +389,7 @@ class TestGoogleScheduleAPI:
         assert data["display_name"] == "API 테스트 스케줄"
         assert data["target_type"] == "google_search"
         assert data["enabled"] is True
+        assert data["expires_at"].startswith(expires_at)
 
     def test_list_schedules(self, test_client, db_session, sample_google_schedule):
         """스케줄 목록 조회 API."""
@@ -407,11 +410,13 @@ class TestGoogleScheduleAPI:
 
     def test_update_schedule(self, test_client, db_session, sample_google_schedule):
         """스케줄 수정 API."""
+        expires_at = (datetime.now() + timedelta(days=3)).replace(microsecond=0).isoformat()
         response = test_client.put(
             f"/api/v1/google/schedule/{sample_google_schedule.id}",
             json={
                 "display_name": "수정된 스케줄",
-                "enabled": False
+                "enabled": False,
+                "expires_at": expires_at
             }
         )
 
@@ -419,6 +424,7 @@ class TestGoogleScheduleAPI:
         data = response.json()
         assert data["display_name"] == "수정된 스케줄"
         assert data["enabled"] is False
+        assert data["expires_at"].startswith(expires_at)
 
     def test_delete_schedule(self, test_client, db_session, sample_google_schedule):
         """스케줄 삭제 API."""

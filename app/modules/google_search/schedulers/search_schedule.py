@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import logging
+import json
 import uuid
+from datetime import datetime
 from typing import TYPE_CHECKING
 
 from app.models import TaskSchedule, TaskScheduleRun
@@ -26,6 +28,39 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
+def _load_schedule_value(schedule: TaskSchedule) -> dict:
+    """TaskSchedule.schedule_value JSON을 dict로 읽는다."""
+    if not schedule.schedule_value:
+        return {}
+    try:
+        loaded = json.loads(schedule.schedule_value)
+    except (json.JSONDecodeError, TypeError):
+        return {}
+    return loaded if isinstance(loaded, dict) else {}
+
+
+def _parse_expires_at(value: object) -> datetime | None:
+    """target_config.expires_at ISO 문자열을 datetime으로 변환."""
+    if not value:
+        return None
+    if isinstance(value, datetime):
+        return value
+    if isinstance(value, str):
+        try:
+            return datetime.fromisoformat(value.replace("Z", "+00:00"))
+        except ValueError:
+            logger.warning("Invalid Google search schedule expires_at: %s", value)
+            return None
+    return None
+
+
+def _is_expired(expires_at: datetime | None) -> bool:
+    if not expires_at:
+        return False
+    now = datetime.now(expires_at.tzinfo) if expires_at.tzinfo else datetime.now()
+    return expires_at <= now
+
+
 class GoogleSearchScheduler(ScheduleHandler):
     target_type = TaskSchedule.TARGET_TYPE_GOOGLE_SEARCH
 
@@ -42,21 +77,34 @@ class GoogleSearchScheduler(ScheduleHandler):
             logger.warning("[%s] saved_search_id 없음: schedule_id=%s", ctx.worker_name, schedule.id)
             return None
 
-        scheduler = InstagramScheduler(
-            daily_runs=config.get("daily_runs", 1),
-            time_windows=None if not config.get("time_windows") else None,
+        if _is_expired(_parse_expires_at(config.get("expires_at"))):
+            logger.info("[%s] Google 검색 스케줄 만료: schedule_id=%s", ctx.worker_name, schedule.id)
+            svc.update_schedule(schedule.id, enabled=False)
+            return None
+
+        schedule_value = _load_schedule_value(schedule)
+        daily_runs = schedule_value.get("daily_runs", config.get("daily_runs", 1))
+        time_windows = schedule_value.get("time_windows", config.get("time_windows", []))
+        min_interval_hours = schedule_value.get(
+            "min_interval_hours",
+            config.get("min_interval_hours", 1),
         )
-        if config.get("time_windows", []):
+
+        scheduler = InstagramScheduler(
+            daily_runs=daily_runs,
+            time_windows=None if not time_windows else None,
+        )
+        if time_windows:
             scheduler = InstagramScheduler(
-                daily_runs=config.get("daily_runs", 1),
-                time_windows=parse_time_windows(config.get("time_windows", [])),
+                daily_runs=daily_runs,
+                time_windows=parse_time_windows(time_windows),
             )
 
         last_run = svc.get_latest_run(schedule.id)
         last_run_time = last_run.started_at if last_run else None
         if not scheduler.should_run_now(
             last_run=last_run_time,
-            min_interval_hours=config.get("min_interval_hours", 1),
+            min_interval_hours=min_interval_hours,
         ):
             return None
 
