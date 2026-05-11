@@ -1183,3 +1183,83 @@ class TestMergeQueueReadContract:
         assert "scan_iter" in read_bodies
         assert "lrange" in read_bodies or "llen" in read_bodies
         assert not re.search(r"\bbrpop\b|acquire_merge_turn|release_merge_turn|merge-turn", read_bodies, re.I)
+
+
+# ── T5: HTTP — approval_required stopped recent runner 표시 일관성 ─────────────
+
+async def test_recent_stopped_approval_runner_visible_in_runners_R(client, mock_executor_redis):
+    """T5-R: active_runners가 아닌 recent_runners의 stopped approval_required runner가 GET /runners에서 반환됨.
+
+    item 14: stopped recent runner가 /runners 엔드포인트에서 display_state=approval_required로 나타난다.
+    """
+    fake_async = mock_executor_redis["async"]
+    rid = "t5-recent-approval-R"
+    prefix = f"plan-runner:runners:{rid}"
+    # recent_runners에만 등록(active_runners 아님) — 이미 종료된 runner
+    await fake_async.zadd("plan-runner:recent_runners", {rid: 1})
+    await fake_async.set(f"{prefix}:status", "stopped")
+    await fake_async.set(f"{prefix}:trigger", "user")
+    await fake_async.set(f"{prefix}:plan_file", "docs/plan/approval-t5.md")
+    await fake_async.set(f"{prefix}:merge_status", "approval_required")
+    await fake_async.set(f"{prefix}:merge_reason", "service_lock")
+
+    response = await client.get("/api/v1/dev-runner/runners")
+
+    assert response.status_code == 200
+    data = response.json()
+    matching = [r for r in data if r["runner_id"] == rid]
+    assert len(matching) == 1, (
+        f"stopped recent runner {rid}가 /runners 응답에 없습니다. "
+        "recent_runners에만 있는 approval_required runner가 누락됩니다."
+    )
+    r = matching[0]
+    assert r["display_state"] == "approval_required"
+    assert r["display_label"] == "승인 필요"
+
+
+async def test_approval_required_display_consistent_between_status_and_runners_R(client, mock_executor_redis):
+    """T5-R: /status와 /runners가 동일 runner에 대해 display_state·display_label을 동일하게 반환함.
+
+    item 15: /status가 대표 runner로 approval_required를 선택하고 display_label=승인 필요를 반환한다.
+    두 엔드포인트 간 display 계약이 일치한다.
+    """
+    fake_async = mock_executor_redis["async"]
+    rid = "t5-consistent-approval-R"
+    prefix = f"plan-runner:runners:{rid}"
+    # active + recent 모두 등록하여 /status가 대표 runner로 선택하게 함
+    await fake_async.sadd("plan-runner:active_runners", rid)
+    await fake_async.zadd("plan-runner:recent_runners", {rid: 1})
+    await fake_async.set(f"{prefix}:status", "stopped")
+    await fake_async.set(f"{prefix}:trigger", "user")
+    await fake_async.set(f"{prefix}:plan_file", "docs/plan/approval-t5b.md")
+    await fake_async.set(f"{prefix}:merge_status", "approval_required")
+    await fake_async.set(f"{prefix}:merge_reason", "service_lock")
+    await fake_async.set(f"{prefix}:merge_message", "MERGE_PRECHECK_FAILED[service_lock]")
+
+    status_resp = await client.get("/api/v1/dev-runner/status")
+    runners_resp = await client.get("/api/v1/dev-runner/runners")
+
+    assert status_resp.status_code == 200
+    assert runners_resp.status_code == 200
+
+    status_data = status_resp.json()
+    runners_data = runners_resp.json()
+
+    matching = [r for r in runners_data if r["runner_id"] == rid]
+    assert len(matching) == 1
+    r = matching[0]
+
+    assert r["display_state"] == "approval_required"
+    assert r["display_label"] == "승인 필요"
+    assert status_data["display_state"] == "approval_required", (
+        f"/status display_state={status_data.get('display_state')}이지만 approval_required 기대"
+    )
+    assert status_data["display_label"] == "승인 필요", (
+        f"/status display_label={status_data.get('display_label')}이지만 '승인 필요' 기대"
+    )
+    assert r["display_state"] == status_data["display_state"], (
+        f"/runners({r['display_state']})와 /status({status_data['display_state']}) display_state 불일치"
+    )
+    assert r["display_label"] == status_data["display_label"], (
+        f"/runners({r['display_label']})와 /status({status_data['display_label']}) display_label 불일치"
+    )

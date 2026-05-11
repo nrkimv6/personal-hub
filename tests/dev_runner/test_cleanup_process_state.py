@@ -519,6 +519,23 @@ class TestCleanupProcessStatePersistSuffixes:
         assert recent_meta is not None
         assert "approval_required" in recent_meta
 
+        import json
+        from app.modules.dev_runner.services.runner_display_state import build_display_state
+        from app.modules.dev_runner.services.runner_read_model import build_runner_read_model
+
+        meta = json.loads(recent_meta)
+        model = build_runner_read_model(
+            runner_id=runner_id,
+            running=False,
+            merge_status=meta.get("merge_status"),
+            exit_reason=meta.get("exit_reason"),
+            branch=meta.get("branch"),
+            worktree_path=meta.get("worktree_path"),
+        )
+        display = build_display_state(model)
+        assert display.state == "approval_required"
+        assert display.label == "승인 필요"
+
 
 # ──────────────────────────────────────────────
 # 키 상수 동기화 테스트

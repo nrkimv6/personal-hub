@@ -24,8 +24,13 @@ def test_recent_meta_preserves_completion_identity_fields():
         '"log_file_path"',
         '"stream_log_path"',
         '"exit_reason"',
+        '"merge_status"',
+        '"merge_reason"',
+        '"merge_message"',
     ):
         assert field in source
+    assert "RECENT_META_TTL" in source
+    assert "setex(" in source
 
 
 def test_runner_list_display_name_fallback_order_is_recent_meta_log_then_worktree_branch():
