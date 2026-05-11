@@ -19,7 +19,7 @@
 - `.claude/skills/` 또는 `.agents/skills/` 수정 시에는 다른 경로도 함께 갱신해 드리프트를 방지한다.
 - mirror surface(`.agents/`, `.agent/`, `.claude/`, `.gemini/`) 직접 수정·로컬 커밋 금지. wtools 원본 수정 후 원격 sync commit을 `git pull --ff-only`로만 수신한다.
 - backup/restore 브랜치를 main에 반영할 때 source branch에 mirror/skill 변경이 섞여 있는지 먼저 확인한다: `git diff --name-status <base> <source> -- .agents .agent .claude .gemini`. 사용자가 skill 제외를 지시했거나 mirror 변경이 범위 밖이면 병합 입력 단계에서 제외하고, merge 전후 `.agents/.agent/.claude/.gemini` diff가 비어 있지 않으면 완료 처리 금지.
-- root `main`과 `origin/main` 관계는 `git rev-list --left-right --count HEAD...origin/main`으로 분류한다. `behind-only`는 `git pull --ff-only` 수신 후보이고, `diverged`에서 sync tip을 plain `git pull`이나 push-first local merge로 닫지 않는다.
+- root `main`과 `origin/main` 관계는 `git rev-list --left-right --count HEAD...origin/main`으로 분류한다. `behind-only`는 `git pull --ff-only` 수신 후보이고, `diverged`는 즉시 blocker가 아니라 mirror diff와 충돌 가능성을 먼저 보고하는 `명시 merge 결정 필요` 상태다. 단, sync tip을 plain `git pull`이나 push-first local merge로 닫지 않는다.
 - root worktree(`main`/non-main 공통)에서는 구현성 경로를 직접 수정·커밋하지 않는다. 현재 impl worktree 또는 대상 repo worktree로 reroute한다. root branch guard는 `scripts/git-hooks/root-branch-guard.ps1`이며, root checkout이 main 밖으로 이동하면 `.git/root-branch-guard.violation` sentinel을 남긴다.
 
 ## Receiver Mirror Scope
@@ -29,7 +29,7 @@
 - mirror sync routing은 `git fetch origin` 후 `git rev-list --left-right --count HEAD...origin/main` tuple을 기준으로 한다. `git status --short --branch`는 display evidence다.
 - `behind-only`(`left=0,right>0`)는 `git pull --ff-only` 수신 후보다.
 - `ahead-only`(`left>0,right=0`)만 owner가 `git push origin main`으로 origin을 정렬한 뒤 `git pull --ff-only`를 retry할 수 있다.
-- `diverged`(`left>0,right>0`)는 push-first 금지이며, mirror path가 관련되면 자동화된 wtools sync 재생성, wtools source owner flow, sync worker, 또는 GitHub Actions `sync-skills.yml` evidence를 확보한 뒤 downstream read-back으로 닫는다.
+- `diverged`(`left>0,right>0`)는 push-first 금지다. mirror path가 관련되면 자동화된 wtools sync 재생성, wtools source owner flow, sync worker, 또는 GitHub Actions `sync-skills.yml` evidence를 확보한 뒤 downstream read-back으로 닫는다. mirror path가 없고 사용자가 명시 승인한 일반 divergence만 fetch/rev-list/mirror diff read-back 후 충돌 없는 merge decision으로 진행할 수 있다.
 - 세부 절차: [`docs/dev-guide/root-branch-guard.md`](docs/dev-guide/root-branch-guard.md)
 
 ## Plans Worktree (활성)
