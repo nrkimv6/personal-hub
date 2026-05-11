@@ -74,7 +74,6 @@
 
   // URL 쿼리 파라미터로 탭 제어
   import { page } from '$app/stores';
-  import { fetchWithTimeout } from '$lib/api/client';
 
   // URL 파라미터에서 탭 초기화
   $: {
@@ -333,11 +332,7 @@
 
     try {
       // DB에서 biz_item 정보 조회 (import API 사용)
-      const importResult = await fetchWithTimeout('/api/v1/businesses/import-url', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ url: recurringForm.url })
-      }).then(r => r.json());
+      const importResult = await businessApi.importFromUrl({ url: recurringForm.url });
 
       if (importResult.biz_item) {
         recurringForm.biz_item_id = importResult.biz_item.id;

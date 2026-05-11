@@ -9,7 +9,7 @@ from io import BytesIO
 from pathlib import Path
 from uuid import uuid4
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
+from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, UploadFile
 from fastapi.responses import FileResponse
 from PIL import Image
 from pydantic import BaseModel
@@ -17,12 +17,13 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from app.modules.slide_scanner.config import settings
-from app.modules.slide_scanner.database import get_db
+from app.modules.slide_scanner.database import SessionLocal, get_db
 from app.modules.slide_scanner.services.rectifier_client import (
     DetectMeta,
     SlideFilterOptions,
     rectifier_client,
 )
+from app.modules.slide_scanner.services.task_store import create_task
 
 router = APIRouter(prefix="/slides", tags=["slide-scanner"])
 
@@ -455,6 +456,22 @@ def transform_slide(slide_id: int, payload: TransformRequest, db: Session = Depe
     }
 
 
+@router.post("/{slide_id}/transform/tasks", status_code=202)
+def start_transform_slide_task(
+    slide_id: int,
+    payload: TransformRequest,
+    background_tasks: BackgroundTasks,
+):
+    def runner() -> dict:
+        db = SessionLocal()
+        try:
+            return transform_slide(slide_id, payload, db)
+        finally:
+            db.close()
+
+    return create_task("slide-transform", background_tasks, runner)
+
+
 @router.post("/{slide_id}/ocr")
 def extract_slide_text(slide_id: int, payload: OcrRequest | None = None, db: Session = Depends(get_db)):
     row = _load_slide_or_404(db, slide_id)
@@ -488,6 +505,22 @@ def extract_slide_text(slide_id: int, payload: OcrRequest | None = None, db: Ses
     db.commit()
 
     return {"id": slide_id, "extracted_text": extracted_text}
+
+
+@router.post("/{slide_id}/ocr/tasks", status_code=202)
+def start_extract_slide_text_task(
+    slide_id: int,
+    background_tasks: BackgroundTasks,
+    payload: OcrRequest | None = None,
+):
+    def runner() -> dict:
+        db = SessionLocal()
+        try:
+            return extract_slide_text(slide_id, payload, db)
+        finally:
+            db.close()
+
+    return create_task("slide-ocr", background_tasks, runner)
 
 
 @router.post("/{slide_id}/review")

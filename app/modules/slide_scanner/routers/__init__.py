@@ -10,6 +10,7 @@ from .mobile_sync import router as mobile_sync_router
 from .scan import router as scan_router
 from .settings import router as settings_router
 from .slides import router as slides_router
+from .tasks import router as tasks_router
 
 __all__ = [
     "health_router",
@@ -22,4 +23,5 @@ __all__ = [
     "export_router",
     "archive_router",
     "settings_router",
+    "tasks_router",
 ]

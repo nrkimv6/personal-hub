@@ -7,14 +7,15 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 from pydantic import BaseModel, Field
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from app.modules.slide_scanner.config import settings
-from app.modules.slide_scanner.database import get_db
+from app.modules.slide_scanner.database import SessionLocal, get_db
 from app.modules.slide_scanner.services.rectifier_client import SlideFilterOptions, rectifier_client
+from app.modules.slide_scanner.services.task_store import create_task
 
 router = APIRouter(prefix="/slides", tags=["slide-scanner"])
 
@@ -195,3 +196,15 @@ def batch_transform(request: BatchTransformRequest, db: Session = Depends(get_db
         "skipped": skipped,
         "failures": failures[:50],
     }
+
+
+@router.post("/batch-transform/tasks", status_code=202)
+def start_batch_transform_task(request: BatchTransformRequest, background_tasks: BackgroundTasks):
+    def runner() -> dict:
+        db = SessionLocal()
+        try:
+            return batch_transform(request, db)
+        finally:
+            db.close()
+
+    return create_task("slide-batch-transform", background_tasks, runner)

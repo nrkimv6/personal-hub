@@ -2,7 +2,13 @@
 
 from __future__ import annotations
 
+from datetime import datetime
+from typing import Literal
+
 from pydantic import BaseModel, Field, field_validator, model_validator
+
+
+ImagePdfTaskStatus = Literal["queued", "running", "completed", "failed"]
 
 
 class ImagePdfHealthResponse(BaseModel):
@@ -39,3 +45,27 @@ class ImagePdfConvertOptions(BaseModel):
         if ".." in normalized or "/" in normalized or "\\" in normalized:
             raise ValueError("output_name must not contain path separators")
         return normalized
+
+
+class ImagePdfTaskAcceptedResponse(BaseModel):
+    task_id: str
+    status: ImagePdfTaskStatus
+    artifact_url: str
+
+
+class ImagePdfTaskStatusResponse(BaseModel):
+    task_id: str
+    status: ImagePdfTaskStatus
+    source_names: list[str]
+    file_count: int
+    bw: bool
+    white: int
+    black: int
+    quality: int
+    preserve_dpi: bool
+    download_filename: str | None = None
+    artifact_url: str | None = None
+    error_message: str | None = None
+    created_at: datetime
+    started_at: datetime | None = None
+    completed_at: datetime | None = None

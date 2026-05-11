@@ -2,6 +2,7 @@
 	import { onMount } from 'svelte';
 	import PageHeader from '$lib/components/layout/PageHeader.svelte';
 	import { isApiGateClosedError } from '$lib/api/client';
+	import { FILE_CLASSIFIER_TIMEOUT_MS, fileClassifierFetch } from '$lib/api/file-classifier';
 
 	let settings = $state<any>(null);
 	let message = $state('');
@@ -10,7 +11,7 @@
 
 	async function fetchSettings() {
 		try {
-			const res = await fetch('/api/fc/settings');
+			const res = await fileClassifierFetch('/settings');
 			if (res.ok) settings = await res.json();
 		} catch (e) {
 			message = isApiGateClosedError(e) ? 'API 서버 재시작 중' : '설정 로드 실패';
@@ -19,11 +20,11 @@
 
 	async function saveSettings() {
 		try {
-			const res = await fetch('/api/fc/settings', {
+			const res = await fileClassifierFetch('/settings', {
 				method: 'PUT',
 				headers: { 'Content-Type': 'application/json' },
 				body: JSON.stringify(settings)
-			});
+			}, FILE_CLASSIFIER_TIMEOUT_MS.command);
 			if (res.ok) {
 				message = '설정 저장됨';
 			}

@@ -14,8 +14,9 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from app.modules.slide_scanner.config import settings
-from app.modules.slide_scanner.database import get_db
+from app.modules.slide_scanner.database import SessionLocal, get_db
 from app.modules.slide_scanner.services.rectifier_client import rectifier_client
+from app.modules.slide_scanner.services.task_store import create_task, get_task
 
 router = APIRouter(prefix="/export", tags=["slide-scanner"])
 
@@ -126,4 +127,79 @@ def export_pdf(
         path=str(pdf_path),
         media_type="application/pdf",
         filename=output_name,
+    )
+
+
+def _export_pdf_to_file(payload: PdfExportRequest, db: Session) -> dict:
+    ids = list(dict.fromkeys(payload.ids))
+    in_clause, in_params = _build_in_clause(ids)
+
+    rows = db.execute(
+        text(
+            f"""
+            SELECT id, captured_at, result_path
+            FROM slides
+            WHERE id IN ({in_clause})
+              AND is_archived = 0
+            """
+        ),
+        in_params,
+    ).fetchall()
+    if not rows:
+        raise HTTPException(status_code=404, detail="No matching slides found")
+
+    row_map = {int(row.id): row for row in rows}
+    ordered_rows = [row_map[slide_id] for slide_id in ids if slide_id in row_map]
+    ordered_rows.sort(key=lambda row: (row.captured_at is None, row.captured_at or "", int(row.id)))
+
+    image_paths: list[Path] = []
+    for row in ordered_rows:
+        if row.result_path:
+            result_path = Path(row.result_path)
+            if result_path.exists():
+                image_paths.append(result_path)
+
+    if not image_paths:
+        raise HTTPException(
+            status_code=400,
+            detail="No transformed result images available for PDF export",
+        )
+
+    output_name = _normalize_filename(payload.filename)
+    export_dir = settings.OUTPUT_DIR / "_exports"
+    export_dir.mkdir(parents=True, exist_ok=True)
+    output_path = export_dir / f"{uuid4().hex}_{output_name}"
+    pdf_path = rectifier_client.export_pdf(image_paths=image_paths, output_path=output_path)
+    return {"path": str(pdf_path), "filename": output_name}
+
+
+@router.post("/pdf/tasks", status_code=202)
+def start_export_pdf_task(payload: PdfExportRequest, background_tasks: BackgroundTasks):
+    def runner() -> dict:
+        db = SessionLocal()
+        try:
+            return _export_pdf_to_file(payload, db)
+        finally:
+            db.close()
+
+    return create_task("slide-export-pdf", background_tasks, runner)
+
+
+@router.get("/pdf/tasks/{task_id}/result")
+def get_export_pdf_task_result(task_id: str):
+    task = get_task(task_id)
+    if task is None:
+        raise HTTPException(status_code=404, detail="PDF export task not found")
+    if task["status"] == "failed":
+        raise HTTPException(status_code=409, detail=task.get("error_message") or "PDF export failed")
+    if task["status"] != "completed":
+        raise HTTPException(status_code=409, detail="PDF export is not completed")
+    result = task.get("result") or {}
+    path = Path(str(result.get("path") or ""))
+    if not path.exists():
+        raise HTTPException(status_code=404, detail="PDF export result not found")
+    return FileResponse(
+        path=str(path),
+        media_type="application/pdf",
+        filename=str(result.get("filename") or "slides_export.pdf"),
     )

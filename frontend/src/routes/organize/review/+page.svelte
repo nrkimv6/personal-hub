@@ -2,6 +2,7 @@
 	import { onMount } from 'svelte';
 	import PageHeader from '$lib/components/layout/PageHeader.svelte';
 	import { isApiGateClosedError } from '$lib/api/client';
+	import { FILE_CLASSIFIER_TIMEOUT_MS, fileClassifierFetch } from '$lib/api/file-classifier';
 
 	let files = $state<any[]>([]);
 	let categories = $state<any[]>([]);
@@ -13,7 +14,7 @@
 	async function fetchFiles() {
 		isLoading = true;
 		try {
-			const res = await fetch('/api/fc/files?status=rule_classified&page_size=100');
+			const res = await fileClassifierFetch('/files?status=rule_classified&page_size=100');
 			if (res.ok) {
 				const data = await res.json();
 				files = data.items || [];
@@ -27,7 +28,7 @@
 
 	async function fetchCategories() {
 		try {
-			const res = await fetch('/api/fc/categories');
+			const res = await fileClassifierFetch('/categories');
 			if (res.ok) {
 				const tree = await res.json();
 				// 트리를 평탄화
@@ -68,11 +69,11 @@
 			return;
 		}
 		try {
-			const res = await fetch('/api/fc/classify/approve', {
+			const res = await fileClassifierFetch('/classify/approve', {
 				method: 'POST',
 				headers: { 'Content-Type': 'application/json' },
 				body: JSON.stringify({ file_ids: [...selectedIds], category_id: bulkCategoryId })
-			});
+			}, FILE_CLASSIFIER_TIMEOUT_MS.command);
 			if (res.ok) {
 				message = `${selectedIds.size}개 파일 승인 완료`;
 				clearSelection();
@@ -85,7 +86,7 @@
 
 	async function startRuleClassify() {
 		try {
-			await fetch('/api/fc/classify/rule/start', { method: 'POST' });
+			await fileClassifierFetch('/classify/rule/start', { method: 'POST' }, FILE_CLASSIFIER_TIMEOUT_MS.command);
 			message = '규칙 분류 시작됨';
 			setTimeout(fetchFiles, 2000);
 		} catch (e) {

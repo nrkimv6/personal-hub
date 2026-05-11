@@ -111,6 +111,12 @@ async def kill_runner(runner_id: str):
     return await executor_service.send_runner_command(runner_id, "force-kill")
 
 
+@router.get("/commands/{command_id}")
+async def get_command_result(command_id: str):
+    """Accepted runner command 결과를 command-specific result key에서 조회"""
+    return await executor_service.get_command_result(command_id)
+
+
 @router.post("/runners/{runner_id}/reattach", response_model=ReattachRunnerResponse)
 async def reattach_runner(runner_id: str, request: ReattachRunnerRequest = ReattachRunnerRequest()):
     """Redis 상태 소실 runner를 사용자 승인으로 active 상태에 재연결"""

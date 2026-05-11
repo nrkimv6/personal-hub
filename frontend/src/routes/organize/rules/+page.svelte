@@ -2,6 +2,7 @@
 	import { onMount } from 'svelte';
 	import PageHeader from '$lib/components/layout/PageHeader.svelte';
 	import { isApiGateClosedError } from '$lib/api/client';
+	import { FILE_CLASSIFIER_TIMEOUT_MS, fileClassifierFetch } from '$lib/api/file-classifier';
 	import { confirm } from '$lib/stores/confirm';
 
 	let rules = $state<any[]>([]);
@@ -27,7 +28,7 @@
 	async function fetchRules() {
 		isLoading = true;
 		try {
-			const res = await fetch('/api/fc/rules');
+			const res = await fileClassifierFetch('/rules');
 			if (res.ok) rules = await res.json();
 		} catch (e) {
 			message = isApiGateClosedError(e) ? 'API 서버 재시작 중' : '규칙 로드 실패';
@@ -38,7 +39,7 @@
 
 	async function fetchCategories() {
 		try {
-			const res = await fetch('/api/fc/categories');
+			const res = await fileClassifierFetch('/categories');
 			if (res.ok) {
 				const tree = await res.json();
 				const flat: any[] = [];
@@ -65,7 +66,7 @@
 			return;
 		}
 		try {
-			const res = await fetch('/api/fc/rules', {
+			const res = await fileClassifierFetch('/rules', {
 				method: 'POST',
 				headers: { 'Content-Type': 'application/json' },
 				body: JSON.stringify({
@@ -74,7 +75,7 @@
 					rule_content: content,
 					priority: newRule.priority
 				})
-			});
+			}, FILE_CLASSIFIER_TIMEOUT_MS.command);
 			if (res.ok) {
 				message = '규칙 생성됨';
 				newRule = { rule_type: 'extension', category_id: null, rule_content: '{"value": ""}', priority: 0 };
@@ -87,7 +88,7 @@
 
 	async function toggleRule(rule: any) {
 		try {
-			await fetch(`/api/fc/rules/${rule.id}/toggle`, { method: 'PUT' });
+			await fileClassifierFetch(`/rules/${rule.id}/toggle`, { method: 'PUT' }, FILE_CLASSIFIER_TIMEOUT_MS.command);
 			await fetchRules();
 		} catch (e) {
 			message = isApiGateClosedError(e) ? 'API 서버 재시작 중' : '규칙 토글 실패';
@@ -104,7 +105,7 @@
 			}))
 		) return;
 		try {
-			await fetch(`/api/fc/rules/${id}`, { method: 'DELETE' });
+			await fileClassifierFetch(`/rules/${id}`, { method: 'DELETE' }, FILE_CLASSIFIER_TIMEOUT_MS.command);
 			await fetchRules();
 		} catch (e) {
 			message = isApiGateClosedError(e) ? 'API 서버 재시작 중' : '규칙 삭제 실패';

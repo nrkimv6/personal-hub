@@ -309,11 +309,7 @@ async def generate_commit_message(
     body: schemas.GenerateMessageRequest = Body(default_factory=schemas.GenerateMessageRequest),
     db: Session = Depends(get_db),
 ):
-    """diff를 LLM에 전달해 커밋 메시지 자동 생성.
-
-    diff 조회는 route에서 직접 수행하고,
-    LLM 요청/폴링은 기존 코드(LLM 큐) 방식 유지.
-    """
+    """diff를 LLM에 전달해 커밋 메시지 자동 생성을 요청하고 request id를 즉시 반환한다."""
     from app.modules.git_repos.services.git_command import GitCommandService
     svc = GitRepoService()
     repo = svc.get_repo(db, repo_id)
@@ -329,8 +325,6 @@ async def generate_commit_message(
 
     try:
         from app.modules.claude_worker.services.llm_service import LLMService
-        from app.modules.claude_worker.models import LLMRequest
-        import asyncio as _asyncio
 
         prompt = f"""아래 git diff를 분석하고 Conventional Commits 형식의 한국어 커밋 메시지를 1줄로 작성하세요.
 
@@ -362,21 +356,38 @@ diff:
         )
         db.commit()
 
-        # 동기 처리 시도 (빠른 응답)
-        for _ in range(30):
-            await _asyncio.sleep(1)
-            db.refresh(req)
-            if req.status in ("completed", "failed"):
-                break
-
-        if req.status == "completed" and req.raw_response:
-            msg = req.raw_response.strip()
-            return {"message": msg, "request_id": req.id}
-        else:
-            return {"message": "", "request_id": req.id, "status": req.status}
+        return {"message": "", "request_id": req.id, "status": req.status or "pending"}
 
     except ImportError:
         raise HTTPException(status_code=503, detail="LLM 서비스를 사용할 수 없습니다.")
+
+
+@router.get("/{repo_id}/generate-message/{request_id}")
+async def get_generate_commit_message_result(
+    repo_id: int,
+    request_id: int,
+    db: Session = Depends(get_db),
+):
+    """generate-message LLM request 결과를 non-blocking으로 조회한다."""
+    from app.modules.claude_worker.models import LLMRequest
+
+    req = (
+        db.query(LLMRequest)
+        .filter(LLMRequest.id == request_id)
+        .filter(LLMRequest.caller_type == "git_repos")
+        .filter(LLMRequest.caller_id == f"generate-message-{repo_id}")
+        .first()
+    )
+    if not req:
+        raise HTTPException(status_code=404, detail="LLM 요청을 찾을 수 없습니다.")
+
+    message = req.raw_response.strip() if req.status == "completed" and req.raw_response else ""
+    return {
+        "message": message,
+        "request_id": req.id,
+        "status": req.status,
+        "error": getattr(req, "error_message", None),
+    }
 
 
 @router.get("/{repo_id}/operations", response_model=List[schemas.OperationLogResponse])

@@ -190,61 +190,76 @@ async def smart_start_classification(
     if classification_status["running"]:
         raise HTTPException(status_code=400, detail="Classification already running")
 
-    # Phase 1: 폴더 자동 매핑
-    from ..workers.folder_classifier import FolderClassifier
-    classifier = FolderClassifier(db)
-    auto_map_result = classifier.auto_map_folders()
-
-    # Phase 2: unclear 폴더 파일만 추출 (pending이고 source_folder가 unclear인 파일)
-    # + source_folder가 NULL인 파일 (폴더 미매핑)
-    files = db.execute(text("""
-        SELECT fc.id, fc.file_path
-        FROM file_classifications fc
-        LEFT JOIN folder_mappings fm ON fc.source_folder_id = fm.id
-        WHERE fc.status = 'pending'
-          AND fc.ai_category_id IS NULL
-          AND (fm.folder_status IN ('unclear', 'flat', 'nested') OR fc.source_folder_id IS NULL)
-        ORDER BY fc.id
-    """)).fetchall()
-
-    total = len(files)
-
-    if total == 0:
-        return ClassifyResponse(
-            message=f"스마트 분류: 폴더 매핑 {auto_map_result['files_mapped']}건 완료, AI 분석 대상 없음",
-            total=0,
-            status="completed",
-        )
-
-    # 상태 초기화 (phase 추가)
     classification_status = {
         "running": True,
-        "total": total,
+        "total": 0,
         "processed": 0,
         "failed": 0,
         "current_file": None,
         "model": request.model,
-        "phase": "ai_classifying",
+        "phase": "smart_preparing",
         "smart": True,
-        "auto_map_result": auto_map_result,
+        "auto_map_result": None,
         "similarity_threshold": request.similarity_threshold,
     }
 
-    # 백그라운드 작업 시작 (기존 run_classification 재활용)
-    background_tasks.add_task(
-        run_classification,
-        files,
-        request.model,
-        request.batch_size,
-        request.gap_minutes,
-        request.max_workers,
-    )
+    background_tasks.add_task(run_smart_classification, request)
 
     return ClassifyResponse(
-        message=f"스마트 분류: 폴더 매핑 {auto_map_result['files_mapped']}건, AI 분석 {total}건 시작",
-        total=total,
+        message="스마트 분류 준비를 시작했습니다.",
+        total=0,
         status="running",
     )
+
+
+async def run_smart_classification(request: SmartClassifyRequest) -> None:
+    """Run folder auto-map and AI classification outside the HTTP request."""
+    global classification_status
+    from ..database import SessionLocal
+    from ..workers.folder_classifier import FolderClassifier
+
+    db = SessionLocal()
+    try:
+        classifier = FolderClassifier(db)
+        auto_map_result = classifier.auto_map_folders()
+
+        files = db.execute(text("""
+            SELECT fc.id, fc.file_path
+            FROM file_classifications fc
+            LEFT JOIN folder_mappings fm ON fc.source_folder_id = fm.id
+            WHERE fc.status = 'pending'
+              AND fc.ai_category_id IS NULL
+              AND (fm.folder_status IN ('unclear', 'flat', 'nested') OR fc.source_folder_id IS NULL)
+            ORDER BY fc.id
+        """)).fetchall()
+
+        total = len(files)
+        classification_status.update({
+            "total": total,
+            "phase": "ai_classifying" if total > 0 else "completed",
+            "auto_map_result": auto_map_result,
+        })
+
+        if total == 0:
+            classification_status["running"] = False
+            return
+
+        await run_classification(
+            files,
+            request.model,
+            request.batch_size,
+            request.gap_minutes,
+            request.max_workers,
+        )
+    except Exception as exc:
+        logger.exception("smart classification failed")
+        classification_status.update({
+            "running": False,
+            "phase": "failed",
+            "error": str(exc),
+        })
+    finally:
+        db.close()
 
 
 def _get_monitor_db_session():

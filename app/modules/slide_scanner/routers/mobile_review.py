@@ -5,16 +5,17 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from app.modules.slide_scanner.config import parse_mobile_device_aliases, settings
-from app.modules.slide_scanner.database import get_db
+from app.modules.slide_scanner.database import SessionLocal, get_db
 from app.modules.slide_scanner.services.mobile_delete import process_remote_delete_for_item
 from app.modules.slide_scanner.services.mobile_handoff import handoff_item_to_slides
+from app.modules.slide_scanner.services.task_store import create_task
 
 router = APIRouter(prefix="/mobile-review", tags=["slide-scanner"])
 _APPROVAL_STATUSES = {"PENDING", "APPROVED", "REJECTED"}
@@ -321,6 +322,18 @@ def remote_delete_mobile_item(item_id: int, db: Session = Depends(get_db)) -> di
     return payload
 
 
+@router.post("/{item_id}/remote-delete/tasks", status_code=202)
+def start_remote_delete_mobile_item_task(item_id: int, background_tasks: BackgroundTasks):
+    def runner() -> dict:
+        db = SessionLocal()
+        try:
+            return remote_delete_mobile_item(item_id, db)
+        finally:
+            db.close()
+
+    return create_task("slide-mobile-remote-delete", background_tasks, runner)
+
+
 @router.post("/{item_id}/remote-delete/retry")
 def retry_remote_delete_mobile_item(item_id: int, db: Session = Depends(get_db)) -> dict[str, Any]:
     row = _fetch_mobile_item_or_404(db, item_id)
@@ -336,6 +349,18 @@ def retry_remote_delete_mobile_item(item_id: int, db: Session = Depends(get_db))
     payload = dict(result)
     payload.update(_build_state_snapshot(state))
     return payload
+
+
+@router.post("/{item_id}/remote-delete/retry/tasks", status_code=202)
+def start_retry_remote_delete_mobile_item_task(item_id: int, background_tasks: BackgroundTasks):
+    def runner() -> dict:
+        db = SessionLocal()
+        try:
+            return retry_remote_delete_mobile_item(item_id, db)
+        finally:
+            db.close()
+
+    return create_task("slide-mobile-remote-delete-retry", background_tasks, runner)
 
 
 @router.post("/{item_id}/handoff")

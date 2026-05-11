@@ -3,6 +3,7 @@ System utility helpers — run_admin_command, send_redis_command
 """
 import asyncio
 import json
+import uuid
 
 
 async def run_admin_command(ps_cmd: str, success_msg: str) -> dict:
@@ -32,27 +33,58 @@ async def send_redis_command(
     timeout: int = 30,
     timeout_msg: str | None = None,
 ) -> dict:
-    """delete→lpush→brpop 패턴 공통 헬퍼.
+    """Redis command를 enqueue하고 command id를 즉시 반환한다.
 
     Args:
         redis_client: async Redis client
         cmd_key: 명령 큐 키 (e.g. "infra:commands")
         result_key: 결과 큐 키 (e.g. "infra:command_results")
         command: JSON 직렬화된 명령 문자열
-        timeout: brpop 타임아웃 (초)
-        timeout_msg: 타임아웃 시 반환 메시지 (None이면 기본 메시지)
+        timeout: legacy 인자. accepted/status 전환 후 request path에서 대기하지 않는다.
+        timeout_msg: legacy 인자. accepted/status 전환 후 request path에서 대기하지 않는다.
     """
     try:
-        await redis_client.delete(result_key)
-        await redis_client.lpush(cmd_key, command)
-
-        result = await redis_client.brpop(result_key, timeout=timeout)
-        if result:
-            _, result_data = result
-            result_json = json.loads(result_data) if isinstance(result_data, str) else json.loads(result_data.decode())
-            return {"success": result_json.get("success", False), "message": result_json.get("message", "완료")}
-        else:
-            msg = timeout_msg or f"응답 타임아웃 ({timeout}초)"
-            return {"success": False, "message": msg}
+        payload = json.loads(command)
+        command_id = payload.get("command_id") or uuid.uuid4().hex[:12]
+        payload["command_id"] = command_id
+        payload["result_key"] = f"{result_key}:{command_id}"
+        await redis_client.delete(payload["result_key"])
+        await redis_client.lpush(cmd_key, json.dumps(payload, ensure_ascii=False))
+        return {
+            "success": True,
+            "status": "accepted",
+            "command_id": command_id,
+            "result_key": payload["result_key"],
+            "message": "명령이 접수되었습니다.",
+        }
     except Exception as e:
         return {"success": False, "message": f"Redis 명령 전송 실패: {str(e)}"}
+
+
+async def get_redis_command_result(redis_client, result_key: str, command_id: str) -> dict:
+    """command-specific result key에서 결과를 non-blocking 조회한다."""
+    key = f"{result_key}:{command_id}"
+    try:
+        raw = await redis_client.lindex(key, 0)
+        if raw is None:
+            return {
+                "success": True,
+                "status": "pending",
+                "command_id": command_id,
+                "message": "명령 처리 대기 중입니다.",
+            }
+        data = json.loads(raw) if isinstance(raw, str) else json.loads(raw.decode())
+        return {
+            "success": bool(data.get("success", False)),
+            "status": "completed" if data.get("success", False) else "failed",
+            "command_id": command_id,
+            "message": data.get("message", "완료"),
+            "result": data,
+        }
+    except Exception as e:
+        return {
+            "success": False,
+            "status": "failed",
+            "command_id": command_id,
+            "message": f"Redis 명령 결과 조회 실패: {str(e)}",
+        }

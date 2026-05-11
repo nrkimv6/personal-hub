@@ -250,7 +250,7 @@
         commitMsg = result.message;
         showToast('커밋 메시지가 생성되었습니다.');
       } else {
-        showToast('메시지 생성 실패 (LLM 처리 대기 중)', 'error');
+        showToast(`메시지 생성 요청 접수됨 (#${result.request_id})`);
       }
     } catch (e) {
       showToast('메시지 생성 실패: ' + (e instanceof Error ? e.message : ''), 'error');

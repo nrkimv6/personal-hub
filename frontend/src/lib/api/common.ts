@@ -30,6 +30,49 @@ import type {
   EntitySourceList
 } from '../types';
 
+interface UrlImportTask<T> {
+  task_id: string;
+  status: 'pending' | 'running' | 'completed' | 'failed';
+  phase?: string;
+  result?: T | null;
+  error?: string | null;
+}
+
+type BusinessUrlImportResponse = {
+  success: boolean;
+  message: string;
+  business_id?: number;
+  item_id?: number;
+  schedule_id?: number;
+  parsed_info?: Record<string, unknown>;
+  business?: { id: number; name: string; [key: string]: unknown };
+  biz_item?: { id: number; name: string; [key: string]: unknown };
+  business_details?: Record<string, unknown>;
+  item_details?: Record<string, unknown>;
+};
+
+function wait(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function pollUrlImportTask<T>(
+  taskPath: string,
+  taskId: string,
+  fallbackError: string,
+): Promise<T> {
+  for (let attempt = 0; attempt < 120; attempt += 1) {
+    const task = await request<UrlImportTask<T>>(`${taskPath}/${taskId}`);
+    if (task.status === 'completed' && task.result) {
+      return task.result;
+    }
+    if (task.status === 'failed') {
+      throw new Error(task.error || fallbackError);
+    }
+    await wait(1000);
+  }
+  throw new Error(fallbackError);
+}
+
 // ============================================================
 // BrowserProfile API (브라우저 프로필)
 // ============================================================
@@ -225,22 +268,14 @@ export const businessApi = {
     time_range?: string;
     max_bookings_per_schedule?: number;
     fetch_details?: boolean;
-  }) =>
-    request<{
-      success: boolean;
-      message: string;
-      business_id?: number;
-      item_id?: number;
-      schedule_id?: number;
-      parsed_info?: Record<string, unknown>;
-      business?: { id: number; name: string; [key: string]: unknown };
-      biz_item?: { id: number; name: string; [key: string]: unknown };
-      business_details?: Record<string, unknown>;
-      item_details?: Record<string, unknown>;
-    }>('/businesses/import-url', {
+  }) => request<UrlImportTask<BusinessUrlImportResponse>>('/businesses/import-url/tasks', {
       method: 'POST',
       body: JSON.stringify(data)
-    })
+    }).then((task) => pollUrlImportTask<BusinessUrlImportResponse>(
+      '/businesses/import-url/tasks',
+      task.task_id,
+      '업체 URL 가져오기 작업이 완료되지 않았습니다.',
+    ))
 };
 
 // ============================================================

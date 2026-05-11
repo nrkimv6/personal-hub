@@ -245,10 +245,6 @@ _ENGINE_CLI_COMMANDS: dict[str, str] = {
     "gemini": "gemini",
 }
 
-# socket_timeout(REDIS_CONNECTION_TIMEOUT=5s)보다 반드시 짧게 유지.
-# brpop timeout >= socket_timeout 이면 소켓 레벨 TimeoutError가 먼저 발생하여 500 에러.
-_BRPOP_TIMEOUT_SEC = 4
-
 
 @router.post("/profiles/{engine}/{name}/launch-cli")
 async def launch_cli(
@@ -264,6 +260,7 @@ async def launch_cli(
     public(8000)에서는 접근 불가.
     """
     import json
+    import uuid
     from app.shared.redis.client import RedisClient
     from app.modules.claude_worker.services.profile_env import ENGINE_ENV_KEYS
     from app.modules.claude_worker.services.profile_store import load_profiles
@@ -292,9 +289,14 @@ async def launch_cli(
             "message": f"Redis 연결 없음. 수동으로 실행하세요: {manual_cmd}",
         }
 
+    command_id = uuid.uuid4().hex
+    result_key = f"worker:launch-cli:results:{command_id}"
+
     # payload 조립
     launch_payload = json.dumps({
         "action": "launch-cli",
+        "command_id": command_id,
+        "result_key": result_key,
         "engine": engine,
         "name": name,
         "config_dir": profile.get("config_dir"),
@@ -304,21 +306,53 @@ async def launch_cli(
     }, ensure_ascii=False)
 
     try:
-        # 이전 결과 비우기 (race condition 방지)
-        await redis_client.delete("worker:launch-cli:results")
-
         # 명령 전송
         await redis_client.lpush("worker:launch-cli", launch_payload)
-
-        # 결과 대기 (_BRPOP_TIMEOUT_SEC < socket_timeout 유지 필수)
-        result = await redis_client.brpop("worker:launch-cli:results", timeout=_BRPOP_TIMEOUT_SEC)
     except Exception as e:
         # socket_timeout 초과, 연결 끊김 등 Redis 예외 → 500 방지
         return {"status": "error", "message": f"Redis 오류: {e}"}
 
-    if result is None:
-        return {"status": "timeout", "message": "명령 전송됨, 리스너 응답 대기 타임아웃"}
+    return {
+        "success": True,
+        "status": "accepted",
+        "command_id": command_id,
+        "result_key": result_key,
+        "message": "CLI 실행 명령이 접수되었습니다.",
+    }
 
-    _, result_data = result
+
+@router.get("/profiles/{engine}/{name}/launch-cli/commands/{command_id}")
+async def get_launch_cli_result(
+    engine: str,
+    name: str,
+    command_id: str,
+    admin: UserInfo = Depends(require_admin),
+):
+    """launch-cli 릴레이 결과를 non-blocking으로 조회한다."""
+    import json
+    from app.shared.redis.client import RedisClient
+
+    redis_client = await RedisClient.get_client()
+    if not redis_client:
+        return {"status": "redis_unavailable", "message": "Redis 연결 없음"}
+
+    result_key = f"worker:launch-cli:results:{command_id}"
+    try:
+        result_data = await redis_client.lindex(result_key, 0)
+    except Exception as e:
+        return {"status": "error", "message": f"Redis 오류: {e}"}
+
+    if result_data is None:
+        return {
+            "success": True,
+            "status": "pending",
+            "command_id": command_id,
+            "engine": engine,
+            "profile": name,
+        }
+
     result_json = json.loads(result_data if isinstance(result_data, str) else result_data.decode())
-    return result_json
+    return {
+        "command_id": command_id,
+        **result_json,
+    }

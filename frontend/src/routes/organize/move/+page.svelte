@@ -2,6 +2,7 @@
 	import { onMount } from 'svelte';
 	import PageHeader from '$lib/components/layout/PageHeader.svelte';
 	import { isApiGateClosedError } from '$lib/api/client';
+	import { FILE_CLASSIFIER_TIMEOUT_MS, fileClassifierFetch } from '$lib/api/file-classifier';
 
 	let previews = $state<any[]>([]);
 	let moveStatus = $state<any>(null);
@@ -11,7 +12,7 @@
 
 	async function fetchStatus() {
 		try {
-			const res = await fetch('/api/fc/move/status');
+			const res = await fileClassifierFetch('/move/status');
 			if (res.ok) moveStatus = await res.json();
 		} catch (e) {
 			message = isApiGateClosedError(e) ? 'API 서버 재시작 중' : '이동 상태 조회 실패';
@@ -21,11 +22,11 @@
 	async function loadPreview() {
 		isLoading = true;
 		try {
-			const res = await fetch('/api/fc/move/preview', {
+			const res = await fileClassifierFetch('/move/preview', {
 				method: 'POST',
 				headers: { 'Content-Type': 'application/json' },
 				body: JSON.stringify({ file_ids: null })
-			});
+			}, FILE_CLASSIFIER_TIMEOUT_MS.command);
 			if (res.ok) {
 				const data = await res.json();
 				previews = data.items || [];
@@ -50,11 +51,11 @@
 
 	async function executeMove(ids?: number[]) {
 		try {
-			const res = await fetch('/api/fc/move/execute', {
+			const res = await fileClassifierFetch('/move/execute', {
 				method: 'POST',
 				headers: { 'Content-Type': 'application/json' },
 				body: JSON.stringify({ file_ids: ids || null })
-			});
+			}, FILE_CLASSIFIER_TIMEOUT_MS.longCommand);
 			if (res.ok) {
 				const data = await res.json();
 				message = `${data.moved}개 이동 완료, 오류: ${data.errors}개`;
@@ -68,7 +69,7 @@
 
 	async function undoMove(file_id: number) {
 		try {
-			const res = await fetch(`/api/fc/move/undo/${file_id}`, { method: 'POST' });
+			const res = await fileClassifierFetch(`/move/undo/${file_id}`, { method: 'POST' }, FILE_CLASSIFIER_TIMEOUT_MS.command);
 			if (res.ok) {
 				message = '되돌리기 완료';
 				await loadPreview();

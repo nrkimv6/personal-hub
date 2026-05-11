@@ -186,7 +186,7 @@ class ExecutorService:
         self.async_redis = self.conn.async_redis
         self.state = RunnerState(self.async_redis, self._runner_key,
                                   self._is_pid_alive, self._force_cleanup_state)
-        self.merge = MergeService(self.async_redis, self._runner_key, self._send_command)
+        self.merge = MergeService(self.async_redis, self._runner_key, self._enqueue_command)
 
     def reconnect(self):
         """환경변수를 반영하여 Redis 클라이언트를 재연결합니다."""
@@ -195,7 +195,7 @@ class ExecutorService:
         self.async_redis = self.conn.async_redis
         self.state = RunnerState(self.async_redis, self._runner_key,
                                   self._is_pid_alive, self._force_cleanup_state)
-        self.merge = MergeService(self.async_redis, self._runner_key, self._send_command)
+        self.merge = MergeService(self.async_redis, self._runner_key, self._enqueue_command)
 
     async def _check_redis_and_listener(self):
         """Redis 연결 + command listener 존재 여부 사전 확인"""
@@ -518,6 +518,40 @@ class ExecutorService:
         _, raw = result
         return json.loads(raw)
 
+    async def _enqueue_command(self, command: dict, timeout: int = COMMAND_TIMEOUT) -> dict:
+        """Redis command를 enqueue하고 command result key를 즉시 반환한다."""
+        if "command_id" not in command:
+            command = {**command, "command_id": uuid.uuid4().hex[:8]}
+        result_key = f"{RESULTS_KEY}:{command['command_id']}"
+        await self.async_redis.delete(result_key)
+        await self.async_redis.lpush(COMMANDS_KEY, json.dumps(command, ensure_ascii=False))
+        return {
+            "success": True,
+            "status": "accepted",
+            "command_id": command["command_id"],
+            "result_key": result_key,
+            "message": "Command accepted",
+        }
+
+    async def get_command_result(self, command_id: str) -> dict:
+        result_key = f"{RESULTS_KEY}:{command_id}"
+        raw = await self.async_redis.lindex(result_key, 0)
+        if raw is None:
+            return {
+                "success": True,
+                "status": "pending",
+                "command_id": command_id,
+                "message": "Command pending",
+            }
+        data = json.loads(raw)
+        return {
+            "success": bool(data.get("success", False)),
+            "status": "completed" if data.get("success", False) else "failed",
+            "command_id": command_id,
+            "message": data.get("message", "Completed"),
+            "result": data,
+        }
+
     async def start_dev_runner(self, request: RunRequest) -> RunStatusResponse:
         """plan-runner 실행 시작 - Redis 명령 전송 (비동기, 멀티 runner 지원)"""
         # Redis + listener 사전 확인
@@ -726,137 +760,22 @@ class ExecutorService:
                 f"{SESSION_ID_KEY_PREFIX}{runner_id}", session_id, ex=86400
             )
 
-            result_data = await self._send_command(command)
-            if result_data is None:
-                await self._cleanup_runner_state(runner_id, reason="start_timeout")
-                _release_claim_safe(_new_claim_id)
-                raise HTTPException(
-                    status_code=504,
-                    detail="Command timeout - listener may not be responding"
-                )
-
-            if not result_data.get("success"):
-                message = result_data.get("message", "Failed to start")
-                gate_evidence_summary = _coerce_gate_evidence_summary(result_data.get("gate_evidence_summary"))
-                _release_claim_safe(_new_claim_id)
-                if result_data.get("reason") == "reserved_status":
-                    raise HTTPException(
-                        status_code=409,
-                        detail=_build_gate_failure_detail(message, gate_evidence_summary),
-                    )
-                if self._is_codex_preflight_failure(resolved_engine, resolved_fix_engine, message):
-                    raise HTTPException(
-                        status_code=422,
-                        detail=_build_gate_failure_detail(message, gate_evidence_summary),
-                    )
-                raise HTTPException(
-                    status_code=500,
-                    detail=_build_gate_failure_detail(message, gate_evidence_summary),
-                )
-
-            # 기존 워커에 attach된 경우 → 기존 runner_id로 상태 반환 (새 claim이 있으면 정리)
-            if result_data.get("status") == "attached":
-                _release_claim_safe(_new_claim_id)
-                existing_id = result_data["runner_id"]
-                fields = await self._get_runner_fields(existing_id, "pid", "plan_file", "start_time", "execution_count", "engine")
-                existing_pid = fields.get("pid")
-                existing_start_time_str = fields.get("start_time")
-                existing_engine = fields.get("engine") or resolved_engine
-                existing_exec_count_raw = fields.get("execution_count")
-                existing_exec_count = None
-                if existing_exec_count_raw is not None:
-                    try:
-                        existing_exec_count = int(existing_exec_count_raw)
-                    except (TypeError, ValueError):
-                        existing_exec_count = None
-                # 같은 runner_id로 중복 start 시 기존 session_id 재사용 (정책: 세션 연속성 유지)
-                existing_session_id = await self.async_redis.get(f"{SESSION_ID_KEY_PREFIX}{existing_id}")
-                if not existing_session_id:
-                    logger.warning(
-                        f"[session] attached runner_id={existing_id} session_id not found in Redis, issuing new UUID"
-                    )
-                    existing_session_id = str(uuid.uuid4())
-                _attach_plan_file = fields.get("plan_file") or request.plan_file
-                self._best_effort_upsert_runner_state(
-                    {
-                        "runner_id": existing_id,
-                        "plan_file": _attach_plan_file or request.plan_file or "__ALL_PLANS__",
-                        "project": "monitor-page",
-                        "status": "running",
-                        "started_at": datetime.fromisoformat(existing_start_time_str) if existing_start_time_str else datetime.now(),
-                        "metadata": {
-                            "engine": existing_engine,
-                            "trigger": trigger,
-                            "session_id": existing_session_id,
-                            "execution_count": existing_exec_count,
-                        },
-                    }
-                )
-                # attached 케이스: 기존 claim 요약 조회
-                _attach_claim_id: Optional[str] = None
-                _attach_claim_state: Optional[str] = None
-                if _attach_plan_file:
-                    try:
-                        from app.database import SessionLocal as _ACSLocal
-                        from app.modules.dev_runner.services.plan_execution_claim_service import (
-                            get_claim_for_plan as _get_claim_for_plan,
-                        )
-                        _ac_db = _ACSLocal()
-                        try:
-                            _ac = _get_claim_for_plan(_ac_db, _attach_plan_file)
-                            if _ac:
-                                _attach_claim_id = _ac.claim_id
-                                _attach_claim_state = _ac.state
-                        finally:
-                            _ac_db.close()
-                    except Exception as _ac_err:
-                        logger.debug(f"[claim] attached claim 조회 실패 (무시): {_ac_err}")
-                return RunStatusResponse(
-                    running=True,
-                    runner_id=existing_id,
-                    attached=True,
-                    engine=existing_engine,
-                    pid=int(existing_pid) if existing_pid else None,
-                    plan_file=_attach_plan_file,
-                    start_time=datetime.fromisoformat(existing_start_time_str) if existing_start_time_str else None,
-                    current_cycle=0,
-                    execution_count=existing_exec_count,
-                    listener_alive=True,
-                    redis_connected=True,
-                    session_id=existing_session_id,
-                    claim_id=_attach_claim_id,
-                    claim_state=_attach_claim_state,
-                    claim_owner_runner_id=existing_id,
-                    claim_message="기존 실행에 연결됨" if _attach_claim_id else None,
-                )
-
-            # Redis에서 per-runner 상태 조회
-            fields = await self._get_runner_fields(runner_id, "pid", "plan_file", "start_time", "execution_count")
-            pid = fields["pid"]
-            plan_file = fields["plan_file"]
-            start_time_str = fields["start_time"]
-            execution_count_raw = fields["execution_count"]
-            execution_count = None
-            if execution_count_raw is not None:
-                try:
-                    execution_count = int(execution_count_raw)
-                except (TypeError, ValueError):
-                    execution_count = None
+            accepted = await self._enqueue_command(command)
+            accepted_at = datetime.now()
 
             self._best_effort_upsert_runner_state(
                 {
                     "runner_id": runner_id,
-                    "plan_file": plan_file or request.plan_file or "__ALL_PLANS__",
+                    "plan_file": request.plan_file or "__ALL_PLANS__",
                     "project": "monitor-page",
-                    "status": "running",
-                    "started_at": datetime.fromisoformat(start_time_str) if start_time_str else datetime.now(),
+                    "status": "starting",
+                    "started_at": accepted_at,
                     "metadata": {
                         "engine": resolved_engine,
                         "fix_engine": resolved_fix_engine,
                         "trigger": trigger,
                         "session_id": session_id,
-                        "execution_count": execution_count,
-                        "pid": pid,
+                        "command_id": accepted["command_id"],
                     },
                 }
             )
@@ -865,11 +784,11 @@ class ExecutorService:
                 running=True,
                 runner_id=runner_id,
                 engine=resolved_engine,
-                pid=int(pid) if pid else None,
-                plan_file=plan_file or request.plan_file,
-                start_time=datetime.fromisoformat(start_time_str) if start_time_str else None,
+                pid=None,
+                plan_file=request.plan_file,
+                start_time=accepted_at,
                 current_cycle=0,
-                execution_count=execution_count,
+                execution_count=None,
                 listener_alive=True,
                 redis_connected=True,
                 session_id=session_id,
@@ -907,12 +826,12 @@ class ExecutorService:
     def _sync_merge(self):
         """merge를 on-demand 생성하고 async_redis/fn들을 현재 값으로 동기화 (테스트 mock 지원)."""
         if not hasattr(self, "merge") or self.merge is None:
-            self.merge = MergeService(self.async_redis, self._runner_key, self._send_command)
+            self.merge = MergeService(self.async_redis, self._runner_key, self._enqueue_command)
         else:
             if self.merge.async_redis is not self.async_redis:
                 self.merge.async_redis = self.async_redis
             self.merge._runner_key = self._runner_key
-            self.merge._send_command = self._send_command
+            self.merge._send_command = self._enqueue_command
 
     async def _correct_pid_state(
         self, rid: str, status: str, pid_str: str | None, caller: str = ""
@@ -1037,19 +956,13 @@ class ExecutorService:
                 "timestamp": datetime.now().isoformat(),
             }
 
-            result_data = await self._send_command(command)
-            if result_data is None:
-                # listener 무응답 → 프로세스가 죽었을 가능성 → 상태 강제 정리
-                logger.warning("[dev-runner] listener 무응답, Redis 상태 강제 정리")
-                await self._cleanup_runner_state(runner_id, reason="stop_timeout")
-                return {"message": "Force cleaned (listener not responding)"}
-
-            if not result_data.get("success"):
-                # stop 실패해도 상태 정리
-                await self._cleanup_runner_state(runner_id, reason="stop_command_failed")
-                return {"message": f"Force cleaned: {result_data.get('message', '')}"}
-
-            return {"message": "Stopped successfully"}
+            accepted = await self._enqueue_command(command)
+            return {
+                "success": True,
+                "status": "accepted",
+                "command_id": accepted["command_id"],
+                "message": "Stop command accepted",
+            }
 
         except redis.ConnectionError:
             raise HTTPException(
@@ -1810,8 +1723,8 @@ class ExecutorService:
         """runner에 명령 전송 (retry-merge, cleanup-worktree 등)
 
         extra: 추가 payload — command dict에 병합되어 Redis에 전송됨 (retry-merge Redis 키 재발급 등에 활용)
-        Redis command write remains authoritative in this mirror stage; DB is updated only after
-        the command response so queue control cannot drift because of a DB write failure.
+        Redis command write remains authoritative in this mirror stage. The route returns an
+        accepted command id and result polling reads the command-specific result key.
         """
         try:
             await self.async_redis.ping()
@@ -1826,9 +1739,7 @@ class ExecutorService:
         }
         if extra:
             command.update(extra)
-        result_data = await self._send_command(command)
-        if result_data is None:
-            return {"success": False, "message": "Command timeout"}
+        result_data = await self._enqueue_command(command)
         if action in {"retry-merge", "resolve-conflict"}:
             payload = extra or {}
             self._best_effort_upsert_runner_state(

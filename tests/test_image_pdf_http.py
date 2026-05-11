@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from io import BytesIO
 import os
+from unittest.mock import patch
 
 import pytest
 from PIL import Image
@@ -13,7 +14,7 @@ pytestmark = pytest.mark.http
 
 
 @pytest.fixture
-def client():
+def client(test_db_session):
     from app.main import app
 
     with TestClient(app) as c:
@@ -35,24 +36,35 @@ def _upload(client, files=None, data=None):
 
 
 def test_convert_returns_pdf_R(client):
-    resp = _upload(client)
-    assert resp.status_code == 200
-    assert "application/pdf" in resp.headers.get("content-type", "")
-    assert resp.content.startswith(b"%PDF-")
+    with patch("app.routes.image_pdf.BackgroundTasks.add_task"):
+        resp = _upload(client)
+    assert resp.status_code == 202
+    body = resp.json()
+    assert body["task_id"]
+    assert body["status"] == "queued"
+    assert body["artifact_url"].endswith(f"/tasks/{body['task_id']}/result")
 
 
 def test_convert_content_disposition_filename_C(client):
-    resp = _upload(client, data={"output_name": "문서.pdf"})
-    assert resp.status_code == 200
-    header = resp.headers.get("content-disposition", "")
-    assert "filename*=UTF-8''" in header
-    assert "%EB%AC%B8%EC%84%9C.pdf" in header
+    with patch("app.routes.image_pdf.BackgroundTasks.add_task"):
+        resp = _upload(client, data={"output_name": "문서.pdf"})
+    assert resp.status_code == 202
+    task_id = resp.json()["task_id"]
+
+    status_resp = client.get(f"/api/v1/image-pdf/tasks/{task_id}")
+    assert status_resp.status_code == 200
+    assert status_resp.json()["download_filename"] == "문서.pdf"
 
 
 def test_convert_default_filename_R(client):
-    resp = _upload(client)
-    assert resp.status_code == 200
-    assert "image-pdf-" in resp.headers.get("content-disposition", "")
+    with patch("app.routes.image_pdf.BackgroundTasks.add_task"):
+        resp = _upload(client)
+    assert resp.status_code == 202
+    task_id = resp.json()["task_id"]
+
+    status_resp = client.get(f"/api/v1/image-pdf/tasks/{task_id}")
+    assert status_resp.status_code == 200
+    assert status_resp.json()["download_filename"].startswith("image-pdf-")
 
 
 def test_convert_multipart_validation_E(client):
@@ -87,10 +99,20 @@ def test_convert_unsupported_extension_E(client):
     assert resp.json()["detail"]["error"] == "unsupported_extension"
 
 
-def test_convert_corrupt_image_E(client):
-    resp = _upload(client, files=[("files", ("bad.jpg", BytesIO(b"not-image"), "image/jpeg"))])
-    assert resp.status_code == 422
-    assert resp.json()["detail"]["error"] == "corrupt"
+def test_convert_corrupt_image_E(client, monkeypatch):
+    with patch("app.routes.image_pdf.BackgroundTasks.add_task"):
+        resp = _upload(client, files=[("files", ("bad.jpg", BytesIO(b"not-image"), "image/jpeg"))])
+    assert resp.status_code == 202
+    task_id = resp.json()["task_id"]
+
+    from app import database
+    from app.routes import image_pdf as image_pdf_route
+
+    monkeypatch.setattr(image_pdf_route, "SessionLocal", database.SessionLocal)
+    image_pdf_route._run_task(task_id)
+    status_resp = client.get(f"/api/v1/image-pdf/tasks/{task_id}")
+    assert status_resp.status_code == 200
+    assert status_resp.json()["status"] == "failed"
 
 
 def test_convert_heic_when_unsupported_E(client, monkeypatch: pytest.MonkeyPatch):

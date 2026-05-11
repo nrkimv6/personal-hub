@@ -18,6 +18,32 @@ export interface ImagePdfConvertOptions {
 	outputName?: string | null;
 }
 
+export type ImagePdfTaskStatus = 'queued' | 'running' | 'completed' | 'failed';
+
+export interface ImagePdfTaskAcceptedResponse {
+	task_id: string;
+	status: ImagePdfTaskStatus;
+	artifact_url: string;
+}
+
+export interface ImagePdfTaskStatusResponse {
+	task_id: string;
+	status: ImagePdfTaskStatus;
+	source_names: string[];
+	file_count: number;
+	bw: boolean;
+	white: number;
+	black: number;
+	quality: number;
+	preserve_dpi: boolean;
+	download_filename?: string | null;
+	artifact_url?: string | null;
+	error_message?: string | null;
+	created_at: string;
+	started_at?: string | null;
+	completed_at?: string | null;
+}
+
 export interface ImagePdfErrorDetail {
 	error: string;
 	filename?: string | null;
@@ -86,10 +112,24 @@ export function getHealth(): Promise<ImagePdfHealthResponse> {
 	return request<ImagePdfHealthResponse>('/image-pdf/health');
 }
 
-export async function convertToPdf(
+async function parseTaskResponse<T>(response: Response): Promise<T> {
+	if (!response.ok) {
+		let detail: ImagePdfErrorDetail | string | undefined;
+		try {
+			const body = await response.json();
+			detail = body?.detail;
+		} catch {
+			detail = response.statusText;
+		}
+		throw new ImagePdfApiError(errorMessageFromDetail(detail), typeof detail === 'object' ? detail : undefined, response.status);
+	}
+	return response.json() as Promise<T>;
+}
+
+export async function createTask(
 	files: File[],
 	opts: ImagePdfConvertOptions
-): Promise<{ blob: Blob; filename: string }> {
+): Promise<ImagePdfTaskAcceptedResponse> {
 	const form = new FormData();
 	for (const file of files) {
 		form.append('files', file);
@@ -108,21 +148,15 @@ export async function convertToPdf(
 		body: form,
 		headers: authHeaders(),
 		credentials: 'include'
-	}, 120000);
+	}, 30000);
 
-	if (!response.ok) {
-		let detail: ImagePdfErrorDetail | string | undefined;
-		try {
-			const body = await response.json();
-			detail = body?.detail;
-		} catch {
-			detail = response.statusText;
-		}
-		throw new ImagePdfApiError(errorMessageFromDetail(detail), typeof detail === 'object' ? detail : undefined, response.status);
-	}
+	return parseTaskResponse<ImagePdfTaskAcceptedResponse>(response);
+}
 
-	const blob = await response.blob();
-	const filename =
-		parseContentDispositionFilename(response.headers.get('content-disposition')) || 'image-pdf.pdf';
-	return { blob, filename };
+export function getTask(taskId: string): Promise<ImagePdfTaskStatusResponse> {
+	return request<ImagePdfTaskStatusResponse>(`/image-pdf/tasks/${taskId}`);
+}
+
+export function getResultUrl(taskId: string): string {
+	return `${API_BASE}/image-pdf/tasks/${taskId}/result`;
 }

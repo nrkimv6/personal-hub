@@ -5,6 +5,7 @@
 	import type { InstagramPost, InstagramTag, LLMRequest } from '$lib/types';
 	import { shareWithFallback, isKakaoAvailable } from '$lib/utils/kakao';
 	import { toast } from '$lib/stores/toast';
+	import { fetchWithTimeout } from '$lib/api/client';
 
 	interface Props {
 		post: InstagramPost;
@@ -218,7 +219,7 @@
 	async function loadImageAsBase64(url: string): Promise<string> {
 		try {
 			const proxyUrl = `/api/v1/instagram/proxy-image?url=${encodeURIComponent(url)}`;
-			const response = await fetch(proxyUrl);
+			const response = await fetchWithTimeout(proxyUrl, {}, 15_000);
 			if (!response.ok) throw new Error('Proxy fetch failed');
 			const blob = await response.blob();
 			return new Promise((resolve, reject) => {

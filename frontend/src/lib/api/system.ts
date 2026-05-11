@@ -34,6 +34,53 @@ import type {
   VideoDownloadBatchResponse
 } from '../types';
 
+interface UrlImportTask<T> {
+  task_id: string;
+  status: 'pending' | 'running' | 'completed' | 'failed';
+  phase?: string;
+  result?: T | null;
+  error?: string | null;
+}
+
+interface AcceptedCommandResponse {
+  success: boolean;
+  message: string;
+  pid: number | null;
+  status?: 'accepted' | string | null;
+  command_id?: string | null;
+}
+
+interface CommandResultResponse {
+  success: boolean;
+  status: 'pending' | 'completed' | 'failed';
+  command_id: string;
+  message: string;
+  pid?: number | null;
+  result?: Record<string, unknown>;
+}
+
+function wait(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function pollUrlImportTask<T>(
+  taskPath: string,
+  taskId: string,
+  fallbackError: string,
+): Promise<T> {
+  for (let attempt = 0; attempt < 120; attempt += 1) {
+    const task = await request<UrlImportTask<T>>(`${taskPath}/${taskId}`);
+    if (task.status === 'completed' && task.result) {
+      return task.result;
+    }
+    if (task.status === 'failed') {
+      throw new Error(task.error || fallbackError);
+    }
+    await wait(1000);
+  }
+  throw new Error(fallbackError);
+}
+
 // ============================================================
 // 시스템 API
 // ============================================================
@@ -208,19 +255,21 @@ export const workerApi = {
   }>('/worker/status', options),
 
   // 시작
-  start: () => request<{ success: boolean; message: string; pid: number | null }>('/worker/start', {
+  start: () => request<AcceptedCommandResponse>('/worker/start', {
     method: 'POST'
   }),
 
   // 중지
-  stop: () => request<{ success: boolean; message: string; pid: number | null }>('/worker/stop', {
+  stop: () => request<AcceptedCommandResponse>('/worker/stop', {
     method: 'POST'
   }),
 
   // 재시작
-  restart: () => request<{ success: boolean; message: string; pid: number | null }>('/worker/restart', {
+  restart: () => request<AcceptedCommandResponse>('/worker/restart', {
     method: 'POST'
   }),
+
+  commandResult: (commandId: string) => request<CommandResultResponse>(`/worker/commands/${commandId}`),
 
   // 전체 모니터링 일시중지
   pause: () => request<{ success: boolean; message: string; pid: number | null }>('/worker/pause', {
@@ -372,11 +421,28 @@ export const eventApi = {
   },
 
   // URL에서 이벤트 가져오기
-  importFromUrl: (url: string, autoSave: boolean = false) =>
-    request<EventImportFromUrlResponse>('/events/import-from-url', {
+  importFromUrl: async (url: string, autoSave: boolean = false) => {
+    const duplicate = await eventApi.checkDuplicateUrl(url);
+    if (duplicate) {
+      return {
+        success: false,
+        is_event: true,
+        page_type: 'unknown',
+        extraction_method: 'skipped',
+        error: `동일 URL로 등록된 이벤트가 있습니다 (ID: ${duplicate.id})`,
+      } satisfies EventImportFromUrlResponse;
+    }
+
+    const task = await request<UrlImportTask<EventImportFromUrlResponse>>('/events/import-from-url/tasks', {
       method: 'POST',
       body: JSON.stringify({ url, auto_save: autoSave })
-    })
+    });
+    return pollUrlImportTask<EventImportFromUrlResponse>(
+      '/events/import-from-url/tasks',
+      task.task_id,
+      '이벤트 URL 가져오기 작업이 완료되지 않았습니다.',
+    );
+  }
 };
 
 // ============================================================

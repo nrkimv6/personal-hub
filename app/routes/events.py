@@ -4,11 +4,16 @@
 GET 엔드포인트는 공개, CUD 엔드포인트는 관리자 인증 필요
 """
 from typing import Optional
-from fastapi import APIRouter, Depends, Query, HTTPException
+from fastapi import APIRouter, BackgroundTasks, Depends, Query, HTTPException, status
 from sqlalchemy.orm import Session
 
-from app.database import get_db
+from app.database import SessionLocal, get_db
 from app.services.event_service import event_service
+from app.services.import_task_store import (
+    create_import_task,
+    get_import_task,
+    run_import_task,
+)
 from app.schemas.event import (
     EventCreate,
     EventUpdate,
@@ -140,6 +145,41 @@ def import_from_url(
     - generic: 기타 일반 웹페이지 (시맨틱 태그/OG 메타데이터 기반)
     """
     return event_service.import_from_url(db, data)
+
+
+async def _run_event_import_from_url_task(task_id: str, data: EventImportFromUrl) -> None:
+    db = SessionLocal()
+    try:
+        await run_import_task(task_id, lambda: event_service.import_from_url(db, data))
+    finally:
+        db.close()
+
+
+@router.post("/import-from-url/tasks", status_code=status.HTTP_202_ACCEPTED)
+def start_import_from_url_task(
+    data: EventImportFromUrl,
+    background_tasks: BackgroundTasks,
+    admin: UserInfo = Depends(require_admin),
+):
+    """
+    URL import를 task로 시작합니다. 중복 URL 확인은 /check-duplicate-url read API를 사용합니다.
+    """
+    task = create_import_task("event_url_import", data.url)
+    background_tasks.add_task(_run_event_import_from_url_task, task["task_id"], data)
+    return {
+        "task_id": task["task_id"],
+        "status": task["status"],
+        "phase": task["phase"],
+    }
+
+
+@router.get("/import-from-url/tasks/{task_id}")
+def get_import_from_url_task(task_id: str, admin: UserInfo = Depends(require_admin)):
+    task = get_import_task(task_id)
+    if not task or task.get("kind") != "event_url_import":
+        raise HTTPException(status_code=404, detail="Import task not found")
+    return task
+
 
 @router.get("/{event_id}", response_model=EventResponse)
 def get_event(event_id: int, db: Session = Depends(get_db)):

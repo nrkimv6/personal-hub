@@ -84,6 +84,13 @@
 		auto_resolvable: number;
 		needs_review: number;
 	}
+	interface DuplicateTaskStatus {
+		task_id: string;
+		kind: string;
+		status: 'queued' | 'running' | 'completed' | 'failed';
+		result?: any;
+		error_message?: string | null;
+	}
 
 	let galleryGroups = $state<GalleryGroup[]>([]);
 	let galleryStats = $state<GalleryStats>({ total: 0, auto_resolvable: 0, needs_review: 0 });
@@ -154,6 +161,31 @@
 
 	const currentPage = $derived(Math.floor(filter.skip / filter.limit) + 1);
 	const totalPages = $derived(Math.ceil(totalGroups / filter.limit));
+
+	function wait(ms: number): Promise<void> {
+		return new Promise((resolve) => setTimeout(resolve, ms));
+	}
+
+	async function runDuplicateTask<T>(endpoint: string, payload?: unknown, timeoutMs = 30000): Promise<T> {
+		const init: RequestInit = { method: 'POST' };
+		if (payload !== undefined) {
+			init.headers = { 'Content-Type': 'application/json' };
+			init.body = JSON.stringify(payload);
+		}
+		const res = await fetchWithTimeout(endpoint, init, timeoutMs);
+		if (!res.ok) throw new Error(`HTTP ${res.status}`);
+		const accepted = await res.json();
+		const taskId = accepted.task_id;
+		for (let attempt = 0; attempt < 120; attempt += 1) {
+			const statusRes = await fetchWithTimeout(`/api/ic/duplicates/tasks/${taskId}`, {}, 10000);
+			if (!statusRes.ok) throw new Error(`HTTP ${statusRes.status}`);
+			const task = (await statusRes.json()) as DuplicateTaskStatus;
+			if (task.status === 'completed') return task.result as T;
+			if (task.status === 'failed') throw new Error(task.error_message ?? '작업이 실패했습니다.');
+			await wait(1000);
+		}
+		throw new Error('작업 상태 확인 시간이 초과되었습니다.');
+	}
 
 	async function checkDetectStatus() {
 		try {
@@ -579,13 +611,7 @@
 		}
 
 		try {
-			const res = await fetchWithTimeout('/api/ic/duplicates/bulk-resolve', {
-				method: 'POST',
-				headers: { 'Content-Type': 'application/json' },
-				body: JSON.stringify({ resolutions })
-			});
-			if (!res.ok) throw new Error(`HTTP ${res.status}`);
-			const result = await res.json();
+			const result = await runDuplicateTask<any>('/api/ic/duplicates/bulk-resolve/tasks', { resolutions });
 
 			const msg = result.failed > 0
 				? `일괄 확정 완료! 성공: ${result.resolved}개, 실패: ${result.failed}개`
@@ -610,13 +636,7 @@
 		bulkTotal = highIds.length;
 		bulkResolved = 0;
 		try {
-			const res = await fetchWithTimeout('/api/ic/duplicates/auto-resolve', {
-				method: 'POST',
-				headers: { 'Content-Type': 'application/json' },
-				body: JSON.stringify({ filter: galleryFilter, strategy: 'quality_best', group_ids: highIds })
-			});
-			if (!res.ok) throw new Error(`HTTP ${res.status}`);
-			const result = await res.json();
+			const result = await runDuplicateTask<any>('/api/ic/duplicates/auto-resolve/tasks', { filter: galleryFilter, strategy: 'quality_best', group_ids: highIds });
 			bulkResolved = result.resolved ?? 0;
 			toast.success(`자동 확정 완료! ${result.resolved}개 그룹 처리됨`);
 			await galleryRemoveAndFill(highIds);
@@ -638,13 +658,7 @@
 		bulkTotal = ids.length;
 		bulkResolved = 0;
 		try {
-			const res = await fetchWithTimeout('/api/ic/duplicates/auto-resolve', {
-				method: 'POST',
-				headers: { 'Content-Type': 'application/json' },
-				body: JSON.stringify({ filter: galleryFilter, strategy: 'quality_best', group_ids: ids })
-			});
-			if (!res.ok) throw new Error(`HTTP ${res.status}`);
-			const result = await res.json();
+			const result = await runDuplicateTask<any>('/api/ic/duplicates/auto-resolve/tasks', { filter: galleryFilter, strategy: 'quality_best', group_ids: ids });
 			bulkResolved = result.resolved ?? 0;
 			toast.success(`선택 확정 완료! ${result.resolved}개 그룹 처리됨`);
 			groupSelection.clear();
@@ -666,9 +680,7 @@
 		pairGroupIds = [];
 		pairKeepFolder = null;
 		try {
-			const res = await fetchWithTimeout('/api/ic/duplicates/folder-pair-analysis', {}, 60000);
-			if (!res.ok) throw new Error(`HTTP ${res.status}`);
-			const data = await res.json();
+			const data = await runDuplicateTask<any>('/api/ic/duplicates/folder-pair-analysis/tasks');
 			folderPairs = data.pairs;
 		} catch (err: any) {
 			toast.error(`폴더 쌍 분석 실패: ${getErrorMessage(err)}`);
@@ -716,17 +728,11 @@
 
 		pairResolving = true;
 		try {
-			const res = await fetchWithTimeout('/api/ic/duplicates/resolve-by-folder-pair', {
-				method: 'POST',
-				headers: { 'Content-Type': 'application/json' },
-				body: JSON.stringify({
-					keep_folder: keepFolder,
-					other_folder: otherFolder,
-					group_ids: pairGroupIds,
-				})
-			}, 120000);
-			if (!res.ok) throw new Error(`HTTP ${res.status}`);
-			const result = await res.json();
+			const result = await runDuplicateTask<any>('/api/ic/duplicates/resolve-by-folder-pair/tasks', {
+				keep_folder: keepFolder,
+				other_folder: otherFolder,
+				group_ids: pairGroupIds,
+			});
 			toast.success(`폴더 쌍 해결 완료! 보관: ${result.resolved_count}개 그룹, 삭제: ${result.deleted_count}개 파일`);
 			showFolderPairModal = false;
 			const resolvedIds = (result.details ?? []).map((d: { group_id: number }) => d.group_id);
@@ -747,9 +753,7 @@
 		folderFileGroupIds = [];
 		try {
 			// 요약만 로드 (파일 상세 없이 폴더 목록 + 카운트만)
-			const res = await fetchWithTimeout('/api/ic/duplicates/folder-analysis', {}, 60000);
-			if (!res.ok) throw new Error(`HTTP ${res.status}`);
-			const data = await res.json();
+			const data = await runDuplicateTask<any>('/api/ic/duplicates/folder-analysis/tasks');
 			folderAnalysis = data.folders;
 			folderTotalPending = data.total_pending_groups;
 		} catch (err: any) {
@@ -800,16 +804,10 @@
 
 		folderResolving = true;
 		try {
-			const res = await fetchWithTimeout('/api/ic/duplicates/resolve-by-folder', {
-				method: 'POST',
-				headers: { 'Content-Type': 'application/json' },
-				body: JSON.stringify({
-					keep_folder: selectedKeepFolder,
-					group_ids: folderAffectedGroupIds
-				})
-			}, 120000);
-			if (!res.ok) throw new Error(`HTTP ${res.status}`);
-			const result = await res.json();
+			const result = await runDuplicateTask<any>('/api/ic/duplicates/resolve-by-folder/tasks', {
+				keep_folder: selectedKeepFolder,
+				group_ids: folderAffectedGroupIds
+			});
 			toast.success(`일괄 해결 완료! 보관: ${result.resolved_count}개 그룹, 삭제: ${result.deleted_count}개 파일`);
 			showFolderModal = false;
 			const resolvedIds = (result.details ?? []).map((d: { group_id: number }) => d.group_id);
