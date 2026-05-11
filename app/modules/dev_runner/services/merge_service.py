@@ -53,12 +53,13 @@ class MergeService:
                         result.append(await self._merge_queue_item(rid, status))
 
             # 2) done/failed: merge-results 최근 10건
-            for raw in await self.async_redis.lrange("plan-runner:merge-results", 0, 9):
+            for idx, raw in enumerate(await self.async_redis.lrange("plan-runner:merge-results", 0, 9)):
                 try:
                     item = json.loads(raw)
                     rid = item.get("runner_id", "")
                     status = item.get("status", "done")
                     result.append({
+                        "queue_key": self._merge_queue_history_key(idx, item),
                         "runner_id": rid,
                         "branch": item.get("branch", ""),
                         "plan_file": item.get("plan_file", ""),
@@ -93,6 +94,7 @@ class MergeService:
     async def _merge_queue_item(self, runner_id: str, status: str) -> dict:
         """runner Redis 키에서 상세 정보 조회"""
         return {
+            "queue_key": f"active:{status}:{runner_id}",
             "runner_id": runner_id,
             "branch": await self.async_redis.get(self._runner_key(runner_id, "branch")) or "",
             "plan_file": await self.async_redis.get(self._runner_key(runner_id, "plan_file")) or "",
@@ -101,6 +103,14 @@ class MergeService:
             "timestamp": await self.async_redis.get(self._runner_key(runner_id, "start_time")) or "",
             "worktree_path": await self.async_redis.get(self._runner_key(runner_id, "worktree_path")) or "",
         }
+
+    def _merge_queue_history_key(self, idx: int, item: dict) -> str:
+        """Stable-enough UI identity for merge-results rows with duplicate runner_id."""
+        runner_id = item.get("runner_id", "")
+        status = item.get("status", "done")
+        timestamp = item.get("timestamp", "")
+        branch = item.get("branch", "")
+        return f"history:{idx}:{runner_id}:{status}:{timestamp}:{branch}"
 
     # ------------------------------------------------------------------
     # merge status / history

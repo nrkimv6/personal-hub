@@ -1062,6 +1062,7 @@ class CurrentTrackingResponse(BaseModel):
 
 class MergeQueueItem(BaseModel):
     """Merge Queue 항목 스키마"""
+    queue_key: Optional[str] = None
     runner_id: str
     branch: str
     plan_file: str

@@ -1,6 +1,8 @@
 """실행 제어 API 테스트 - fakeredis + patch.object 적용"""
 
 import json
+from pathlib import Path
+import re
 from unittest.mock import patch, AsyncMock, MagicMock
 from datetime import datetime
 from types import SimpleNamespace
@@ -917,3 +919,100 @@ class TestMergeApprovalPayload:
         assert data["reason"] == "service_lock"
         assert "MERGE_PRECHECK_FAILED[service_lock]" in data["message"]
         assert data["gate_evidence_summary"]["reason"] == "service_lock"
+
+
+class TestMergeQueueReadContract:
+    async def test_get_merge_queue_right_duplicate_completed_runner_ids_return_stable_items(
+        self,
+        client,
+        mock_executor_redis,
+    ):
+        """R: duplicate completed runner_id rows stay renderable with unique queue_key values."""
+        fake_async = mock_executor_redis["async"]
+        rid = "duplicate-completed-001"
+        for timestamp, branch in (
+            ("2026-05-11T10:00:01", "impl/first"),
+            ("2026-05-11T10:00:02", "impl/second"),
+        ):
+            await fake_async.lpush(
+                "plan-runner:merge-results",
+                json.dumps(
+                    {
+                        "runner_id": rid,
+                        "branch": branch,
+                        "plan_file": "docs/plan/duplicate.md",
+                        "timestamp": timestamp,
+                        "status": "done",
+                        "success": True,
+                    }
+                ),
+            )
+
+        response = await client.get("/api/v1/dev-runner/merge-queue")
+
+        assert response.status_code == 200
+        rows = [row for row in response.json() if row["runner_id"] == rid]
+        assert len(rows) == 2
+        assert len({row["queue_key"] for row in rows}) == 2
+        assert all(row["queue_key"].startswith("history:") for row in rows)
+
+    async def test_get_merge_queue_boundary_active_runner_not_dropped_by_completed_history_duplicate(
+        self,
+        client,
+        mock_executor_redis,
+    ):
+        """B: active queue and completed history can contain the same runner_id."""
+        fake_async = mock_executor_redis["async"]
+        rid = "duplicate-active-001"
+        prefix = f"plan-runner:runners:{rid}"
+        await fake_async.rpush("plan-runner:merge-queue:monitor-page", rid)
+        await fake_async.set(f"{prefix}:branch", "impl/current")
+        await fake_async.set(f"{prefix}:plan_file", "docs/plan/current.md")
+        await fake_async.set(f"{prefix}:start_time", "2026-05-11T10:00:00")
+        await fake_async.lpush(
+            "plan-runner:merge-results",
+            json.dumps(
+                {
+                    "runner_id": rid,
+                    "branch": "impl/old",
+                    "plan_file": "docs/plan/old.md",
+                    "timestamp": "2026-05-11T09:00:00",
+                    "status": "done",
+                    "success": True,
+                }
+            ),
+        )
+
+        response = await client.get("/api/v1/dev-runner/merge-queue")
+
+        assert response.status_code == 200
+        rows = [row for row in response.json() if row["runner_id"] == rid]
+        assert {row["status"] for row in rows} == {"merging", "done"}
+        assert any(row["queue_key"] == f"active:merging:{rid}" for row in rows)
+
+    def test_get_merge_queue_correct_read_only_does_not_call_blocking_turn_wait(self):
+        """Co: merge queue API/service read path must not call BRPOP/merge-turn wait helpers."""
+        root = Path(__file__).resolve().parents[1]
+        service_source = (root / "services" / "merge_service.py").read_text(encoding="utf-8")
+        route_source = (root / "routes" / "runner.py").read_text(encoding="utf-8")
+
+        def body(source: str, function_name: str) -> str:
+            marker = f"async def {function_name}"
+            start = source.index(marker)
+            next_def = source.find("\n    async def ", start + len(marker))
+            if next_def == -1:
+                next_def = source.find("\n    def ", start + len(marker))
+            return source[start: next_def if next_def != -1 else len(source)]
+
+        read_bodies = "\n".join(
+            [
+                body(service_source, "get_merge_queue"),
+                body(service_source, "get_merge_queue_length"),
+                body(route_source, "get_merge_queue"),
+                body(route_source, "get_merge_queue_length"),
+            ]
+        )
+
+        assert "scan_iter" in read_bodies
+        assert "lrange" in read_bodies or "llen" in read_bodies
+        assert not re.search(r"\bbrpop\b|acquire_merge_turn|release_merge_turn|merge-turn", read_bodies, re.I)

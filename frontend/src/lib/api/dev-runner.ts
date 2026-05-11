@@ -603,6 +603,7 @@ export const devRunnerEventApi = {
 // ============================================================
 
 export interface MergeQueueItem {
+	queue_key?: string;
 	runner_id: string;
 	branch: string;
 	plan_file: string;
