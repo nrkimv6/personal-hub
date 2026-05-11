@@ -126,6 +126,19 @@ export interface PdfExportResponse {
   filename: string;
 }
 
+export interface SlideScannerTaskAcceptedResponse {
+  task_id: string;
+  status: 'queued' | 'running' | 'completed' | 'failed';
+}
+
+export interface SlideScannerTaskStatusResponse<T = Record<string, unknown>> {
+  task_id: string;
+  kind: string;
+  status: 'queued' | 'running' | 'completed' | 'failed';
+  result?: T | null;
+  error_message?: string | null;
+}
+
 export interface SlideScannerSettings {
   scan_path?: string | null;
   output_path: string;
@@ -312,6 +325,35 @@ async function parseResponse<T>(response: Response): Promise<T> {
   return response.json() as Promise<T>;
 }
 
+function wait(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function runTask<T>(
+  endpoint: string,
+  body?: unknown,
+  timeoutMs = 30000
+): Promise<T> {
+  const response = await fetchWithTimeout(`${API_BASE}${endpoint}`, {
+    method: 'POST',
+    headers: {
+      ...(body !== undefined ? { 'Content-Type': 'application/json' } : {}),
+      ...authHeaders()
+    },
+    credentials: 'include',
+    body: body === undefined ? undefined : JSON.stringify(body)
+  }, timeoutMs);
+  const accepted = await parseResponse<SlideScannerTaskAcceptedResponse>(response);
+
+  for (let attempt = 0; attempt < 180; attempt += 1) {
+    const status = await request<SlideScannerTaskStatusResponse<T>>(`${BASE}/tasks/${accepted.task_id}`);
+    if (status.status === 'completed') return (status.result ?? {}) as T;
+    if (status.status === 'failed') throw new Error(status.error_message || '작업이 실패했습니다.');
+    await wait(1000);
+  }
+  throw new Error('작업 상태 확인 시간이 초과되었습니다.');
+}
+
 async function uploadSlide(
   file: File,
   options?: { sourceApp?: string; capturedAt?: string }
@@ -346,13 +388,10 @@ function transformSlide(
   aspectRatio?: AspectRatioValue,
   filters?: SlideFilterOptions | null
 ): Promise<SlideTransformResponse> {
-  return request<SlideTransformResponse>(`${BASE}/slides/${slideId}/transform`, {
-    method: 'POST',
-    body: JSON.stringify({
-      points,
-      aspect_ratio: aspectRatio && aspectRatio !== 'AUTO' ? aspectRatio : null,
-      filters: normalizeFilterPayload(filters)
-    })
+  return runTask<SlideTransformResponse>(`${BASE}/slides/${slideId}/transform/tasks`, {
+    points,
+    aspect_ratio: aspectRatio && aspectRatio !== 'AUTO' ? aspectRatio : null,
+    filters: normalizeFilterPayload(filters)
   });
 }
 
@@ -368,11 +407,8 @@ function reviewSlide(slideId: number, points: SlidePoint[]): Promise<SlideReview
 }
 
 function ocrSlide(slideId: number, languages?: string[]): Promise<SlideOcrResponse> {
-  return request<SlideOcrResponse>(`${BASE}/slides/${slideId}/ocr`, {
-    method: 'POST',
-    body: JSON.stringify({
-      languages: languages?.length ? languages : null
-    })
+  return runTask<SlideOcrResponse>(`${BASE}/slides/${slideId}/ocr/tasks`, {
+    languages: languages?.length ? languages : null
   });
 }
 
@@ -434,14 +470,11 @@ function batchTransform(
   ids: number[],
   options?: { aspectRatio?: AspectRatioValue | null; filters?: SlideFilterOptions | null }
 ): Promise<BatchTransformResponse> {
-  return request<BatchTransformResponse>(`${BASE}/slides/batch-transform`, {
-    method: 'POST',
-    body: JSON.stringify({
-      ids,
-      aspect_ratio:
-        options?.aspectRatio && options.aspectRatio !== 'AUTO' ? options.aspectRatio : null,
-      filters: normalizeFilterPayload(options?.filters)
-    })
+  return runTask<BatchTransformResponse>(`${BASE}/slides/batch-transform/tasks`, {
+    ids,
+    aspect_ratio:
+      options?.aspectRatio && options.aspectRatio !== 'AUTO' ? options.aspectRatio : null,
+    filters: normalizeFilterPayload(options?.filters)
   });
 }
 
@@ -453,19 +486,30 @@ function archiveSlides(ids: number[]): Promise<ArchiveSlidesResponse> {
 }
 
 async function exportPdf(ids: number[], filename?: string): Promise<PdfExportResponse> {
-  const response = await fetchWithTimeout(`${API_BASE}${BASE}/export/pdf`, {
+  const acceptedResponse = await fetchWithTimeout(`${API_BASE}${BASE}/export/pdf/tasks`, {
     method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      ...authHeaders()
-    },
+    headers: { 'Content-Type': 'application/json', ...authHeaders() },
     credentials: 'include',
-    body: JSON.stringify({
-      ids,
-      filename: filename?.trim() || null
-    })
+    body: JSON.stringify({ ids, filename: filename?.trim() || null })
   });
+  const accepted = await parseResponse<SlideScannerTaskAcceptedResponse>(acceptedResponse);
 
+  let completed = false;
+  for (let attempt = 0; attempt < 180; attempt += 1) {
+    const status = await request<SlideScannerTaskStatusResponse<{ filename?: string }>>(`${BASE}/tasks/${accepted.task_id}`);
+    if (status.status === 'failed') throw new Error(status.error_message || 'PDF 내보내기 실패');
+    if (status.status === 'completed') {
+      completed = true;
+      break;
+    }
+    await wait(1000);
+  }
+  if (!completed) throw new Error('PDF 내보내기 상태 확인 시간이 초과되었습니다.');
+
+  const response = await fetchWithTimeout(`${API_BASE}${BASE}/export/pdf/tasks/${accepted.task_id}/result`, {
+    headers: authHeaders(),
+    credentials: 'include'
+  });
   if (!response.ok) {
     let message = response.statusText;
     try {
@@ -559,10 +603,8 @@ function rejectMobileItem(itemId: number, reason: string): Promise<MobileReviewU
 }
 
 function remoteDeleteMobileItem(itemId: number, retry = false): Promise<MobileRemoteDeleteResponse> {
-  const suffix = retry ? '/remote-delete/retry' : '/remote-delete';
-  return request<MobileRemoteDeleteResponse>(`${BASE}/mobile-review/${itemId}${suffix}`, {
-    method: 'POST'
-  });
+  const suffix = retry ? '/remote-delete/retry/tasks' : '/remote-delete/tasks';
+  return runTask<MobileRemoteDeleteResponse>(`${BASE}/mobile-review/${itemId}${suffix}`);
 }
 
 function handoffMobileItem(itemId: number): Promise<MobileHandoffResponse> {
