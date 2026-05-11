@@ -1,10 +1,14 @@
 """
-GraphQL API 상세정보 필드 추가 마이그레이션
+GraphQL API 상세정보 필드 추가 마이그레이션 (SQLite 전용 레거시)
 생성일: 2025-12-03
 요구사항: REQ-DATA-004 (업체/상품 상세정보 조회)
 
-실행 방법:
-    python -m app.migrations.003_add_graphql_detail_fields
+⚠️ LEGACY: SQLite 전용 마이그레이션 — PostgreSQL 전환 후(2026-04-10) 운영 DB에 실행 금지.
+   PG 환경에서는 003_add_graphql_detail_fields.sql 또는 SQLAlchemy metadata.create_all()이 대신한다.
+   컬럼은 app/models/business.py, app/models/biz_item.py 에 정의되어 있으며 PG에 이미 적용됨.
+
+실행 방법 (SQLite 테스트 환경에서만):
+    DATABASE_URL=sqlite:///data/test.db python -m app.migrations.003_add_graphql_detail_fields
 
 설명:
     - businesses 테이블에 위치정보, 연락처, API 동기화 시간 필드 추가
@@ -21,6 +25,21 @@ PROJECT_ROOT = Path(__file__).parent.parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
 from app.config import settings
+
+_SQLITE_LEGACY_GUARD_MSG = (
+    "003_add_graphql_detail_fields.py는 SQLite 전용 레거시 마이그레이션입니다.\n"
+    "현재 DATABASE_URL이 SQLite가 아닙니다: {url}\n"
+    "PostgreSQL 환경에서는 003_add_graphql_detail_fields.sql을 참조하거나 "
+    "SQLAlchemy metadata.create_all()을 사용하세요."
+)
+
+
+def _assert_sqlite_database() -> str:
+    """SQLite URL이 아닌 경우 즉시 종료하는 가드."""
+    url = settings.DATABASE_URL or ""
+    if not url.startswith("sqlite:///"):
+        raise RuntimeError(_SQLITE_LEGACY_GUARD_MSG.format(url=url))
+    return url.replace("sqlite:///", "")
 
 
 def get_existing_columns(cursor, table_name: str) -> set:
@@ -65,8 +84,8 @@ def create_index_if_not_exists(cursor, index_name: str, table_name: str, column_
 
 
 def migrate():
-    """마이그레이션 실행"""
-    db_path = settings.DATABASE_URL.replace("sqlite:///", "")
+    """마이그레이션 실행 (SQLite 전용 레거시)"""
+    db_path = _assert_sqlite_database()
     print(f"Database: {db_path}")
     print()
 
@@ -150,8 +169,8 @@ def migrate():
 
 
 def verify():
-    """마이그레이션 결과 검증"""
-    db_path = settings.DATABASE_URL.replace("sqlite:///", "")
+    """마이그레이션 결과 검증 (SQLite 전용 레거시)"""
+    db_path = _assert_sqlite_database()
     conn = sqlite3.connect(db_path)
     cursor = conn.cursor()
 
