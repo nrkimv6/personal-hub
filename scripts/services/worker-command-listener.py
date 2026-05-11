@@ -74,16 +74,19 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
-def execute_worker_action(action: str) -> dict:
+def execute_worker_action(action: str, public: bool = False, target: str | None = None) -> dict:
     """browser-workers.ps1을 호출하여 워커 액션을 실행합니다.
 
     Args:
-        action: start, stop, restart
+        action: start, stop, restart, restart-frontend
+        public: restart-frontend를 public preview 모드로 실행할지 여부
+        target: 예약 필드. 현재 restart-frontend 계약 확장용으로 수신만 허용
 
     Returns:
         dict: {success: bool, message: str, pid: int|None}
     """
-    if action not in ("start", "stop", "restart"):
+    allowed_actions = ("start", "stop", "restart", "restart-frontend")
+    if action not in allowed_actions:
         return {"success": False, "message": f"알 수 없는 액션: {action}"}
 
     if not BROWSER_WORKERS_SCRIPT.exists():
@@ -91,14 +94,17 @@ def execute_worker_action(action: str) -> dict:
 
     try:
         logger.info(f"워커 액션 실행: {action}")
+        command = [
+            "powershell.exe",
+            "-ExecutionPolicy", "Bypass",
+            "-File", str(BROWSER_WORKERS_SCRIPT),
+            "-Action", action,
+        ]
+        if action == "restart-frontend" and public:
+            command.append("-Public")
 
         result = subprocess.run(
-            [
-                "powershell.exe",
-                "-ExecutionPolicy", "Bypass",
-                "-File", str(BROWSER_WORKERS_SCRIPT),
-                "-Action", action,
-            ],
+            command,
             **with_text_subprocess_defaults(
                 capture_output=True,
                 text=True,
@@ -411,7 +417,14 @@ def main():
                 logger.info(f"명령 수신: action={action}, source={source}, time={timestamp}")
 
                 # 액션 실행
-                action_result = execute_worker_action(action)
+                public = command.get("public")
+                if isinstance(public, str):
+                    public = public.strip().lower() in {"1", "true", "yes", "on"}
+                else:
+                    public = bool(public)
+                target = command.get("target")
+
+                action_result = execute_worker_action(action, public=public, target=target)
                 action_result["action"] = action
                 action_result["executed_at"] = datetime.now().isoformat()
 
