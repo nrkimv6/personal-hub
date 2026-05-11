@@ -13,6 +13,22 @@ async def client():
         yield c
 
 
+@pytest.fixture(autouse=True)
+def fixed_diagnostics(monkeypatch):
+    from app.modules.dev_runner.routes import logs
+
+    monkeypatch.setattr(
+        logs.diagnostics_service,
+        "run_diagnostics",
+        lambda: {
+            "steps": [
+                {"step": 1, "name": "Redis 연결", "ok": True, "detail": "연결됨"},
+                {"step": 9, "name": "runner DB mirror drift", "ok": True, "detail": "redis_only=0, db_only=0"},
+            ]
+        },
+    )
+
+
 async def test_diagnostics_http_right_200(client):
     """GET /api/v1/dev-runner/logs/diagnostics → 200, body에 steps 배열 포함."""
     resp = await client.get("/api/v1/dev-runner/logs/diagnostics")
@@ -33,3 +49,15 @@ async def test_diagnostics_http_right_steps_structure(client):
         assert "name" in s
         assert "ok" in s
         assert "detail" in s
+
+
+async def test_diagnostics_http_right_includes_runner_db_mirror_drift(client):
+    """GET /logs/diagnostics includes the Postgres mirror drift step."""
+    resp = await client.get("/api/v1/dev-runner/logs/diagnostics")
+    assert resp.status_code == 200
+
+    steps = resp.json()["steps"]
+    drift_step = next(s for s in steps if s["name"] == "runner DB mirror drift")
+    assert drift_step["step"] == 9
+    assert "redis_only=0" in drift_step["detail"]
+    assert "db_only=0" in drift_step["detail"]
