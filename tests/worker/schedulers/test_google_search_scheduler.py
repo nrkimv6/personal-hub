@@ -216,6 +216,51 @@ def test_claim_run_disables_expired_google_search_schedule(session_factory):
         assert schedule.enabled is False
 
 
+def test_claim_run_allows_not_yet_expired_google_search_schedule(session_factory):
+    with session_factory() as db:
+        saved_search = GoogleSavedSearch(name="Future", query="future query")
+        db.add(saved_search)
+        db.commit()
+        db.refresh(saved_search)
+
+        schedule = TaskSchedule(
+            name="future-google",
+            target_type=TaskSchedule.TARGET_TYPE_GOOGLE_SEARCH,
+            schedule_type=TaskSchedule.SCHEDULE_TYPE_TIME_WINDOW,
+            schedule_value=json.dumps({
+                "time_windows": [{"start": "00:00", "end": "23:59"}],
+                "daily_runs": 1,
+                "min_interval_hours": 1,
+            }),
+            enabled=True,
+        )
+        schedule.set_target_config({
+            "saved_search_id": saved_search.id,
+            "expires_at": (datetime.now() + timedelta(days=1)).isoformat(),
+        })
+        db.add(schedule)
+        db.commit()
+        db.refresh(schedule)
+
+        scheduler = GoogleSearchScheduler()
+        ctx = WorkerContext(
+            worker_name="test_worker",
+            browser_manager=None,
+            db_factory=session_factory,
+            update_worker_state=MagicMock(),
+        )
+
+        with patch(
+            "app.modules.google_search.schedulers.search_schedule.InstagramScheduler"
+        ) as scheduler_cls:
+            scheduler_cls.return_value.should_run_now.return_value = True
+            claimed = scheduler.claim_run(db, schedule, TaskScheduleService(db), ctx)
+
+        assert claimed is not None
+        db.refresh(schedule)
+        assert schedule.enabled is True
+
+
 def test_claim_run_uses_schedule_value_time_windows(session_factory):
     with session_factory() as db:
         saved_search = GoogleSavedSearch(name="Timed", query="timed query")
