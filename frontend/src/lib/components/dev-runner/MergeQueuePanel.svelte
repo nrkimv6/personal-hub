@@ -3,6 +3,7 @@
 	import { devRunnerMergeApi, devRunnerLogApi } from '$lib/api/dev-runner';
 
 	interface MergeItem {
+		queue_key?: string;
 		runner_id: string;
 		status: string;
 		branch?: string;
@@ -42,6 +43,10 @@
 
 	function statusColor(status: string): string {
 		return STATUS_COLORS[status] ?? 'bg-muted text-muted-foreground';
+	}
+
+	function mergeItemKey(item: MergeItem, index: number, section: string): string {
+		return item.queue_key ?? `${section}:${item.status}:${item.runner_id}:${item.timestamp ?? ''}:${index}`;
 	}
 
 	async function load() {
@@ -150,7 +155,7 @@
 		<!-- 활성 섹션 (merging / queued) -->
 		{#if activeItems.length > 0}
 			<div class="space-y-2.5 pb-2">
-				{#each activeItems as item (item.runner_id)}
+				{#each activeItems as item, index (mergeItemKey(item, index, 'active'))}
 					<div class="rounded-xl border border-border bg-card text-card-foreground shadow-sm overflow-hidden flex flex-col transition-all hover:shadow-md">
 						<!-- svelte-ignore a11y_click_events_have_key_events -->
 						<div
@@ -194,7 +199,7 @@
 		{#if doneItems.length > 0}
 			<div class="mt-3 opacity-50 space-y-2 pb-2">
 				<p class="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider mb-1">Completed</p>
-				{#each doneItems as item (item.runner_id)}
+				{#each doneItems as item, index (mergeItemKey(item, index, 'completed'))}
 					<div class="rounded-xl border border-border bg-card text-card-foreground shadow-sm overflow-hidden flex flex-col">
 						<div class="flex items-center justify-between gap-3 px-3 py-2">
 							<div class="flex flex-col min-w-0">
