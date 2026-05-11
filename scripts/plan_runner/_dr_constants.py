@@ -41,6 +41,8 @@ RECENT_RUNNERS_TTL = _resolve_recent_runners_ttl()
 # recent-meta 보존 TTL — cleanup 후에도 trigger/accepted_at/started_at 조회 가능 시간 (1시간)
 RECENT_META_TTL = 3600
 ADMIN_API_PORT = int(os.environ.get("ADMIN_API_PORT", "8001"))
+DEV_RUNNER_PG_MIRROR_ENABLED_ENV = "DEV_RUNNER_PG_MIRROR_ENABLED"
+DEV_RUNNER_PG_MIRROR_ENABLED_DEFAULT = "1"
 
 # per-runner 키 suffix 전체 목록 — app/modules/dev_runner/services/executor_service.py의 RUNNER_KEY_SUFFIXES와 동일
 RUNNER_KEY_SUFFIXES = (
