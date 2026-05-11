@@ -10,7 +10,9 @@
 
 import asyncio
 import logging
-from typing import Optional
+from datetime import datetime
+from typing import Any, Optional
+from uuid import uuid4
 from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
 from pydantic import BaseModel
 from sqlalchemy import text
@@ -27,6 +29,86 @@ logger = logging.getLogger(__name__)
 
 # 실행 중인 detector 참조 (취소용)
 _active_detector = None
+_duplicate_tasks: dict[str, dict[str, Any]] = {}
+
+
+class DuplicateTaskAcceptedResponse(BaseModel):
+    task_id: str
+    status: str = "queued"
+
+
+class DuplicateTaskStatusResponse(BaseModel):
+    task_id: str
+    kind: str
+    status: str
+    result: dict[str, Any] | None = None
+    error_message: str | None = None
+    created_at: str
+    started_at: str | None = None
+    completed_at: str | None = None
+
+
+def _now_iso() -> str:
+    return datetime.now().isoformat(timespec="seconds")
+
+
+def _create_duplicate_task(kind: str, payload: dict[str, Any], background_tasks: BackgroundTasks) -> DuplicateTaskAcceptedResponse:
+    task_id = str(uuid4())
+    _duplicate_tasks[task_id] = {
+        "task_id": task_id,
+        "kind": kind,
+        "status": "queued",
+        "payload": payload,
+        "result": None,
+        "error_message": None,
+        "created_at": _now_iso(),
+        "started_at": None,
+        "completed_at": None,
+    }
+    background_tasks.add_task(_run_duplicate_task, task_id)
+    return DuplicateTaskAcceptedResponse(task_id=task_id)
+
+
+def _complete_duplicate_task(task_id: str, status: str, *, result: dict[str, Any] | None = None, error: str | None = None) -> None:
+    task = _duplicate_tasks.get(task_id)
+    if task is None:
+        return
+    task["status"] = status
+    task["result"] = result
+    task["error_message"] = error
+    task["completed_at"] = _now_iso()
+
+
+def _run_duplicate_task(task_id: str) -> None:
+    task = _duplicate_tasks.get(task_id)
+    if task is None:
+        return
+    task["status"] = "running"
+    task["started_at"] = _now_iso()
+    db = SessionLocal()
+    try:
+        kind = task["kind"]
+        payload = task.get("payload") or {}
+        if kind == "folder-analysis":
+            result = get_folder_analysis(db)
+        elif kind == "folder-pair-analysis":
+            result = get_folder_pair_analysis(db)
+        elif kind == "resolve-by-folder":
+            result = asyncio.run(resolve_by_folder(ResolveByFolderRequest(**payload), db))
+        elif kind == "resolve-by-folder-pair":
+            result = asyncio.run(resolve_by_folder_pair(ResolveByFolderPairRequest(**payload), db))
+        elif kind == "auto-resolve":
+            result = asyncio.run(auto_resolve(AutoResolveRequest(**payload), db))
+        elif kind == "bulk-resolve":
+            result = asyncio.run(bulk_resolve(BulkResolveRequest(**payload), db))
+        else:
+            raise ValueError(f"Unknown duplicate task kind: {kind}")
+        _complete_duplicate_task(task_id, "completed", result=result)
+    except Exception as exc:
+        logger.exception("duplicate task failed: %s", task_id)
+        _complete_duplicate_task(task_id, "failed", error=str(exc))
+    finally:
+        db.close()
 
 
 def _batch_delete_files(
@@ -1295,6 +1377,53 @@ class BulkResolveItem(BaseModel):
 
 class BulkResolveRequest(BaseModel):
     resolutions: list[BulkResolveItem]
+
+
+@router.get("/tasks/{task_id}", response_model=DuplicateTaskStatusResponse)
+def get_duplicate_task(task_id: str):
+    task = _duplicate_tasks.get(task_id)
+    if task is None:
+        raise HTTPException(status_code=404, detail="중복 처리 작업을 찾을 수 없습니다.")
+    return DuplicateTaskStatusResponse(
+        task_id=task["task_id"],
+        kind=task["kind"],
+        status=task["status"],
+        result=task.get("result"),
+        error_message=task.get("error_message"),
+        created_at=task["created_at"],
+        started_at=task.get("started_at"),
+        completed_at=task.get("completed_at"),
+    )
+
+
+@router.post("/folder-analysis/tasks", status_code=202, response_model=DuplicateTaskAcceptedResponse)
+def start_folder_analysis_task(background_tasks: BackgroundTasks):
+    return _create_duplicate_task("folder-analysis", {}, background_tasks)
+
+
+@router.post("/folder-pair-analysis/tasks", status_code=202, response_model=DuplicateTaskAcceptedResponse)
+def start_folder_pair_analysis_task(background_tasks: BackgroundTasks):
+    return _create_duplicate_task("folder-pair-analysis", {}, background_tasks)
+
+
+@router.post("/resolve-by-folder/tasks", status_code=202, response_model=DuplicateTaskAcceptedResponse)
+def start_resolve_by_folder_task(request: ResolveByFolderRequest, background_tasks: BackgroundTasks):
+    return _create_duplicate_task("resolve-by-folder", request.model_dump(), background_tasks)
+
+
+@router.post("/resolve-by-folder-pair/tasks", status_code=202, response_model=DuplicateTaskAcceptedResponse)
+def start_resolve_by_folder_pair_task(request: ResolveByFolderPairRequest, background_tasks: BackgroundTasks):
+    return _create_duplicate_task("resolve-by-folder-pair", request.model_dump(), background_tasks)
+
+
+@router.post("/auto-resolve/tasks", status_code=202, response_model=DuplicateTaskAcceptedResponse)
+def start_auto_resolve_task(request: AutoResolveRequest, background_tasks: BackgroundTasks):
+    return _create_duplicate_task("auto-resolve", request.model_dump(), background_tasks)
+
+
+@router.post("/bulk-resolve/tasks", status_code=202, response_model=DuplicateTaskAcceptedResponse)
+def start_bulk_resolve_task(request: BulkResolveRequest, background_tasks: BackgroundTasks):
+    return _create_duplicate_task("bulk-resolve", request.model_dump(), background_tasks)
 
 
 @router.post("/bulk-resolve")
