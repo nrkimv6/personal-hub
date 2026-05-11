@@ -434,9 +434,10 @@
 		f === '__ALL_PLANS__' || f === 'ALL';
 
 	function updateRunnerTab(tab: RunnerTab, runner: RunnerSource): RunnerTab {
+		const incomingRunning = runner.running ?? runner.status === 'running';
 		return {
 			...tab,
-			running: runner.running ?? runner.status === 'running',
+			running: incomingRunning,
 			plan_file: (!runner.plan_file || isAllPlansSentinel(runner.plan_file)) ? tab.plan_file : runner.plan_file,
 			engine: (runner.engine ?? tab.engine) ?? null,
 			start_time: (runner.start_time ?? tab.start_time) ?? null,
@@ -444,9 +445,9 @@
 			worktree_path: runner.worktree_path ?? tab.worktree_path ?? null,
 			merge_status: runner.merge_status ?? tab.merge_status ?? null,
 			stop_stage: runner.stop_stage ?? tab.stop_stage ?? null,
-			orphan: runner.orphan ?? tab.orphan ?? false,
-			orphan_alive: runner.orphan_alive ?? tab.orphan_alive ?? false,
-			redis_missing: runner.redis_missing ?? tab.redis_missing ?? false,
+			orphan: runner.orphan ?? (incomingRunning ? false : tab.orphan ?? false),
+			orphan_alive: runner.orphan_alive ?? (incomingRunning ? false : tab.orphan_alive ?? false),
+			redis_missing: runner.redis_missing ?? (incomingRunning ? false : tab.redis_missing ?? false),
 			log_file_found: runner.log_file_found ?? tab.log_file_found ?? false,
 			exit_reason: runner.exit_reason ?? tab.exit_reason ?? undefined,
 			error: runner.error ?? tab.error ?? undefined,
