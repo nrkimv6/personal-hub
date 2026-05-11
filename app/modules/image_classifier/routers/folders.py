@@ -22,6 +22,11 @@ from ..adapters.base import ClassifyRequest
 from ..adapters.claude_cli import ClaudeCLIAdapter
 from ..adapters.gemini_cli import GeminiCLIAdapter
 from ..config import settings
+from app.services.import_task_store import (
+    create_import_task,
+    get_import_task,
+    run_import_task,
+)
 
 router = APIRouter(prefix="/folders", tags=["Folders"])
 
@@ -666,19 +671,44 @@ async def get_classify_history(db: Session = Depends(get_db)):
     return {"history": progress_mgr.get_history('classify', limit=10)}
 
 
+async def _run_auto_map_task(task_id: str) -> None:
+    db = SessionLocal()
+    try:
+        def _auto_map() -> dict:
+            classifier = FolderClassifier(db)
+            result = classifier.auto_map_folders()
+            return {
+                "status": "success",
+                "mapped_folders": result["mapped"],
+                "skipped_folders": result["skipped"],
+                "files_mapped": result["files_mapped"],
+                "message": f"{result['mapped']}개 폴더 매핑, {result['files_mapped']}개 파일 분류 완료",
+            }
+
+        await run_import_task(task_id, _auto_map)
+    finally:
+        db.close()
+
+
 @router.post("/auto-map")
-async def auto_map_folders(db: Session = Depends(get_db)):
+async def auto_map_folders(background_tasks: BackgroundTasks):
     """clear 폴더 + 특수 폴더 규칙으로 자동 카테고리 매핑.
 
     미매핑 폴더를 CLEAR_PATTERNS, SPECIAL_FOLDER_MAP, classification_rules로 매칭하여
     카테고리를 자동 할당하고, 해당 파일을 folder_mapped 상태로 전환합니다.
     """
-    classifier = FolderClassifier(db)
-    result = classifier.auto_map_folders()
+    task = create_import_task("image_classifier_auto_map", "folders:auto-map")
+    background_tasks.add_task(_run_auto_map_task, task["task_id"])
     return {
-        "status": "success",
-        "mapped_folders": result["mapped"],
-        "skipped_folders": result["skipped"],
-        "files_mapped": result["files_mapped"],
-        "message": f"{result['mapped']}개 폴더 매핑, {result['files_mapped']}개 파일 분류 완료"
+        "task_id": task["task_id"],
+        "status": task["status"],
+        "phase": task["phase"],
     }
+
+
+@router.get("/auto-map/tasks/{task_id}")
+async def get_auto_map_task(task_id: str):
+    task = get_import_task(task_id)
+    if not task or task.get("kind") != "image_classifier_auto_map":
+        raise HTTPException(status_code=404, detail="Auto-map task not found")
+    return task
