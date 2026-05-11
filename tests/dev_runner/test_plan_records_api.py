@@ -591,6 +591,33 @@ class TestSyncEndpoint:
         assert resp.json()["wait_tracking"] == {"action": "skipped", "reason": "not_waiting_status"}
         assert test_db_session.query(TrackingItem).count() == 0
 
+    def test_get_plans_does_not_write_wait_tracking(self, client, test_db_session):
+        """GET plan list는 예약대기 plan을 보여줘도 wait tracking DB write를 하지 않는다."""
+        from app.models.plan_record import PlanRecord
+        from app.models.tracking_item import TrackingItem, TrackingItemPlanLink
+        from app.modules.dev_runner.schemas import PlanFileResponse
+
+        _clear_tracking(test_db_session)
+        before_records = test_db_session.query(PlanRecord).count()
+        waiting_plan = PlanFileResponse(
+            path="/tmp/2026-05-11_waiting-plan.md",
+            filename="2026-05-11_waiting-plan.md",
+            status="예약대기",
+            summary="GET list read-only contract",
+        )
+
+        with patch(
+            "app.modules.dev_runner.routes.plans.plan_service.list_plans",
+            return_value=[waiting_plan],
+        ):
+            resp = client.get("/api/v1/dev-runner/plans")
+
+        assert resp.status_code == 200
+        assert resp.json()[0]["status"] == "예약대기"
+        assert test_db_session.query(PlanRecord).count() == before_records
+        assert test_db_session.query(TrackingItem).count() == 0
+        assert test_db_session.query(TrackingItemPlanLink).count() == 0
+
     def test_archive_candidates_endpoint(self, client, tmp_path):
         """archive 후보 엔드포인트 → 파일/DB 후보 요약 반환"""
         archive_dir = tmp_path / "archive" / "common"
