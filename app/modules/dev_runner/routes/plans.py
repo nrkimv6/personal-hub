@@ -27,6 +27,9 @@ from app.modules.dev_runner.schemas import (
 from app.modules.dev_runner.services.plan_service import plan_service
 from app.modules.dev_runner.services import archive_service
 from app.modules.dev_runner.services.plan_record_service import PlanRecordService
+from app.modules.dev_runner.services.plan_wait_tracking_service import (
+    upsert_wait_tracking_for_plan,
+)
 from app.modules.dev_runner.services.plan_path_helpers import (
     collect_plan_storage_root_candidates,
     iter_repo_plan_path_candidates,
@@ -522,7 +525,11 @@ class UpdateStatusRequest(BaseModel):
 
 
 @router.patch("/plans/{encoded_path}/status")
-async def update_plan_status(encoded_path: str, body: UpdateStatusRequest):
+async def update_plan_status(
+    encoded_path: str,
+    body: UpdateStatusRequest,
+    db: Session = Depends(get_db),
+):
     """plan 파일의 상태 필드를 업데이트한다."""
     try:
         decoded_path = _decode_path(encoded_path)
@@ -539,8 +546,20 @@ async def update_plan_status(encoded_path: str, body: UpdateStatusRequest):
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e))
 
+    wait_tracking = {"action": "skipped", "reason": "not_waiting_status"}
+    if new_status == "예약대기":
+        wait_result = upsert_wait_tracking_for_plan(db, decoded_path)
+        wait_tracking = wait_result.to_summary()
+        if wait_result.created or wait_result.updated:
+            db.commit()
+
     plans = plan_service.list_plans()
-    return {"path": decoded_path, "status": new_status, "plans": [p.model_dump() for p in plans]}
+    return {
+        "path": decoded_path,
+        "status": new_status,
+        "wait_tracking": wait_tracking,
+        "plans": [p.model_dump() for p in plans],
+    }
 
 
 # ── Archive 정리 ──────────────────────────────────────────────

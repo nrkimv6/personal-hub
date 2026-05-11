@@ -894,6 +894,9 @@ class PlanRecordsSyncResponse(BaseModel):
     archive_updated: int = 0
     archive_normalized: int = 0
     relation_refreshed: int = 0
+    wait_tracking_created: int = 0
+    wait_tracking_updated: int = 0
+    wait_tracking_skipped: int = 0
 
 
 class PlanRecordResponse(BaseModel):

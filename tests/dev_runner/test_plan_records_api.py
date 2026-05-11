@@ -4,6 +4,7 @@
 TestClient 사용, test_db_session 픽스처로 격리
 """
 import pytest
+import base64
 from unittest.mock import patch
 from fastapi.testclient import TestClient
 
@@ -90,6 +91,14 @@ def _make_record(session, path, **kwargs):
     r = svc.get_or_create(path, **kwargs)
     session.flush()
     return r
+
+
+def _clear_tracking(session):
+    from app.models.tracking_item import TrackingItem, TrackingItemPlanLink
+
+    session.query(TrackingItemPlanLink).delete()
+    session.query(TrackingItem).delete()
+    session.commit()
 
 
 class TestPlanRecordsApiDbBootstrap:
@@ -487,6 +496,100 @@ class TestSyncEndpoint:
         assert "missing" in data
         assert "archive_created" in data
         assert "archive_normalized" in data
+        assert "wait_tracking_created" in data
+        assert "wait_tracking_updated" in data
+        assert "wait_tracking_skipped" in data
+
+    def test_sync_endpoint_returns_wait_tracking_counts_and_links(self, client, test_db_session, tmp_path):
+        """records sync가 예약대기 plan을 TrackingItem으로 자동 연결한다."""
+        from app.models.tracking_item import TrackingItem, TrackingItemPlanLink
+
+        _clear_tracking(test_db_session)
+        plan_dir = tmp_path / "plans"
+        plan_dir.mkdir()
+        plan_path = plan_dir / "2026-05-11_http-waiting-plan.md"
+        plan_path.write_text(
+            "\n".join(
+                [
+                    "# HTTP 예약대기",
+                    "> 상태: 예약대기",
+                    "> 검토 예정일: 2026-06-07",
+                    "> 요약: sync endpoint coverage",
+                ]
+            ),
+            encoding="utf-8",
+        )
+
+        registered = [type("RegisteredPath", (), {"path": str(plan_dir), "path_type": "plan"})()]
+        with patch(
+            "app.modules.dev_runner.routes.plan_records._plan_service.list_registered_paths",
+            return_value=registered,
+        ):
+            resp = client.post("/api/v1/plans/records/sync")
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["wait_tracking_created"] == 1
+        assert data["wait_tracking_updated"] == 0
+        assert data["wait_tracking_skipped"] == 0
+        item = test_db_session.query(TrackingItem).one()
+        link = test_db_session.query(TrackingItemPlanLink).one()
+        assert item.title == "예약대기 plan: HTTP 예약대기"
+        assert link.tracking_item_id == item.id
+
+    def test_status_patch_reserved_upserts_wait_tracking(self, client, test_db_session, tmp_path):
+        """status mutation 경계에서만 예약대기 TrackingItem을 만든다."""
+        from app.models.tracking_item import TrackingItem
+
+        _clear_tracking(test_db_session)
+        plan_path = tmp_path / "2026-05-11_status-waiting-plan.md"
+        plan_path.write_text(
+            "\n".join(
+                [
+                    "# Status 예약대기",
+                    "> 상태: 초안",
+                    "> 검토 예정일: 2026-06-07",
+                ]
+            ),
+            encoding="utf-8",
+        )
+        encoded = base64.urlsafe_b64encode(str(plan_path).encode("utf-8")).decode("ascii").rstrip("=")
+
+        with patch("app.modules.dev_runner.routes.plans.plan_service.validate_path", return_value=True), patch(
+            "app.modules.dev_runner.routes.plans.plan_service.list_plans",
+            return_value=[],
+        ):
+            resp = client.patch(
+                f"/api/v1/dev-runner/plans/{encoded}/status",
+                json={"status": "예약대기"},
+            )
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["wait_tracking"]["action"] == "created"
+        assert test_db_session.query(TrackingItem).count() == 1
+
+    def test_status_patch_non_waiting_does_not_write_tracking(self, client, test_db_session, tmp_path):
+        """예약대기가 아닌 status mutation은 wait tracking upsert를 건너뛴다."""
+        from app.models.tracking_item import TrackingItem
+
+        _clear_tracking(test_db_session)
+        plan_path = tmp_path / "2026-05-11_status-active-plan.md"
+        plan_path.write_text("# Status active\n> 상태: 초안\n> 검토 예정일: 2026-06-07\n", encoding="utf-8")
+        encoded = base64.urlsafe_b64encode(str(plan_path).encode("utf-8")).decode("ascii").rstrip("=")
+
+        with patch("app.modules.dev_runner.routes.plans.plan_service.validate_path", return_value=True), patch(
+            "app.modules.dev_runner.routes.plans.plan_service.list_plans",
+            return_value=[],
+        ):
+            resp = client.patch(
+                f"/api/v1/dev-runner/plans/{encoded}/status",
+                json={"status": "구현중"},
+            )
+
+        assert resp.status_code == 200
+        assert resp.json()["wait_tracking"] == {"action": "skipped", "reason": "not_waiting_status"}
+        assert test_db_session.query(TrackingItem).count() == 0
 
     def test_archive_candidates_endpoint(self, client, tmp_path):
         """archive 후보 엔드포인트 → 파일/DB 후보 요약 반환"""

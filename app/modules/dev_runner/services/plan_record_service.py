@@ -1141,7 +1141,11 @@ class PlanRecordService:
         """
         created = updated = missing = 0
         archive_created = archive_updated = archive_normalized = 0
+        wait_tracking_created = wait_tracking_updated = wait_tracking_skipped = 0
         relation_refresh_records: List[PlanRecord] = []
+        from app.modules.dev_runner.services.plan_wait_tracking_service import (
+            upsert_wait_tracking_for_plan,
+        )
 
         # DB에 있는 모든 레코드의 hash → record 매핑
         all_records: Dict[str, PlanRecord] = {
@@ -1224,6 +1228,14 @@ class PlanRecordService:
                             updated += 1
                     if record.raw_content:
                         relation_refresh_records.append(record)
+                if not is_archive_entry:
+                    wait_result = upsert_wait_tracking_for_plan(self.db, file_str)
+                    if wait_result.created:
+                        wait_tracking_created += 1
+                    elif wait_result.updated:
+                        wait_tracking_updated += 1
+                    else:
+                        wait_tracking_skipped += 1
 
         # DB에 있지만 스캔에서 발견 안 된 것 → missing
         for h, record in all_records.items():
@@ -1242,6 +1254,9 @@ class PlanRecordService:
             "archive_updated": archive_updated,
             "archive_normalized": archive_normalized,
             "relation_refreshed": len(relation_results),
+            "wait_tracking_created": wait_tracking_created,
+            "wait_tracking_updated": wait_tracking_updated,
+            "wait_tracking_skipped": wait_tracking_skipped,
         }
 
     # ── archive candidate import ──────────────────────────────────────────────
