@@ -84,10 +84,10 @@
 		error = null;
 		try {
 			const [statusRes, scheduleRes, logsRes, statsRes] = await Promise.all([
-				fetch(`${API_BASE}/status`),
-				fetch(`${API_BASE}/schedule`),
-				fetch(`${API_BASE}/logs?days=7`),
-				fetch(`${API_BASE}/stats?days=7`)
+				fetchWithTimeout(`${API_BASE}/status`),
+				fetchWithTimeout(`${API_BASE}/schedule`),
+				fetchWithTimeout(`${API_BASE}/logs?days=7`),
+				fetchWithTimeout(`${API_BASE}/stats?days=7`)
 			]);
 
 			if (!statusRes.ok) throw new Error('상태 조회 실패');

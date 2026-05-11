@@ -3,6 +3,7 @@
 	import PageHeader from '$lib/components/layout/PageHeader.svelte';
 	import TabNav from '$lib/components/layout/TabNav.svelte';
 	import { isApiGateClosedError } from '$lib/api/client';
+	import { FILE_CLASSIFIER_TIMEOUT_MS, fileClassifierFetch } from '$lib/api/file-classifier';
 
 	// 탭
 	type TabId = 'explore' | 'classify' | 'extract';
@@ -221,7 +222,13 @@
 
 	async function apiFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
 		try {
-			const response = await fetch(input, init);
+			const url = String(input);
+			const timeout = /\/(scan|classify|extract)\/start/.test(url)
+				? FILE_CLASSIFIER_TIMEOUT_MS.command
+				: FILE_CLASSIFIER_TIMEOUT_MS.read;
+			const response = url.startsWith('/api/fc/')
+				? await fileClassifierFetch(url.slice('/api/fc'.length), init, timeout)
+				: await fetch(input, init);
 			apiMessage = null;
 			return response;
 		} catch (e) {

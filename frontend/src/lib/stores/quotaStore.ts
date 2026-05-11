@@ -6,6 +6,7 @@
  */
 import { writable, get } from 'svelte/store';
 import { isApiGateClosedError } from '$lib/api/client';
+import { llmApi } from '$lib/api/system';
 
 export interface QuotaProviderStatus {
 	paused: boolean;
@@ -50,9 +51,7 @@ export async function fetchQuotaStatus(force = false): Promise<void> {
 	}
 
 	try {
-		const res = await fetch('/api/v1/llm/quota-status');
-		if (!res.ok) return;
-		const data: QuotaStatusMap = await res.json();
+		const data = await llmApi.getQuotaStatus();
 		quotaStatus.set(data);
 		lastFetchedAt = now;
 	} catch (e) {
@@ -68,9 +67,7 @@ export async function fetchProfileQuotaStatus(force = false): Promise<void> {
 	}
 
 	try {
-		const res = await fetch('/api/v1/llm/profiles/status');
-		if (!res.ok) return;
-		const data: ProfileQuotaStatus[] = await res.json();
+		const data = await llmApi.getProfileStatus() as ProfileQuotaStatus[];
 		profileQuotaStatus.set(data);
 		lastProfileFetchedAt = now;
 	} catch (e) {

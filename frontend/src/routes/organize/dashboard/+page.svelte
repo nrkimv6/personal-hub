@@ -3,6 +3,7 @@
 	import PageHeader from '$lib/components/layout/PageHeader.svelte';
 	import { Play, Square, RefreshCw, HardDrive, Music, Archive, FileText, Terminal, Gamepad2, Folder, Video, Image, Zap } from 'lucide-svelte';
 	import { isApiGateClosedError } from '$lib/api/client';
+	import { FILE_CLASSIFIER_TIMEOUT_MS, fileClassifierFetch } from '$lib/api/file-classifier';
 
 	// 상태
 	let stats = $state<any>(null);
@@ -49,9 +50,9 @@
 	async function fetchStats() {
 		try {
 			const [statsRes, scanRes, pipelineRes] = await Promise.all([
-				fetch('/api/fc/stats'),
-				fetch('/api/fc/scan/status'),
-				fetch('/api/fc/pipeline/status')
+				fileClassifierFetch('/stats'),
+				fileClassifierFetch('/scan/status'),
+				fileClassifierFetch('/pipeline/status')
 			]);
 			if (statsRes.ok) stats = await statsRes.json();
 			if (scanRes.ok) {
@@ -75,11 +76,11 @@
 			.map((s: string) => s.trim())
 			.filter(Boolean);
 		try {
-			const res = await fetch('/api/fc/pipeline/start', {
+			const res = await fileClassifierFetch('/pipeline/start', {
 				method: 'POST',
 				headers: { 'Content-Type': 'application/json' },
 				body: JSON.stringify({ root_folders: rootFolders.length > 0 ? rootFolders : null })
-			});
+			}, FILE_CLASSIFIER_TIMEOUT_MS.command);
 			const data = await res.json();
 			if (data.status === 'started' || data.status === 'already_running') {
 				isPipelineRunning = true;
@@ -91,7 +92,7 @@
 
 	async function stopPipeline() {
 		try {
-			await fetch('/api/fc/pipeline/stop', { method: 'POST' });
+			await fileClassifierFetch('/pipeline/stop', { method: 'POST' }, FILE_CLASSIFIER_TIMEOUT_MS.command);
 		} catch (e) {
 			error = isApiGateClosedError(e) ? 'API 서버 재시작 중' : '파이프라인 중지 실패';
 		}
@@ -104,11 +105,11 @@
 			.filter(Boolean);
 
 		try {
-			const res = await fetch('/api/fc/scan/start', {
+			const res = await fileClassifierFetch('/scan/start', {
 				method: 'POST',
 				headers: { 'Content-Type': 'application/json' },
 				body: JSON.stringify({ root_folders: rootFolders.length > 0 ? rootFolders : null })
-			});
+			}, FILE_CLASSIFIER_TIMEOUT_MS.command);
 			const data = await res.json();
 			if (data.status === 'started' || data.status === 'already_running') {
 				isScanRunning = true;
@@ -120,7 +121,7 @@
 
 	async function stopScan() {
 		try {
-			await fetch('/api/fc/scan/stop', { method: 'POST' });
+			await fileClassifierFetch('/scan/stop', { method: 'POST' }, FILE_CLASSIFIER_TIMEOUT_MS.command);
 		} catch (e) {
 			error = isApiGateClosedError(e) ? 'API 서버 재시작 중' : '스캔 중지 실패';
 		}

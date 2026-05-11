@@ -7,7 +7,7 @@ import type {
   ExpoPublishedStatusResponse,
 } from '$lib/types';
 
-import { API_BASE, getAuthToken, request } from './client';
+import { API_BASE, fetchWithTimeout, getAuthToken, request } from './client';
 
 const BASE = '/expo';
 
@@ -44,12 +44,12 @@ export const expoApi = {
     const token = getAuthToken();
     const headers: HeadersInit = token ? { Authorization: `Bearer ${token}` } : {};
 
-    const res = await fetch(`${API_BASE}${BASE}/maps/${slug}/upload`, {
+    const res = await fetchWithTimeout(`${API_BASE}${BASE}/maps/${slug}/upload`, {
       method: 'POST',
       body: formData,
       headers,
       credentials: 'include',
-    });
+    }, 60_000);
 
     if (!res.ok) {
       let detail = `업로드 실패 (${res.status})`;

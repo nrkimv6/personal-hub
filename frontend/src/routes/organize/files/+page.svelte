@@ -4,6 +4,7 @@
 	import PageHeader from '$lib/components/layout/PageHeader.svelte';
 	import { Search, ChevronLeft, ChevronRight } from 'lucide-svelte';
 	import { isApiGateClosedError } from '$lib/api/client';
+	import { fileClassifierFetch } from '$lib/api/file-classifier';
 
 	// 필터 상태
 	let fileGroup = $state('');
@@ -52,7 +53,7 @@
 			params.set('page', String(page));
 			params.set('page_size', String(pageSize));
 
-			const res = await fetch(`/api/fc/files?${params}`);
+			const res = await fileClassifierFetch(`/files?${params}`);
 			if (res.ok) result = await res.json();
 			error = null;
 		} catch (e) {

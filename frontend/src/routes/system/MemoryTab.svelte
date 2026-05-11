@@ -18,6 +18,7 @@
     type MemoryPressureHistoryResponse,
     type MemoryPressureLevel
   } from '$lib/api';
+  import { fetchWithTimeout } from '$lib/api/client';
   import {
     getMemoryPressureLevelMeta,
     formatMemoryPressureMb,
@@ -84,7 +85,7 @@
 
   async function fetchMemory() {
     try {
-      const resp = await fetch('/api/v1/system/memory');
+      const resp = await fetchWithTimeout('/api/v1/system/memory');
       if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
       data = await resp.json();
       error = null;
