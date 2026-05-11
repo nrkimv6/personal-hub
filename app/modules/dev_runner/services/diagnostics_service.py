@@ -153,6 +153,36 @@ class DiagnosticsService:
         except Exception as e:
             steps.append({"step": 7, "name": "orphan runner evidence", "ok": False, "detail": f"조회 실패: {e}"})
 
+        # 8. Redis runner suffix와 Postgres mirror drift
+        try:
+            redis_ids = set()
+            prefix = f"{RUNNER_KEY_PREFIX}:"
+            for raw_key in self.redis_client.scan_iter(f"{RUNNER_KEY_PREFIX}:*:status"):
+                key = raw_key.decode("utf-8", errors="replace") if isinstance(raw_key, bytes) else str(raw_key)
+                suffix = ":status"
+                if key.startswith(prefix) and key.endswith(suffix):
+                    redis_ids.add(key[len(prefix):-len(suffix)])
+
+            from app.database import SessionLocal
+            from app.modules.dev_runner.services.dev_runner_state_repository import list_runner_states
+
+            db = SessionLocal()
+            try:
+                db_ids = {row.runner_id for row in list_runner_states(db, limit=500)}
+            finally:
+                db.close()
+
+            redis_only = sorted(redis_ids - db_ids)
+            db_only = sorted(db_ids - redis_ids)
+            ok = not redis_only and not db_only
+            detail = (
+                f"redis_only={len(redis_only)}, db_only={len(db_only)}"
+                + (f" sample={','.join((redis_only + db_only)[:5])}" if (redis_only or db_only) else "")
+            )
+            steps.append({"step": 8, "name": "runner DB mirror drift", "ok": ok, "detail": detail})
+        except Exception as e:
+            steps.append({"step": 8, "name": "runner DB mirror drift", "ok": False, "detail": f"조회 실패: {e}"})
+
         return {"steps": steps}
 
 

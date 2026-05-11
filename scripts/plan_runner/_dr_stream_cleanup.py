@@ -10,6 +10,7 @@ import logging
 import re
 import subprocess
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -17,6 +18,8 @@ import redis
 
 from _dr_constants import (
     COMMANDS_KEY,
+    DEV_RUNNER_PG_MIRROR_ENABLED_DEFAULT,
+    DEV_RUNNER_PG_MIRROR_ENABLED_ENV,
     LOG_CHANNEL_PREFIX,
     PLAN_FILE_ALL,
     RUNNER_KEY_PREFIX,
@@ -460,6 +463,70 @@ def _decode_redis_text(value) -> str:
     if isinstance(value, bytes):
         return value.decode("utf-8", errors="replace")
     return str(value)
+
+
+def _mirror_terminal_state_to_db(ctx: _StreamCleanupCtx, merge_requested: bool) -> None:
+    """Best-effort Postgres mirror for cleanup terminal evidence."""
+    if not ctx.runner_id:
+        return
+    import os
+
+    if os.environ.get(DEV_RUNNER_PG_MIRROR_ENABLED_ENV, DEV_RUNNER_PG_MIRROR_ENABLED_DEFAULT) in {"0", "false", "False"}:
+        return
+
+    try:
+        from app.database import SessionLocal
+        from app.modules.dev_runner.services.dev_runner_state_repository import upsert_runner_state
+
+        prefix = f"{RUNNER_KEY_PREFIX}:{ctx.runner_id}"
+        plan_file = _decode_redis_text(ctx.redis_client.get(f"{prefix}:plan_file")) or PLAN_FILE_ALL
+        branch = _decode_redis_text(ctx.redis_client.get(f"{prefix}:branch")) or None
+        worktree_path = _decode_redis_text(ctx.redis_client.get(f"{prefix}:worktree_path")) or None
+        start_time = _decode_redis_text(ctx.redis_client.get(f"{prefix}:start_time"))
+        merge_status = _decode_redis_text(ctx.redis_client.get(f"{prefix}:merge_status")) or None
+        status = "머지대기" if merge_requested else "stopped"
+        if merge_status == "merging":
+            status = "통합테스트중"
+
+        started_at = None
+        if start_time:
+            try:
+                from datetime import datetime as _datetime
+
+                started_at = _datetime.fromisoformat(start_time)
+            except ValueError:
+                started_at = None
+
+        db = SessionLocal()
+        try:
+            upsert_runner_state(
+                db,
+                {
+                    "runner_id": ctx.runner_id,
+                    "plan_file": plan_file,
+                    "project": "monitor-page",
+                    "status": status,
+                    "started_at": started_at,
+                    "branch": branch,
+                    "worktree_path": worktree_path,
+                    "exit_reason": ctx.exit_reason,
+                    "merge_requested": bool(merge_requested),
+                    "completed_at": None if merge_requested else datetime.now(),
+                    "metadata": {
+                        "merge_status": merge_status,
+                        "stop_stage": ctx.stop_stage,
+                        "failure_message": ctx.failure_message,
+                    },
+                },
+            )
+            db.commit()
+        except Exception:
+            db.rollback()
+            raise
+        finally:
+            db.close()
+    except Exception as exc:
+        logger.warning("[dev-runner] Postgres runner mirror failed; Redis cleanup continues: %s", exc)
 
 
 def _project_root() -> Path:
@@ -1003,6 +1070,7 @@ def _update_workflow_and_execute_cleanup(
     )
 
     merge_requested = _update_workflow_status(ctx, merge_requested)
+    _mirror_terminal_state_to_db(ctx, merge_requested)
     _execute_cleanup_action(
         ctx,
         merge_requested,

@@ -419,6 +419,79 @@ class ExecutorService:
             display_plan_name = log_path.name
         return trigger, plan_file, engine, start_time, execution_count, display_plan_name
 
+    def _best_effort_upsert_runner_state(self, payload: dict) -> None:
+        """Mirror Redis runner metadata into Postgres without changing Redis control flow."""
+        try:
+            from app.database import SessionLocal
+            from app.modules.dev_runner.services.dev_runner_state_repository import upsert_runner_state
+
+            db = SessionLocal()
+            try:
+                upsert_runner_state(db, payload)
+                db.commit()
+            except Exception:
+                db.rollback()
+                raise
+            finally:
+                db.close()
+        except Exception as exc:
+            logger.debug("[dev-runner] runner state DB mirror skipped: %s", exc)
+
+    def _load_db_runner_states(self, limit: int = 200) -> dict[str, object]:
+        try:
+            from app.database import SessionLocal
+            from app.modules.dev_runner.services.dev_runner_state_repository import list_runner_states
+
+            db = SessionLocal()
+            try:
+                return {row.runner_id: row for row in list_runner_states(db, limit=limit)}
+            finally:
+                db.close()
+        except Exception as exc:
+            logger.debug("[dev-runner] runner state DB read skipped: %s", exc)
+            return {}
+
+    def _load_db_runner_state(self, runner_id: str) -> object | None:
+        try:
+            from app.database import SessionLocal
+            from app.modules.dev_runner.services.dev_runner_state_repository import get_runner_state
+
+            db = SessionLocal()
+            try:
+                return get_runner_state(db, runner_id)
+            finally:
+                db.close()
+        except Exception as exc:
+            logger.debug("[dev-runner] runner state DB read skipped: runner=%s error=%s", runner_id, exc)
+            return None
+
+    def _best_effort_backfill_runner_state_from_redis(self, runner_id: str, data: dict, recent_meta: dict | None = None) -> None:
+        recent_meta = recent_meta or {}
+        metadata = {
+            "engine": data.get("engine") or recent_meta.get("engine"),
+            "trigger": data.get("trigger") or recent_meta.get("trigger"),
+            "execution_count": data.get("execution_count") or recent_meta.get("execution_count"),
+            "merge_status": data.get("merge_status") or recent_meta.get("merge_status"),
+            "merge_reason": data.get("merge_reason") or recent_meta.get("merge_reason"),
+            "merge_message": data.get("merge_message") or recent_meta.get("merge_message"),
+            "error": data.get("error") or recent_meta.get("error"),
+        }
+        self._best_effort_upsert_runner_state(
+            {
+                "runner_id": runner_id,
+                "plan_file": data.get("plan_file") or recent_meta.get("plan_file") or "__ALL_PLANS__",
+                "project": "monitor-page",
+                "status": data.get("status") or "unknown",
+                "started_at": self._coerce_datetime(data.get("start_time") or recent_meta.get("started_at")) or datetime.now(),
+                "branch": data.get("branch") or recent_meta.get("branch"),
+                "worktree_path": data.get("worktree_path") or recent_meta.get("worktree_path"),
+                "exit_reason": data.get("exit_reason") or recent_meta.get("exit_reason"),
+                "merge_requested": bool(data.get("merge_requested") or recent_meta.get("merge_requested")),
+                "completed_at": datetime.now() if data.get("status") in {"stopped", "completed", "failed", "error"} else None,
+                "metadata": {k: v for k, v in metadata.items() if v is not None},
+            }
+        )
+
     async def _send_command(self, command: dict, timeout: int = COMMAND_TIMEOUT) -> dict | None:
         """Redis 명령 전송 공통 메서드 — LPUSH + BRPOP + delete + parse 패턴.
 
@@ -564,6 +637,23 @@ class ExecutorService:
             f"[session] runner_id={runner_id} session_id={session_id} fused={request.fused_session}"
         )
 
+        self._best_effort_upsert_runner_state(
+            {
+                "runner_id": runner_id,
+                "plan_file": request.plan_file or "__ALL_PLANS__",
+                "project": "monitor-page",
+                "status": "starting",
+                "started_at": datetime.now(),
+                "metadata": {
+                    "engine": resolved_engine,
+                    "fix_engine": resolved_fix_engine,
+                    "trigger": trigger,
+                    "session_id": session_id,
+                    "test_source": request.test_source,
+                },
+            }
+        )
+
         # registered_paths에서 wtools 외부 경로 추출 (asyncio.to_thread로 이벤트 루프 블로킹 방지)
         if request.parallel:
             import asyncio
@@ -678,10 +768,25 @@ class ExecutorService:
                         f"[session] attached runner_id={existing_id} session_id not found in Redis, issuing new UUID"
                     )
                     existing_session_id = str(uuid.uuid4())
+                _attach_plan_file = fields.get("plan_file") or request.plan_file
+                self._best_effort_upsert_runner_state(
+                    {
+                        "runner_id": existing_id,
+                        "plan_file": _attach_plan_file or request.plan_file or "__ALL_PLANS__",
+                        "project": "monitor-page",
+                        "status": "running",
+                        "started_at": datetime.fromisoformat(existing_start_time_str) if existing_start_time_str else datetime.now(),
+                        "metadata": {
+                            "engine": existing_engine,
+                            "trigger": trigger,
+                            "session_id": existing_session_id,
+                            "execution_count": existing_exec_count,
+                        },
+                    }
+                )
                 # attached 케이스: 기존 claim 요약 조회
                 _attach_claim_id: Optional[str] = None
                 _attach_claim_state: Optional[str] = None
-                _attach_plan_file = fields.get("plan_file") or request.plan_file
                 if _attach_plan_file:
                     try:
                         from app.database import SessionLocal as _ACSLocal
@@ -729,6 +834,24 @@ class ExecutorService:
                     execution_count = int(execution_count_raw)
                 except (TypeError, ValueError):
                     execution_count = None
+
+            self._best_effort_upsert_runner_state(
+                {
+                    "runner_id": runner_id,
+                    "plan_file": plan_file or request.plan_file or "__ALL_PLANS__",
+                    "project": "monitor-page",
+                    "status": "running",
+                    "started_at": datetime.fromisoformat(start_time_str) if start_time_str else datetime.now(),
+                    "metadata": {
+                        "engine": resolved_engine,
+                        "fix_engine": resolved_fix_engine,
+                        "trigger": trigger,
+                        "session_id": session_id,
+                        "execution_count": execution_count,
+                        "pid": pid,
+                    },
+                }
+            )
 
             return RunStatusResponse(
                 running=True,
@@ -795,6 +918,12 @@ class ExecutorService:
 
     async def _cleanup_runner_state(self, runner_id: str, reason: str) -> None:
         """timeout/예외/stop 경로 공통 정리 함수."""
+        data = await self._get_runner_fields(
+            runner_id,
+            "status", "plan_file", "start_time", "engine", "execution_count",
+            "worktree_path", "branch", "merge_status", "merge_reason", "merge_message",
+            "trigger", "exit_reason", "error",
+        )
         try:
             await self._force_cleanup_state(runner_id)
         except Exception as exc:
@@ -804,6 +933,29 @@ class ExecutorService:
                 reason,
                 exc,
             )
+        metadata = {
+            "engine": data.get("engine"),
+            "trigger": data.get("trigger"),
+            "execution_count": data.get("execution_count"),
+            "merge_status": data.get("merge_status"),
+            "merge_reason": data.get("merge_reason"),
+            "merge_message": data.get("merge_message"),
+            "error": data.get("error"),
+        }
+        self._best_effort_upsert_runner_state(
+            {
+                "runner_id": runner_id,
+                "plan_file": data.get("plan_file") or "__ALL_PLANS__",
+                "project": "monitor-page",
+                "status": "stopped",
+                "started_at": self._coerce_datetime(data.get("start_time")) or datetime.now(),
+                "branch": data.get("branch"),
+                "worktree_path": data.get("worktree_path"),
+                "exit_reason": data.get("exit_reason") or reason,
+                "completed_at": datetime.now(),
+                "metadata": {k: v for k, v in metadata.items() if v is not None},
+            }
+        )
 
     async def _send_force_stop(self, runner_id: str = ""):
         """listener에 force-stop 명령 전송 (_running_processes 변수까지 정리)"""
@@ -908,6 +1060,8 @@ class ExecutorService:
 
     async def get_runner_status(self, runner_id: str) -> RunStatusResponse:
         """특정 runner 상태 조회 (per-runner Redis 키 기반)"""
+        db_row = self._load_db_runner_state(runner_id)
+        db_meta = getattr(db_row, "metadata_json", None) or {}
         data = await self._get_runner_fields(
             runner_id, "status", "pid", "plan_file", "start_time", "engine", "execution_count",
             "exit_reason", "error",
@@ -915,17 +1069,18 @@ class ExecutorService:
             "worktree_exists", "branch_exists", "branch_merged_to_main", "metadata_checked_at",
             "gate_evidence_summary"
         )
-        status = data["status"]
+        status = data["status"] or getattr(db_row, "status", None)
         pid_str = data["pid"]
-        plan_file = data["plan_file"]
-        start_time_str = data["start_time"]
-        engine = data["engine"] or "claude"
-        execution_count_raw = data["execution_count"]
-        exit_reason = data["exit_reason"]
-        error = data["error"]
-        worktree_path = data["worktree_path"]
-        branch = data["branch"]
-        merge_status = data["merge_status"]
+        plan_file = data["plan_file"] or getattr(db_row, "plan_file", None)
+        row_started_at = getattr(db_row, "started_at", None)
+        start_time_str = data["start_time"] or (row_started_at.isoformat() if row_started_at else None)
+        engine = data["engine"] or db_meta.get("engine") or "claude"
+        execution_count_raw = data["execution_count"] or db_meta.get("execution_count")
+        exit_reason = data["exit_reason"] or getattr(db_row, "exit_reason", None)
+        error = data["error"] or db_meta.get("error")
+        worktree_path = data["worktree_path"] or getattr(db_row, "worktree_path", None)
+        branch = data["branch"] or getattr(db_row, "branch", None)
+        merge_status = data["merge_status"] or db_meta.get("merge_status") or ("queued" if getattr(db_row, "merge_requested", False) else None)
         worktree_exists = _coerce_runner_metadata_state(data["worktree_exists"])
         branch_exists = _coerce_runner_metadata_state(data["branch_exists"])
         branch_merged_to_main = _coerce_runner_metadata_state(data["branch_merged_to_main"])
@@ -1011,6 +1166,8 @@ class ExecutorService:
             heartbeat_ids = await self._scan_runner_ids_with_suffix("subprocess_heartbeat")
             redis_registry_ids = set(all_ids)
             all_ids |= heartbeat_ids
+            db_runner_states = self._load_db_runner_states()
+            all_ids |= set(db_runner_states)
 
             # orphan 판별을 위한 DB 세션
             from app.database import SessionLocal
@@ -1019,6 +1176,8 @@ class ExecutorService:
             try:
                 result = []
                 for rid in all_ids:
+                    db_row = db_runner_states.get(rid)
+                    db_meta = getattr(db_row, "metadata_json", None) or {}
                     d = await self._get_runner_fields(rid, "status", "pid", "plan_file", "engine",
                                                       "start_time", "execution_count", "worktree_path", "merge_status",
                                                       "merge_reason", "merge_message",
@@ -1026,18 +1185,21 @@ class ExecutorService:
                                                       "worktree_exists", "branch_exists",
                                                       "branch_merged_to_main", "metadata_checked_at",
                                                       "gate_evidence_summary")
-                    status = d["status"]
+                    if db_row is None and rid in redis_registry_ids:
+                        self._best_effort_backfill_runner_state_from_redis(rid, d)
+                    status = d["status"] or getattr(db_row, "status", None)
                     pid_str = d["pid"]
-                    plan_file = d["plan_file"]
-                    engine = d["engine"]
-                    start_time_str = d["start_time"]
-                    execution_count_raw = d["execution_count"]
-                    worktree_path = d["worktree_path"]
-                    merge_status = d["merge_status"]
-                    merge_reason = d["merge_reason"]
-                    merge_message = d["merge_message"]
-                    branch = d["branch"]
-                    trigger = d["trigger"]
+                    plan_file = d["plan_file"] or getattr(db_row, "plan_file", None)
+                    engine = d["engine"] or db_meta.get("engine")
+                    row_started_at = getattr(db_row, "started_at", None)
+                    start_time_str = d["start_time"] or (row_started_at.isoformat() if row_started_at else None)
+                    execution_count_raw = d["execution_count"] or db_meta.get("execution_count")
+                    worktree_path = d["worktree_path"] or getattr(db_row, "worktree_path", None)
+                    merge_status = d["merge_status"] or db_meta.get("merge_status") or ("queued" if getattr(db_row, "merge_requested", False) else None)
+                    merge_reason = d["merge_reason"] or db_meta.get("merge_reason")
+                    merge_message = d["merge_message"] or db_meta.get("merge_message")
+                    branch = d["branch"] or getattr(db_row, "branch", None)
+                    trigger = d["trigger"] or db_meta.get("trigger")
                     recent_meta: dict = {}
                     try:
                         recent_meta_raw = await self.async_redis.get(f"plan-runner:recent-meta:{rid}")
@@ -1049,9 +1211,9 @@ class ExecutorService:
                     # trigger 미존재 시 recent-meta fallback (cleanup 후 타이밍 이슈 방어)
                     if trigger is None:
                         trigger = recent_meta.get("trigger")
-                    exit_reason = d["exit_reason"] or recent_meta.get("exit_reason")
+                    exit_reason = d["exit_reason"] or getattr(db_row, "exit_reason", None) or recent_meta.get("exit_reason")
                     stop_stage = d["stop_stage"]
-                    error = d["error"]
+                    error = d["error"] or db_meta.get("error")
                     worktree_exists = _coerce_runner_metadata_state(d["worktree_exists"], recent_meta.get("worktree_exists"))
                     branch_exists = _coerce_runner_metadata_state(d["branch_exists"], recent_meta.get("branch_exists"))
                     branch_merged_to_main = _coerce_runner_metadata_state(
@@ -1275,6 +1437,8 @@ class ExecutorService:
         """runner에 명령 전송 (retry-merge, cleanup-worktree 등)
 
         extra: 추가 payload — command dict에 병합되어 Redis에 전송됨 (retry-merge Redis 키 재발급 등에 활용)
+        Redis command write remains authoritative in this mirror stage; DB is updated only after
+        the command response so queue control cannot drift because of a DB write failure.
         """
         try:
             await self.async_redis.ping()
@@ -1292,6 +1456,24 @@ class ExecutorService:
         result_data = await self._send_command(command)
         if result_data is None:
             return {"success": False, "message": "Command timeout"}
+        if action in {"retry-merge", "resolve-conflict"}:
+            payload = extra or {}
+            self._best_effort_upsert_runner_state(
+                {
+                    "runner_id": runner_id,
+                    "plan_file": payload.get("plan_file") or "__ALL_PLANS__",
+                    "project": "monitor-page",
+                    "status": "머지대기" if payload.get("branch") else "stopped",
+                    "branch": payload.get("branch"),
+                    "worktree_path": payload.get("worktree_path"),
+                    "merge_requested": True,
+                    "metadata": {
+                        "merge_status": result_data.get("merge_status") or result_data.get("status") or "queued",
+                        "merge_message": result_data.get("message"),
+                        "command_action": action,
+                    },
+                }
+            )
         return result_data
 
     async def send_direct_merge_command(

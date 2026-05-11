@@ -12,12 +12,17 @@ import redis
 import fakeredis
 import fakeredis.aioredis
 from pydantic import ValidationError
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
+from sqlalchemy.pool import StaticPool
 
 from app.modules.claude_worker.services.profile_store import LLMProfile
 from app.modules.dev_runner.schemas import RunRequest
 from app.modules.dev_runner.services.executor_service import executor_service
 from app.modules.dev_runner.services.event_payload import build_status_payload
 from app.modules.dev_runner.services.state import get_state
+from app.models.dev_runner_state import DevRunnerMergeRequest, DevRunnerState
+from app.modules.dev_runner.services.dev_runner_state_repository import create_merge_request, upsert_runner_state
 
 RESULTS_KEY = "plan-runner:command_results"
 
@@ -33,6 +38,25 @@ def mock_executor_redis():
          patch.object(executor_service, 'async_redis', fake_async), \
          patch('app.modules.dev_runner.services.plan_execution_claim_service.claim_plan', return_value=mock_claim):
         yield {"async": fake_async, "sync": fake_sync}
+
+
+@pytest.fixture
+def runner_state_db():
+    engine = create_engine(
+        "sqlite://",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    DevRunnerState.__table__.create(bind=engine, checkfirst=True)
+    DevRunnerMergeRequest.__table__.create(bind=engine, checkfirst=True)
+    Session = sessionmaker(bind=engine, autocommit=False, autoflush=False)
+    session = Session()
+    with patch("app.database.SessionLocal", Session):
+        try:
+            yield session
+        finally:
+            session.close()
+            engine.dispose()
 
 
 class TestGetStatus:
@@ -780,6 +804,64 @@ class TestListRunners:
         assert data[0]["display_state"] == "merge_error"
         assert data[0]["display_label"] == "머지 오류"
 
+    async def test_get_all_runners_R_runner_state_db_row_survives_redis_metadata_loss(self, client, mock_executor_redis, runner_state_db):
+        rid = "db-only-runner-001"
+        try:
+            upsert_runner_state(
+                runner_state_db,
+                {
+                    "runner_id": rid,
+                    "plan_file": "docs/plan/db-only.md",
+                    "project": "monitor-page",
+                    "status": "stopped",
+                    "branch": "impl/db-only",
+                    "worktree_path": "D:/work/db-only",
+                    "exit_reason": "completed",
+                    "completed_at": datetime.now(),
+                    "metadata": {"engine": "codex", "trigger": "user", "merge_status": "queued"},
+                },
+            )
+            runner_state_db.commit()
+
+            response = await client.get("/api/v1/dev-runner/runners")
+
+            assert response.status_code == 200
+            rows = [row for row in response.json() if row["runner_id"] == rid]
+            assert len(rows) == 1
+            assert rows[0]["redis_missing"] is True
+            assert rows[0]["plan_file"] == "docs/plan/db-only.md"
+            assert rows[0]["branch"] == "impl/db-only"
+            assert rows[0]["trigger"] == "user"
+        finally:
+            runner_state_db.query(DevRunnerMergeRequest).filter_by(runner_id=rid).delete()
+            runner_state_db.query(DevRunnerState).filter_by(runner_id=rid).delete()
+            runner_state_db.commit()
+
+    async def test_get_all_runners_B_runner_state_redis_active_without_db_backfills_row(self, client, mock_executor_redis, runner_state_db):
+        fake_async = mock_executor_redis["async"]
+        rid = "redis-only-runner-001"
+        prefix = f"plan-runner:runners:{rid}"
+        await fake_async.sadd("plan-runner:active_runners", rid)
+        await fake_async.set(f"{prefix}:status", "running")
+        await fake_async.set(f"{prefix}:trigger", "user")
+        await fake_async.set(f"{prefix}:plan_file", "docs/plan/redis-only.md")
+        await fake_async.set(f"{prefix}:branch", "impl/redis-only")
+        await fake_async.set(f"{prefix}:worktree_path", "D:/work/redis-only")
+        await fake_async.set(f"{prefix}:start_time", datetime.now().isoformat())
+
+        try:
+            response = await client.get("/api/v1/dev-runner/runners")
+
+            assert response.status_code == 200
+            row = runner_state_db.get(DevRunnerState, rid)
+            assert row is not None
+            assert row.plan_file == "docs/plan/redis-only.md"
+            assert row.branch == "impl/redis-only"
+        finally:
+            runner_state_db.query(DevRunnerMergeRequest).filter_by(runner_id=rid).delete()
+            runner_state_db.query(DevRunnerState).filter_by(runner_id=rid).delete()
+            runner_state_db.commit()
+
 
 class TestGetRunnerStatus:
     async def test_get_runner_status_includes_display_fields(self, client, mock_executor_redis):
@@ -922,6 +1004,68 @@ class TestMergeApprovalPayload:
 
 
 class TestMergeQueueReadContract:
+    async def test_get_merge_queue_R_reads_pending_db_rows_before_redis(
+        self,
+        client,
+        mock_executor_redis,
+        runner_state_db,
+    ):
+        rid = "db-merge-runner-001"
+        try:
+            upsert_runner_state(
+                runner_state_db,
+                {
+                    "runner_id": rid,
+                    "plan_file": "docs/plan/db-merge.md",
+                    "status": "running",
+                    "branch": "impl/db-merge",
+                },
+            )
+            create_merge_request(
+                runner_state_db,
+                {
+                    "runner_id": rid,
+                    "branch": "impl/db-merge",
+                    "worktree_path": "D:/work/db-merge",
+                    "plan_file": "docs/plan/db-merge.md",
+                    "state": "pending",
+                },
+            )
+            runner_state_db.commit()
+
+            response = await client.get("/api/v1/dev-runner/merge-queue")
+
+            assert response.status_code == 200
+            rows = [row for row in response.json() if row["runner_id"] == rid]
+            assert len(rows) == 1
+            assert rows[0]["queue_key"].startswith("db:")
+            assert rows[0]["status"] == "queued"
+            assert rows[0]["branch"] == "impl/db-merge"
+        finally:
+            runner_state_db.query(DevRunnerMergeRequest).filter_by(runner_id=rid).delete()
+            runner_state_db.query(DevRunnerState).filter_by(runner_id=rid).delete()
+            runner_state_db.commit()
+
+    async def test_get_merge_queue_B_db_empty_uses_redis_fallback(
+        self,
+        client,
+        mock_executor_redis,
+    ):
+        fake_async = mock_executor_redis["async"]
+        rid = "redis-merge-runner-001"
+        prefix = f"plan-runner:runners:{rid}"
+        await fake_async.rpush("plan-runner:merge-queue:monitor-page", rid)
+        await fake_async.set(f"{prefix}:branch", "impl/redis-merge")
+        await fake_async.set(f"{prefix}:plan_file", "docs/plan/redis-merge.md")
+
+        response = await client.get("/api/v1/dev-runner/merge-queue")
+
+        assert response.status_code == 200
+        rows = [row for row in response.json() if row["runner_id"] == rid]
+        assert len(rows) == 1
+        assert rows[0]["queue_key"] == f"active:merging:{rid}"
+        assert rows[0]["branch"] == "impl/redis-merge"
+
     async def test_get_merge_queue_right_duplicate_completed_runner_ids_return_stable_items(
         self,
         client,

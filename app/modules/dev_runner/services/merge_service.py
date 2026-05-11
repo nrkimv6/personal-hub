@@ -9,6 +9,12 @@ import redis.asyncio as aioredis
 from fastapi import HTTPException
 
 from app.config import logger
+from app.modules.dev_runner.services.dev_runner_state_repository import (
+    MERGE_REQUEST_ACTIVE_STATES,
+    MERGE_REQUEST_HISTORY_STATES,
+    count_merge_requests,
+    list_merge_requests,
+)
 
 __all__ = ["MergeService"]
 
@@ -33,12 +39,88 @@ class MergeService:
     # merge queue 조회
     # ------------------------------------------------------------------
 
+    def _db_session(self):
+        from app.database import SessionLocal
+
+        return SessionLocal()
+
+    @staticmethod
+    def _merge_request_queue_status(state: str) -> str:
+        return {"pending": "queued", "claimed": "merging"}.get(state, state)
+
+    def _merge_request_to_queue_item(self, row) -> dict:
+        return {
+            "queue_key": f"db:{row.id}",
+            "runner_id": row.runner_id,
+            "branch": row.branch or "",
+            "plan_file": row.plan_file or "",
+            "project": row.project or "monitor-page",
+            "status": self._merge_request_queue_status(row.state),
+            "timestamp": row.created_at.isoformat() if row.created_at else "",
+            "worktree_path": row.worktree_path or "",
+        }
+
+    def _merge_request_to_history_item(self, row) -> dict:
+        success = row.state in {"completed", "done", "merged"}
+        return {
+            "runner_id": row.runner_id,
+            "branch": row.branch or "",
+            "plan_file": row.plan_file or "",
+            "project": row.project or "monitor-page",
+            "timestamp": (row.completed_at or row.created_at).isoformat() if (row.completed_at or row.created_at) else "",
+            "worktree_path": row.worktree_path or "",
+            "status": row.state,
+            "success": success,
+            "message": row.error_detail or "",
+            "reason": row.error_detail if not success else None,
+        }
+
+    def _read_db_merge_queue(self) -> list[dict] | None:
+        try:
+            db = self._db_session()
+            try:
+                rows = list_merge_requests(db, states=MERGE_REQUEST_ACTIVE_STATES)
+                return [self._merge_request_to_queue_item(row) for row in rows]
+            finally:
+                db.close()
+        except Exception as exc:
+            logger.debug("[dev-runner] DB merge queue read skipped: %s", exc)
+            return None
+
+    def _read_db_merge_queue_length(self) -> int | None:
+        try:
+            db = self._db_session()
+            try:
+                return count_merge_requests(db, states=("pending",))
+            finally:
+                db.close()
+        except Exception as exc:
+            logger.debug("[dev-runner] DB merge queue length read skipped: %s", exc)
+            return None
+
+    def _read_db_merge_history(self, limit: int) -> list[dict] | None:
+        try:
+            db = self._db_session()
+            try:
+                rows = list_merge_requests(db, states=MERGE_REQUEST_HISTORY_STATES, limit=limit)
+                rows = sorted(rows, key=lambda row: row.completed_at or row.created_at or datetime.min, reverse=True)
+                return [self._merge_request_to_history_item(row) for row in rows[:limit]]
+            finally:
+                db.close()
+        except Exception as exc:
+            logger.debug("[dev-runner] DB merge history read skipped: %s", exc)
+            return None
+
     async def get_merge_queue(self) -> list:
         """merge 상태 통합 조회 — merging/queued/done 3개 소스 병합
 
         merge_queue.py 기반: SCAN plan-runner:merge-queue:* 1패턴만 사용.
         index 0 = merging 러너, index 1+ = queued 러너.
         """
+        db_rows = self._read_db_merge_queue()
+        if db_rows:
+            return db_rows
+
         try:
             result = []
             seen_runners: set[str] = set()
@@ -82,6 +164,10 @@ class MergeService:
         index 0 = 실행 중 러너이므로 대기 수 = LLEN - 1.
         외부 소비자(모니터링 스크립트 등)용 경량 엔드포인트.
         """
+        db_count = self._read_db_merge_queue_length()
+        if db_count:
+            return db_count
+
         try:
             total = 0
             async for key in self.async_redis.scan_iter(match="plan-runner:merge-queue:*"):
@@ -143,6 +229,10 @@ class MergeService:
 
     async def get_merge_history(self, limit: int = 50) -> list:
         """Redis merge-results 이력 조회 → list[MergeHistoryItem] (최신순)"""
+        db_rows = self._read_db_merge_history(limit)
+        if db_rows:
+            return db_rows
+
         try:
             raw_items = await self.async_redis.lrange("plan-runner:merge-results", 0, limit - 1)
             result = []
