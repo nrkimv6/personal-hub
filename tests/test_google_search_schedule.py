@@ -391,6 +391,54 @@ class TestGoogleScheduleAPI:
         assert data["enabled"] is True
         assert data["expires_at"].startswith(expires_at)
 
+    def test_wanderlust_saved_search_and_schedule_registration_contract(self, test_client):
+        """T3: 원더러스트 초대권 7일 알림 등록 데이터 모양을 고정한다."""
+        saved_response = test_client.post(
+            "/api/v1/google/saved",
+            json={
+                "name": "[auto] 원더러스트 초대권 - 7일",
+                "query": "원더러스트 초대권",
+                "date_filter": "24h",
+                "max_pages": 1,
+                "notify_on_new": True,
+            },
+        )
+        assert saved_response.status_code == 200
+        saved = saved_response.json()
+        assert saved["query"] == "원더러스트 초대권"
+        assert saved["date_filter"] == "24h"
+        assert saved["max_pages"] == 1
+        assert saved["notify_on_new"] is True
+
+        schedule_response = test_client.post(
+            "/api/v1/google/schedule/",
+            json={
+                "saved_search_id": saved["id"],
+                "display_name": "[auto] 원더러스트 초대권 - 7일 자동 검색",
+                "schedule_type": "time_window",
+                "schedule_value": {
+                    "time_windows": [
+                        {"start": "09:00", "end": "09:00"},
+                        {"start": "21:00", "end": "21:00"},
+                    ],
+                    "daily_runs": 2,
+                    "min_interval_hours": 8,
+                },
+                "expires_at": "2026-05-18T23:59:59+09:00",
+                "enabled": True,
+            },
+        )
+        assert schedule_response.status_code == 201
+        schedule = schedule_response.json()
+        assert schedule["enabled"] is True
+        assert schedule["expires_at"] == "2026-05-18T23:59:59+09:00"
+        assert schedule["schedule_value"]["daily_runs"] == 2
+        assert schedule["schedule_value"]["min_interval_hours"] == 8
+        assert schedule["schedule_value"]["time_windows"] == [
+            {"start": "09:00", "end": "09:00"},
+            {"start": "21:00", "end": "21:00"},
+        ]
+
     def test_list_schedules(self, test_client, db_session, sample_google_schedule):
         """스케줄 목록 조회 API."""
         response = test_client.get("/api/v1/google/schedule/")

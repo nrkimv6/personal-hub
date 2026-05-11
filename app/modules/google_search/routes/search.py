@@ -17,6 +17,7 @@ import logging
 import uuid
 from datetime import datetime
 from typing import List, Optional
+from urllib.parse import parse_qs, urlparse
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import JSONResponse
@@ -48,6 +49,35 @@ from app.modules.google_search.models.schemas import (
 logger = logging.getLogger("google_search.routes")
 
 router = APIRouter(prefix="/api/v1/google", tags=["google-search"])
+
+GOOGLE_TBS_TO_DATE_FILTER = {
+    "qdr:h": "1h",
+    "qdr:d": "24h",
+    "qdr:w": "1w",
+    "qdr:m": "1m",
+    "qdr:y": "1y",
+}
+
+
+def _normalize_google_search_input(
+    query: str,
+    date_filter: Optional[str] = None,
+) -> tuple[str, Optional[str]]:
+    """Google 검색 URL 입력을 저장 검색 모델 값으로 정규화."""
+    raw_query = (query or "").strip()
+    parsed = urlparse(raw_query)
+    if not parsed.scheme or "google." not in parsed.netloc or not parsed.path.startswith("/search"):
+        return raw_query, date_filter
+
+    params = parse_qs(parsed.query)
+    normalized_query = (params.get("q") or [raw_query])[0].strip() or raw_query
+    normalized_date_filter = date_filter
+
+    if not normalized_date_filter:
+        tbs = (params.get("tbs") or [None])[0]
+        normalized_date_filter = GOOGLE_TBS_TO_DATE_FILTER.get(tbs)
+
+    return normalized_query, normalized_date_filter
 
 
 # ============================================================
@@ -355,10 +385,15 @@ async def create_saved_search(
     if data.search_params:
         search_params_json = json.dumps(data.search_params)
 
+    normalized_query, normalized_date_filter = _normalize_google_search_input(
+        data.query,
+        data.date_filter,
+    )
+
     saved = GoogleSavedSearch(
         name=data.name,
-        query=data.query,
-        date_filter=data.date_filter,
+        query=normalized_query,
+        date_filter=normalized_date_filter,
         max_pages=data.max_pages,
         service_account_id=data.service_account_id,
         is_favorite=data.is_favorite,
@@ -414,6 +449,15 @@ async def update_saved_search(
 
     # 부분 업데이트
     update_data = data.model_dump(exclude_unset=True)
+    if "query" in update_data:
+        normalized_query, normalized_date_filter = _normalize_google_search_input(
+            update_data["query"],
+            update_data.get("date_filter"),
+        )
+        update_data["query"] = normalized_query
+        if normalized_date_filter is not None:
+            update_data["date_filter"] = normalized_date_filter
+
     for field, value in update_data.items():
         if field == "search_params" and value is not None:
             value = json.dumps(value)
