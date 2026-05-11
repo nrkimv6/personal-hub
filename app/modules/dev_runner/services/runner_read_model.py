@@ -16,6 +16,13 @@ RunnerMetadataState = bool | Literal["unknown"]
 
 @dataclass(frozen=True)
 class RunnerReadModel:
+    """Shared read model for runner state.
+
+    Priority contract (enforced by build_display_state):
+      merge_status=approval_required overrides running=False → display is "approval_required",
+      not "stopped". Callers must not short-circuit on running=False alone.
+    """
+
     runner_id: str
     running: bool
     merge_status: str | None
@@ -23,6 +30,10 @@ class RunnerReadModel:
     remaining_post_merge_tasks: int = 0
     merge_evidence_missing: bool = False
     git: RunnerGitMetadata | None = None
+
+    @property
+    def is_approval_required(self) -> bool:
+        return self.merge_status == "approval_required"
 
     @property
     def branch_exists(self) -> RunnerMetadataState:

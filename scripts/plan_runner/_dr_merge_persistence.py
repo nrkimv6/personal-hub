@@ -167,6 +167,28 @@ class MergePersistence:
         return "__MERGE_COMPLETED::merge_failed__"
 
     @staticmethod
+    def _extract_service_lock_details(message: str) -> dict:
+        """service_lock 메시지에서 changed/running 목록을 구조화해 반환한다.
+
+        메시지 형식:
+            MERGE_PRECHECK_FAILED[service_lock]: ...\n- changed: f1, f2\n- running: s1, s2
+        """
+        details: dict = {}
+        if not message:
+            return details
+        for line in message.splitlines():
+            stripped = line.strip()
+            if stripped.startswith("- changed:"):
+                text = stripped[len("- changed:"):].strip()
+                if text:
+                    details["service_lock_changed"] = [f.strip() for f in text.split(",") if f.strip()]
+            elif stripped.startswith("- running:"):
+                text = stripped[len("- running:"):].strip()
+                if text:
+                    details["service_lock_running"] = [s.strip() for s in text.split(",") if s.strip()]
+        return details
+
+    @staticmethod
     def build_gate_evidence_summary(result: dict) -> dict | None:
         if not isinstance(result, dict):
             return None
@@ -179,6 +201,7 @@ class MergePersistence:
             or post_merge_done.get("status")
             or result.get("merge_status")
         )
+        message = result.get("message") or post_merge_done.get("message")
         summary = {
             "tool": "merge-test",
             "status": result.get("merge_status") or result.get("status") or post_merge_done.get("status"),
@@ -188,8 +211,11 @@ class MergePersistence:
             "merge_snapshot_path": result.get("snapshot_path"),
             "done_post_merge_status": post_merge_done.get("status"),
             "restart_after_merge": post_merge_done.get("status") == "restart_scheduled",
-            "message": result.get("message") or post_merge_done.get("message"),
+            "message": message,
         }
+        if "service_lock" in (reason or "").lower():
+            sl_details = MergePersistence._extract_service_lock_details(message or "")
+            summary.update(sl_details)
         return {key: value for key, value in summary.items() if value not in (None, "")}
 
     def publish_completed_sentinel(self, result: dict) -> None:
