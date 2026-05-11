@@ -10,7 +10,9 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.database import Base, get_db
+from app.models.plan_record import PlanRecord
 from app.models.tracking_item import TrackingItem
+from app.models.tracking_item import TrackingItemPlanLink
 from app.routes.tracking import router as tracking_router
 from app.services.tracking_service import calculate_tracking_status
 
@@ -151,3 +153,40 @@ def test_tracking_list_includes_nightly_repo_sync_blocker_ready(tracking_api_con
     assert len(items) == 1
     assert items[0]["title"] == "Nightly repo sync blocked"
     assert items[0]["status"] == "ready"
+
+
+def test_tracking_list_keeps_wait_plan_upcoming_item_without_status_collision(tracking_api_context):
+    client, session = tracking_api_context
+    now = datetime.now()
+    plan = PlanRecord(
+        filename_hash="wait-plan-upcoming-hash",
+        file_path="docs/plan/2026-05-11_waiting.md",
+        title="예약대기 plan",
+        status="예약대기",
+    )
+    wait_item = TrackingItem(
+        title="예약대기 plan",
+        description="auto-track waiting plan",
+        start_at=now + timedelta(days=2),
+    )
+    session.add_all(
+        [
+            TrackingItem(title="Ready item", due_at=now + timedelta(hours=1)),
+            TrackingItem(title="Overdue item", due_at=now - timedelta(hours=1)),
+            plan,
+            wait_item,
+        ]
+    )
+    session.flush()
+    session.add(TrackingItemPlanLink(tracking_item_id=wait_item.id, plan_record_id=plan.id))
+    session.commit()
+
+    response = client.get("/api/v1/tracking/items")
+
+    assert response.status_code == 200
+    items = response.json()["items"]
+    assert [item["title"] for item in items] == ["Overdue item", "Ready item", "예약대기 plan"]
+    waiting = items[2]
+    assert waiting["status"] == "upcoming"
+    assert waiting["linked_plans"][0]["title"] == "예약대기 plan"
+    assert waiting["linked_plans"][0]["status"] == "예약대기"
