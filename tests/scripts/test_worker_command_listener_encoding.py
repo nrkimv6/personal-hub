@@ -79,3 +79,25 @@ def test_execute_worker_action_restart_Re_preserves_existing_worker_restart(list
     assert result["pid"] == 1234
     assert args[args.index("-Action") + 1] == "restart"
     assert "-Public" not in args
+
+
+def test_execute_worker_action_restart_frontend_public_T3_executes_temp_script(listener, tmp_path, monkeypatch):
+    """T3: 실제 PowerShell script 파일을 통해 restart-frontend/-Public argv를 read-back한다."""
+    args_file = tmp_path / "args.txt"
+    script = tmp_path / "browser-workers.ps1"
+    script.write_text(
+        "\n".join(
+            [
+                "param([string]$Action, [switch]$Public)",
+                f"Set-Content -LiteralPath '{args_file}' -Value \"$Action|$($Public.IsPresent)\" -Encoding UTF8",
+                "Write-Output 'ok'",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(listener, "BROWSER_WORKERS_SCRIPT", script)
+
+    result = listener.execute_worker_action("restart-frontend", public=True)
+
+    assert result["success"] is True
+    assert args_file.read_text(encoding="utf-8-sig").strip() == "restart-frontend|True"
