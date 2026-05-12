@@ -86,6 +86,15 @@ git worktree list | grep -q ".worktrees/plans" || git worktree add .worktrees/pl
 - 커밋 스크립트 사용:
   `& "D:\work\project\tools\common\commit.ps1" "type: message"`
 
+## Child Helper Contract
+
+- mirror surface(`.agents/.claude/.gemini/.agent`)가 `common\tools\<helper>.ps1|.sh|.py`를 언급하면 monitor-page child repo에서는 다음 순서로 해석한다:
+  1. repo-local `common\tools\<helper>`
+  2. `D:\work\project\service\wtools\common\tools\<helper>`
+  3. 둘 다 없으면 `helper_unavailable`로 기록하고 직접 read-back fallback을 사용한다.
+- `D:\work\project\tools\common\commit.ps1`, `commit.sh`, `version-bump.ps1`, `version-bump.sh` 같은 legacy common script는 `common\tools` helper surface가 아니다. helper missing과 섞어 판단하지 않는다.
+- mirror 문서를 직접 고쳐 child 경로 문제를 해결하지 않는다. 진단은 project-owned `scripts\diagnostics\check-helper-contract.ps1`를 사용한다.
+
 ## Proxy Operations
 
 - 공유 프록시는 `proxy_list_get.txt` / `proxy_list_post.txt`를 우선 읽고, 파일이 없으면 `proxy_list.txt`로 fallback한다.
