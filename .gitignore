@@ -24,6 +24,7 @@ data/browser_profiles/
 *.db-wal
 data/llm_images/
 .playwright
+.playwright-mcp/
 htmlcov/
 .coverage
 .coverage.*
