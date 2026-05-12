@@ -16,7 +16,7 @@
 - `_build_worktree.ps1`는 setup 전용 helper 예외이며, implement 중 임의 probe 근거로 사용하면 안 된다.
 - 스킬 원본 수정: monitor-page의 `.claude/skills`, `.claude/agents` 직접 수정 금지  
   `D:\work\project\service\wtools\.claude\`에서 수정 후 동기화
-- `.claude/skills/` 또는 `.agents/skills/` 수정 시에는 다른 경로도 함께 갱신해 드리프트를 방지한다.
+- `.claude/skills/` 또는 `.agents/skills/`를 수정할 때는 wtools 원본에서 반영이 필요한지 검토하고 결과를 `반영|비반영|별도 계획|해당 없음`으로 기록한다. monitor-page mirror surface 직접 수정은 금지한다.
 - mirror surface(`.agents/`, `.agent/`, `.claude/`, `.gemini/`) 직접 수정·로컬 커밋 금지. wtools 원본 수정 후 원격 sync commit을 `git pull --ff-only`로만 수신한다.
 - backup/restore 브랜치를 main에 반영할 때 source branch에 mirror/skill 변경이 섞여 있는지 먼저 확인한다: `git diff --name-status <base> <source> -- .agents .agent .claude .gemini`. 사용자가 skill 제외를 지시했거나 mirror 변경이 범위 밖이면 병합 입력 단계에서 제외하고, merge 전후 `.agents/.agent/.claude/.gemini` diff가 비어 있지 않으면 완료 처리 금지.
 - root `main`과 `origin/main` 관계는 `git rev-list --left-right --count HEAD...origin/main`으로 분류한다. `behind-only`는 `git pull --ff-only` 수신 후보이고, `diverged`는 즉시 blocker가 아니라 mirror diff와 충돌 가능성을 먼저 보고하는 `명시 merge 결정 필요` 상태다. 단, sync tip을 plain `git pull`이나 push-first local merge로 닫지 않는다.
