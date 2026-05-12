@@ -50,3 +50,21 @@ test('quota store reuses llm api wrapper', () => {
 	assert.match(source, /llmApi\.getProfileStatus\(\)/);
 	assert.doesNotMatch(source, /fetch\('\/api\/v1\/llm\//);
 });
+
+test('sleep-now separates mandatory status schedule load from logs stats fallback', () => {
+	const source = read('../src/routes/system/SleepNowTab.svelte');
+	assert.match(source, /const \[statusRes, scheduleRes\] = await Promise\.all\(\[/);
+	assert.match(source, /void Promise\.allSettled\(\[loadLogs\(\), loadStats\(\)\]\)/);
+	assert.match(source, /fetchWithTimeout\(`\$\{API_BASE\}\/logs\?days=7`, \{\}, 5000\)/);
+	assert.match(source, /fetchWithTimeout\(`\$\{API_BASE\}\/stats\?days=7`, \{\}, 5000\)/);
+});
+
+test('memory live view uses stale while revalidate timeout and in-flight guard', () => {
+	const source = read('../src/routes/system/MemoryTab.svelte');
+	assert.match(source, /let initialMemoryLoaded = \$state\(false\)/);
+	assert.match(source, /let memoryRequestInFlight = \$state\(false\)/);
+	assert.match(source, /if \(memoryRequestInFlight\) \{\s*return;\s*\}/);
+	assert.match(source, /fetchWithTimeout\('\/api\/v1\/system\/memory', \{\}, 5000\)/);
+	assert.match(source, /\{#if loading && !data\}/);
+	assert.match(source, /최근 갱신 실패/);
+});

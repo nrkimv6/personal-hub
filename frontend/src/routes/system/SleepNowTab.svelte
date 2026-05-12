@@ -39,6 +39,8 @@
 	let logs = $state<LogEntry[]>([]);
 	let stats = $state<DailyStats[]>([]);
 	let loading = $state(true);
+	let logsLoading = $state(false);
+	let statsLoading = $state(false);
 	let error = $state<string | null>(null);
 
 	// Emergency unlock form
@@ -80,26 +82,52 @@
 	const API_BASE = '/api/v1/sleep-now';
 
 	async function fetchData() {
-		loading = true;
+		if (!status) loading = true;
 		error = null;
 		try {
-			const [statusRes, scheduleRes, logsRes, statsRes] = await Promise.all([
+			const [statusRes, scheduleRes] = await Promise.all([
 				fetchWithTimeout(`${API_BASE}/status`),
-				fetchWithTimeout(`${API_BASE}/schedule`),
-				fetchWithTimeout(`${API_BASE}/logs?days=7`),
-				fetchWithTimeout(`${API_BASE}/stats?days=7`)
+				fetchWithTimeout(`${API_BASE}/schedule`)
 			]);
 
 			if (!statusRes.ok) throw new Error('상태 조회 실패');
+			if (!scheduleRes.ok) throw new Error('스케줄 조회 실패');
 
 			status = await statusRes.json();
 			schedule = await scheduleRes.json();
-			logs = await logsRes.json();
-			stats = await statsRes.json();
+			if (activeTab === 'settings') initializeSettingsForm();
+			loading = false;
+			void Promise.allSettled([loadLogs(), loadStats()]);
 		} catch (e) {
 			error = e instanceof Error ? e.message : '데이터 로드 실패';
 		} finally {
 			loading = false;
+		}
+	}
+
+	async function loadLogs() {
+		logsLoading = true;
+		try {
+			const logsRes = await fetchWithTimeout(`${API_BASE}/logs?days=7`, {}, 5000);
+			if (!logsRes.ok) throw new Error('로그 조회 실패');
+			logs = await logsRes.json();
+		} catch {
+			// 보조 데이터 실패는 기존 표시를 유지한다.
+		} finally {
+			logsLoading = false;
+		}
+	}
+
+	async function loadStats() {
+		statsLoading = true;
+		try {
+			const statsRes = await fetchWithTimeout(`${API_BASE}/stats?days=7`, {}, 5000);
+			if (!statsRes.ok) throw new Error('통계 조회 실패');
+			stats = await statsRes.json();
+		} catch {
+			// 보조 데이터 실패는 기존 표시를 유지한다.
+		} finally {
+			statsLoading = false;
 		}
 	}
 
@@ -370,12 +398,17 @@
 		<div class="flex items-center justify-center h-64">
 			<div class="text-muted-foreground">로딩 중...</div>
 		</div>
-	{:else if error}
+	{:else if error && !status}
 		<div class="bg-error-light border border-red-200 rounded-lg p-4 text-error">
 			{error}
 		</div>
 	{:else if activeTab === 'status'}
 		<!-- Status Tab -->
+		{#if error}
+			<div class="mb-4 bg-error-light border border-red-200 rounded-lg p-3 text-error text-sm">
+				{error}
+			</div>
+		{/if}
 		<!-- Status Card -->
 		<div class="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-6">
 			<!-- Current Status -->
@@ -456,7 +489,9 @@
 			<!-- Weekly Stats -->
 			<div class="bg-white rounded-lg shadow p-6">
 				<h2 class="text-lg font-semibold text-foreground mb-4">주간 통계</h2>
-				{#if stats.length > 0}
+				{#if statsLoading && stats.length === 0}
+					<div class="text-sm text-muted-foreground">통계 로딩 중...</div>
+				{:else if stats.length > 0}
 					<div class="space-y-2">
 						<div class="text-sm">
 							<span class="font-medium text-foreground">총 우회 시도:</span>
@@ -543,7 +578,9 @@
 		<!-- Recent Logs -->
 		<div class="bg-white rounded-lg shadow p-6">
 			<h2 class="text-lg font-semibold text-foreground mb-4">최근 로그</h2>
-			{#if logs.length > 0}
+			{#if logsLoading && logs.length === 0}
+				<div class="text-sm text-muted-foreground text-center py-8">로그 로딩 중...</div>
+			{:else if logs.length > 0}
 				<div class="overflow-x-auto">
 					<table class="w-full text-sm">
 						<thead class="bg-background">

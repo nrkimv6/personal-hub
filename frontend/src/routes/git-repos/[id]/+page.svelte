@@ -47,6 +47,8 @@
   ];
   let loading = $state(true);
   let working = $state(false);
+  let refreshingStatus = $state(false);
+  let refreshAttempt = $state(0);
   let error = $state('');
   let toast = $state('');
 
@@ -83,35 +85,62 @@
     loading = true;
     error = '';
     try {
-      // refreshRepo는 이제 task_id를 반환 — 폴링 후 상태 재로드
-      await gitReposApi.executeAndPoll(
-        () => gitReposApi.refreshRepo(repoId),
-        { interval: 500, maxRetries: 30 }
-      );
-
       await loadRepo();
+      loading = false;
       await Promise.all([loadStatus(), loadLog(), loadOperations()]);
     } catch (e) {
-      repo = null;
-      error = e instanceof Error ? e.message : '로드 실패';
+      if (repo) {
+        showToast(e instanceof Error ? e.message : '로드 실패', 'error');
+      } else {
+        error = e instanceof Error ? e.message : '로드 실패';
+      }
     } finally {
       loading = false;
+    }
+
+    if (repo) {
+      void refreshRepoStatus();
+    }
+  }
+
+  async function refreshRepoStatus() {
+    if (refreshingStatus) return;
+    refreshingStatus = true;
+    refreshAttempt = 0;
+    try {
+      await gitReposApi.executeAndPoll(
+        () => gitReposApi.refreshRepo(repoId),
+        {
+          interval: 500,
+          maxRetries: 30,
+          onPending: (attempt) => {
+            refreshAttempt = attempt;
+          }
+        }
+      );
+      await Promise.all([loadRepo(), loadStatus(), loadLog(), loadOperations()]);
+    } catch (e) {
+      showToast(e instanceof Error ? e.message : '상태 갱신 실패', 'error');
+    } finally {
+      refreshingStatus = false;
     }
   }
 
   async function loadStatus() {
-    try {
-      status = await gitReposApi.getStatus(repoId);
-      // diff 로드
-      const [d, sd] = await Promise.all([
-        gitReposApi.getDiff(repoId, false),
-        gitReposApi.getDiff(repoId, true),
-      ]);
-      diff = d.diff;
-      stagedDiff = sd.diff;
-    } catch (e) {
+    const [statusResult, diffResult, stagedDiffResult] = await Promise.allSettled([
+      gitReposApi.getStatus(repoId),
+      gitReposApi.getDiff(repoId, false),
+      gitReposApi.getDiff(repoId, true),
+    ]);
+
+    if (statusResult.status === 'fulfilled') {
+      status = statusResult.value;
+    } else {
       status = null;
     }
+
+    diff = diffResult.status === 'fulfilled' ? diffResult.value.diff : '';
+    stagedDiff = stagedDiffResult.status === 'fulfilled' ? stagedDiffResult.value.diff : '';
   }
 
   async function loadLog() {
@@ -399,6 +428,11 @@
       {/if}
       {#if r.last_behind != null && r.last_behind > 0}
         <span class="text-xs text-red-500 dark:text-red-400 self-center">↓{r.last_behind} behind</span>
+      {/if}
+      {#if refreshingStatus}
+        <span class="text-xs text-gray-500 dark:text-gray-400 self-center flex items-center gap-1">
+          <Loader2 size={12} class="animate-spin" /> 상태 갱신 중{refreshAttempt ? ` (${refreshAttempt})` : ''}
+        </span>
       {/if}
     </div>
 
