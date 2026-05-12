@@ -1,5 +1,8 @@
 """
-WorkerService 단위 테스트
+WorkerService 단위 테스트.
+
+이 파일은 PID file read/kill process boundary를 검증한다. /api/v1/system/status
+read-model 우선순위와 display payload 계약은 tests/test_system_worker_status*.py에 둔다.
 """
 import pytest
 from pathlib import Path

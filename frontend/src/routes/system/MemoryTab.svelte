@@ -69,6 +69,8 @@
   // 상태
   let data = $state<MemoryResponse | null>(null);
   let loading = $state(true);
+  let initialMemoryLoaded = $state(false);
+  let memoryRequestInFlight = $state(false);
   let error = $state<string | null>(null);
   let lastUpdated = $state<Date | null>(null);
   let activeView = $state<'live' | 'history'>('live');
@@ -84,8 +86,15 @@
   let intervalId: ReturnType<typeof setInterval> | null = null;
 
   async function fetchMemory() {
+    if (memoryRequestInFlight) {
+      return;
+    }
+    memoryRequestInFlight = true;
+    if (!initialMemoryLoaded && !data) {
+      loading = true;
+    }
     try {
-      const resp = await fetchWithTimeout('/api/v1/system/memory');
+      const resp = await fetchWithTimeout('/api/v1/system/memory', {}, 5000);
       if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
       data = await resp.json();
       error = null;
@@ -96,7 +105,9 @@
     } catch (e) {
       error = e instanceof Error ? e.message : '알 수 없는 오류';
     } finally {
+      initialMemoryLoaded = true;
       loading = false;
+      memoryRequestInFlight = false;
     }
   }
 
@@ -261,28 +272,29 @@
         onclick={refreshActiveView}
         class="px-3 py-1 rounded bg-gray-100 hover:bg-gray-200 text-gray-700 text-xs font-medium transition-colors flex items-center gap-1"
       >
-        <RefreshCw class="w-3 h-3 {((activeView === 'live' && loading) || (activeView === 'history' && historyLoading)) ? 'animate-spin' : ''}" />
+        <RefreshCw class="w-3 h-3 {((activeView === 'live' && memoryRequestInFlight) || (activeView === 'history' && historyLoading)) ? 'animate-spin' : ''}" />
         새로고침
       </button>
     </div>
   </div>
 
   {#if activeView === 'live'}
-    {#if loading}
+    {#if loading && !data}
       <div class="space-y-4 animate-pulse">
         <div class="h-24 bg-gray-200 rounded-lg"></div>
         <div class="h-24 bg-gray-200 rounded-lg"></div>
         <div class="h-48 bg-gray-200 rounded-lg"></div>
       </div>
-    {:else if error}
-      <div class="p-4 rounded-lg bg-red-50 border border-red-200 text-red-700 flex items-start gap-2">
-        <AlertTriangle class="w-5 h-5 shrink-0 mt-0.5" />
-        <div>
-          <p class="font-medium">메모리 정보 조회 실패</p>
-          <p class="text-sm mt-1">{error}</p>
-        </div>
-      </div>
     {:else if data}
+      {#if error}
+        <div class="p-4 rounded-lg bg-amber-50 border border-amber-200 text-amber-800 flex items-start gap-2">
+          <AlertTriangle class="w-5 h-5 shrink-0 mt-0.5" />
+          <div>
+            <p class="font-medium">최근 갱신 실패</p>
+            <p class="text-sm mt-1">{error}</p>
+          </div>
+        </div>
+      {/if}
       <div class="bg-white rounded-lg border border-gray-200 p-5 shadow-sm">
         <div class="flex items-center justify-between mb-3">
           <h3 class="font-semibold text-gray-800 flex items-center gap-2">
@@ -369,6 +381,14 @@
       </div>
 
       <p class="text-xs text-gray-400 text-center">30초마다 자동 새로고침</p>
+    {:else if error}
+      <div class="p-4 rounded-lg bg-red-50 border border-red-200 text-red-700 flex items-start gap-2">
+        <AlertTriangle class="w-5 h-5 shrink-0 mt-0.5" />
+        <div>
+          <p class="font-medium">메모리 정보 조회 실패</p>
+          <p class="text-sm mt-1">{error}</p>
+        </div>
+      </div>
     {/if}
   {:else}
     <div class="space-y-4">
