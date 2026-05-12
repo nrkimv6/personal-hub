@@ -1,7 +1,7 @@
 """Focused InstagramFeedScheduler contract tests."""
 
 import json
-from datetime import date, datetime, time, timedelta
+from datetime import date, datetime, timedelta
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -16,38 +16,6 @@ from app.services.task_schedule_service import TaskScheduleService
 from app.worker.schedule_handler_base import ClaimedRun, ScheduleExecutionSpec, WorkerContext
 
 
-OPERATIONAL_EXACT_SLOTS = ["07:00", "09:20", "10:00", "12:00", "14:00", "15:00", "22:00", "17:00"]
-
-
-def _operational_windows() -> list[TimeWindow]:
-    return [TimeWindow(start=value, end=value) for value in OPERATIONAL_EXACT_SLOTS]
-
-
-def _legacy_exact_slot_schedule(day: date) -> list[datetime]:
-    import hashlib
-    import random
-
-    rng = random.Random(int(hashlib.md5(f"instagram_scheduler_{day.isoformat()}".encode()).hexdigest()[:8], 16))
-    generated: list[datetime] = []
-    for window in _operational_windows():
-        start = _to_minutes(window.start)
-        end = _to_minutes(window.end)
-        if end <= start:
-            end += 24 * 60
-        minutes = rng.randint(start, end)
-        run_date = day
-        if minutes >= 24 * 60:
-            minutes -= 24 * 60
-            run_date = day + timedelta(days=1)
-        generated.append(datetime.combine(run_date, time(hour=minutes // 60, minute=minutes % 60)))
-    return sorted(generated)
-
-
-def _to_minutes(value: str) -> int:
-    hour, minute = value.split(":")
-    return int(hour) * 60 + int(minute)
-
-
 def _sqlite_session():
     engine = create_engine("sqlite:///:memory:")
     TaskSchedule.__table__.create(engine)
@@ -55,201 +23,168 @@ def _sqlite_session():
     return sessionmaker(bind=engine)()
 
 
-def test_operational_exact_slot_schedule_generates_eight_same_day_slots():
-    run_date = datetime(2026, 5, 4).date()
-    scheduler = InstagramScheduler(daily_runs=8, time_windows=_operational_windows())
+def _create_instagram_schedule(db, windows: list[dict[str, str]] | None = None) -> TaskSchedule:
+    schedule = TaskSchedule(
+        name="instagram_feed_account_6",
+        target_type=TaskSchedule.TARGET_TYPE_INSTAGRAM_FEED,
+        schedule_type=TaskSchedule.SCHEDULE_TYPE_TIME_WINDOW,
+        enabled=True,
+        schedule_value=json.dumps(
+            {
+                "daily_runs": len(windows or [{"start": "09:00", "end": "12:00"}]),
+                "time_windows": windows or [{"start": "09:00", "end": "12:00"}],
+            }
+        ),
+    )
+    schedule.set_target_config({"service_account_id": 6, "min_interval_hours": 2})
+    db.add(schedule)
+    db.commit()
+    db.refresh(schedule)
+    return schedule
 
-    schedule = scheduler.generate_daily_schedule(run_date)
 
-    assert schedule == [
-        datetime(2026, 5, 4, 7, 0),
-        datetime(2026, 5, 4, 9, 20),
-        datetime(2026, 5, 4, 10, 0),
-        datetime(2026, 5, 4, 12, 0),
-        datetime(2026, 5, 4, 14, 0),
-        datetime(2026, 5, 4, 15, 0),
-        datetime(2026, 5, 4, 17, 0),
-        datetime(2026, 5, 4, 22, 0),
-    ]
-
-
-def test_get_due_run_time_R_exact_slot_due_within_tolerance():
-    scheduler = InstagramScheduler(daily_runs=8, time_windows=_operational_windows())
-
-    due = scheduler.get_due_run_time(
-        last_run=datetime(2026, 5, 3, 18, 53),
-        now=datetime(2026, 5, 4, 22, 4),
-        tolerance_minutes=5,
-        min_interval_hours=2,
+def test_exact_slot_schedule_returns_empty_and_requires_repair():
+    scheduler = InstagramScheduler(
+        daily_runs=8,
+        time_windows=[
+            TimeWindow(start="07:00", end="07:00"),
+            TimeWindow(start="09:20", end="09:20"),
+        ],
     )
 
-    assert due == datetime(2026, 5, 4, 22, 0)
+    assert scheduler.generate_daily_schedule(date(2026, 5, 4)) == []
 
 
-def test_get_due_run_time_T_exact_slot_not_due_after_tolerance():
-    scheduler = InstagramScheduler(daily_runs=8, time_windows=_operational_windows())
-
-    due = scheduler.get_due_run_time(
-        last_run=datetime(2026, 5, 3, 18, 53),
-        now=datetime(2026, 5, 4, 22, 9),
-        tolerance_minutes=5,
-        min_interval_hours=2,
-    )
-
-    assert due is None
-
-
-def test_legacy_exact_slot_bug_Re_would_have_generated_2209():
-    assert _legacy_exact_slot_schedule(date(2026, 5, 4))[0] == datetime(2026, 5, 4, 22, 9)
-
-
-def test_claim_run_records_scheduled_for_snapshot():
+def test_claim_run_R_runs_due_slot_even_when_last_run_was_recent(monkeypatch):
     scheduler = InstagramFeedScheduler()
     schedule = MagicMock(spec=TaskSchedule)
     schedule.id = 7
     schedule.schedule_value = json.dumps(
-        {
-            "daily_runs": 1,
-            "time_windows": [{"start": "09:00", "end": "09:00"}],
-        }
+        {"daily_runs": 1, "time_windows": [{"start": "09:00", "end": "12:00"}]}
     )
-    schedule.get_target_config.return_value = {
-        "service_account_id": 6,
-        "min_interval_hours": 0,
-    }
+    schedule.get_target_config.return_value = {"service_account_id": 6, "min_interval_hours": 2}
     svc = MagicMock()
-    svc.get_latest_run.return_value = None
+    svc.get_oldest_deferred_run.return_value = None
+    svc.get_latest_run.return_value = MagicMock(started_at=datetime(2026, 5, 3, 9, 59, 55))
     svc.has_active_run.return_value = False
+    svc.is_slot_claimed.return_value = False
     svc.start_run.return_value = MagicMock(id=11)
-    ctx = WorkerContext(worker_name="test_worker", browser_manager=None, db_factory=MagicMock())
+    ctx = WorkerContext(
+        worker_name="test_worker",
+        browser_manager=None,
+        db_factory=MagicMock(),
+        now=datetime(2026, 5, 3, 10, 0),
+    )
+    due_run_time = datetime(2026, 5, 3, 10, 0)
 
-    due_run_time = datetime(2026, 5, 3, 9, 0)
-    with pytest.MonkeyPatch.context() as monkeypatch:
-        monkeypatch.setattr(
-            "app.modules.instagram.schedulers.feed_schedule.InstagramScheduler.get_due_run_time",
-            lambda self, last_run=None, now=None, min_interval_hours=0: due_run_time,
-        )
-        claimed = scheduler.claim_run(MagicMock(), schedule, svc, ctx)
+    def fake_due(self, **kwargs):
+        assert kwargs.get("min_interval_hours") is None
+        return due_run_time
+
+    monkeypatch.setattr(
+        "app.modules.instagram.schedulers.feed_schedule.InstagramScheduler.get_due_run_time",
+        fake_due,
+    )
+
+    claimed = scheduler.claim_run(MagicMock(), schedule, svc, ctx)
 
     assert claimed is not None
     svc.start_run.assert_called_once()
     snapshot = svc.start_run.call_args.kwargs["config_snapshot"]
     assert snapshot["scheduled_for"] == due_run_time.isoformat()
-    assert snapshot["schedule_params"] == {
-        "daily_runs": 1,
-        "time_windows": [{"start": "09:00", "end": "09:00"}],
-        "min_interval_hours": 0,
-    }
+    assert snapshot["schedule_params"]["time_windows"] == [{"start": "09:00", "end": "12:00"}]
 
 
-def test_claim_run_Ca_records_scheduled_for_for_operational_slots():
+def test_claim_run_C_active_run_defers_due_slot_instead_of_dropping(monkeypatch):
     db = _sqlite_session()
     try:
-        schedule = TaskSchedule(
-            name="instagram_feed_account_6",
-            target_type=TaskSchedule.TARGET_TYPE_INSTAGRAM_FEED,
-            schedule_type=TaskSchedule.SCHEDULE_TYPE_TIME_WINDOW,
-            enabled=True,
-            schedule_value=json.dumps(
-                {
-                    "daily_runs": 8,
-                    "time_windows": [{"start": value, "end": value} for value in OPERATIONAL_EXACT_SLOTS],
-                }
-            ),
-        )
-        schedule.set_target_config({"service_account_id": 6, "min_interval_hours": 2})
-        db.add(schedule)
-        db.commit()
-        db.refresh(schedule)
-
+        schedule = _create_instagram_schedule(db)
         svc = TaskScheduleService(db)
-        ctx = WorkerContext(
-            worker_name="scheduled_worker",
-            browser_manager=None,
-            db_factory=MagicMock(),
-            now=datetime(2026, 5, 4, 22, 4),
+        svc.start_run(schedule.id, worker_id="scheduled_worker")
+        due_run_time = datetime(2026, 5, 4, 10, 0)
+        monkeypatch.setattr(
+            "app.modules.instagram.schedulers.feed_schedule.InstagramScheduler.get_due_run_time",
+            lambda self, **kwargs: due_run_time,
         )
-
-        claimed = InstagramFeedScheduler().claim_run(db, schedule, svc, ctx)
-
-        assert claimed is not None
-        snapshot = db.query(TaskScheduleRun).filter_by(id=claimed.run_id).one().get_config_snapshot()
-        assert snapshot["scheduled_for"] == datetime(2026, 5, 4, 22, 0).isoformat()
-        assert snapshot["schedule_params"]["time_windows"] == [
-            {"start": value, "end": value} for value in OPERATIONAL_EXACT_SLOTS
-        ]
-    finally:
-        db.close()
-
-
-def test_claim_run_T_does_not_create_run_after_tolerance():
-    db = _sqlite_session()
-    try:
-        schedule = TaskSchedule(
-            name="instagram_feed_account_6",
-            target_type=TaskSchedule.TARGET_TYPE_INSTAGRAM_FEED,
-            schedule_type=TaskSchedule.SCHEDULE_TYPE_TIME_WINDOW,
-            enabled=True,
-            schedule_value=json.dumps(
-                {
-                    "daily_runs": 8,
-                    "time_windows": [{"start": value, "end": value} for value in OPERATIONAL_EXACT_SLOTS],
-                }
-            ),
-        )
-        schedule.set_target_config({"service_account_id": 6, "min_interval_hours": 2})
-        db.add(schedule)
-        db.commit()
-        db.refresh(schedule)
 
         claimed = InstagramFeedScheduler().claim_run(
             db,
             schedule,
-            TaskScheduleService(db),
+            svc,
             WorkerContext(
                 worker_name="scheduled_worker",
                 browser_manager=None,
                 db_factory=MagicMock(),
-                now=datetime(2026, 5, 4, 22, 9),
+                now=due_run_time,
             ),
         )
 
         assert claimed is None
-        assert db.query(TaskScheduleRun).count() == 0
+        deferred = db.query(TaskScheduleRun).filter_by(status=TaskScheduleRun.STATUS_DEFERRED).one()
+        assert deferred.get_config_snapshot()["scheduled_for"] == due_run_time.isoformat()
     finally:
         db.close()
 
 
-def test_claim_run_T_active_run_blocks_duplicate_claim():
+def test_claim_run_O_deferred_slot_runs_after_active_run_finishes():
     db = _sqlite_session()
     try:
-        schedule = TaskSchedule(
-            name="instagram_feed_account_6",
-            target_type=TaskSchedule.TARGET_TYPE_INSTAGRAM_FEED,
-            schedule_type=TaskSchedule.SCHEDULE_TYPE_TIME_WINDOW,
-            enabled=True,
-            schedule_value=json.dumps(
-                {
-                    "daily_runs": 8,
-                    "time_windows": [{"start": value, "end": value} for value in OPERATIONAL_EXACT_SLOTS],
-                }
-            ),
+        schedule = _create_instagram_schedule(db)
+        svc = TaskScheduleService(db)
+        due_run_time = datetime(2026, 5, 4, 10, 0)
+        deferred = svc.get_or_create_deferred_run(
+            schedule_id=schedule.id,
+            scheduled_for=due_run_time,
+            config_snapshot={"scheduled_for": due_run_time.isoformat()},
         )
-        schedule.set_target_config({"service_account_id": 6, "min_interval_hours": 2})
-        db.add(schedule)
-        db.commit()
-        db.refresh(schedule)
-        TaskScheduleService(db).start_run(schedule.id, worker_id="scheduled_worker")
 
         claimed = InstagramFeedScheduler().claim_run(
             db,
             schedule,
-            TaskScheduleService(db),
+            svc,
             WorkerContext(
                 worker_name="scheduled_worker",
                 browser_manager=None,
                 db_factory=MagicMock(),
-                now=datetime(2026, 5, 4, 22, 4),
+                now=due_run_time + timedelta(minutes=30),
+            ),
+        )
+
+        assert claimed is not None
+        assert claimed.run_id == deferred.id
+        db.refresh(deferred)
+        assert deferred.status == TaskScheduleRun.STATUS_RUNNING
+        assert deferred.worker_id == "scheduled_worker"
+        assert deferred.get_config_snapshot()["scheduled_for"] == due_run_time.isoformat()
+    finally:
+        db.close()
+
+
+def test_claim_run_Ca_does_not_duplicate_same_scheduled_for(monkeypatch):
+    db = _sqlite_session()
+    try:
+        schedule = _create_instagram_schedule(db)
+        svc = TaskScheduleService(db)
+        due_run_time = datetime(2026, 5, 4, 10, 0)
+        svc.start_run(
+            schedule.id,
+            worker_id="scheduled_worker",
+            config_snapshot={"scheduled_for": due_run_time.isoformat()},
+        )
+        monkeypatch.setattr(
+            "app.modules.instagram.schedulers.feed_schedule.InstagramScheduler.get_due_run_time",
+            lambda self, **kwargs: due_run_time,
+        )
+
+        claimed = InstagramFeedScheduler().claim_run(
+            db,
+            schedule,
+            svc,
+            WorkerContext(
+                worker_name="scheduled_worker",
+                browser_manager=None,
+                db_factory=MagicMock(),
+                now=due_run_time,
             ),
         )
 

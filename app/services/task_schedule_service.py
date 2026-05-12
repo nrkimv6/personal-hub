@@ -423,6 +423,81 @@ class TaskScheduleService:
         self.db.refresh(run)
         return run
 
+    @staticmethod
+    def _snapshot_scheduled_for(run: TaskScheduleRun) -> Optional[datetime]:
+        scheduled_for = run.get_config_snapshot().get("scheduled_for")
+        if not isinstance(scheduled_for, str):
+            return None
+        try:
+            return datetime.fromisoformat(scheduled_for)
+        except ValueError:
+            return None
+
+    def get_or_create_deferred_run(
+        self,
+        schedule_id: int,
+        scheduled_for: datetime,
+        worker_id: Optional[str] = None,
+        config_snapshot: Optional[dict] = None,
+    ) -> TaskScheduleRun:
+        """Create or reuse a deferred run for one scheduled slot."""
+        for run in self.db.query(TaskScheduleRun).filter(
+            TaskScheduleRun.schedule_id == schedule_id,
+            TaskScheduleRun.status == TaskScheduleRun.STATUS_DEFERRED,
+        ).all():
+            if self._snapshot_scheduled_for(run) == scheduled_for:
+                return run
+
+        run = TaskScheduleRun(
+            schedule_id=schedule_id,
+            started_at=scheduled_for,
+            status=TaskScheduleRun.STATUS_DEFERRED,
+            worker_id=worker_id,
+        )
+        if config_snapshot:
+            run.set_config_snapshot(config_snapshot)
+
+        self.db.add(run)
+        self.db.commit()
+        self.db.refresh(run)
+        return run
+
+    def get_oldest_deferred_run(self, schedule_id: int) -> Optional[TaskScheduleRun]:
+        """Return the oldest deferred run by scheduled slot time."""
+        runs = self.db.query(TaskScheduleRun).filter(
+            TaskScheduleRun.schedule_id == schedule_id,
+            TaskScheduleRun.status == TaskScheduleRun.STATUS_DEFERRED,
+        ).all()
+        if not runs:
+            return None
+        return min(runs, key=lambda run: self._snapshot_scheduled_for(run) or run.started_at)
+
+    def claim_deferred_run(self, run_id: int, worker_id: Optional[str] = None) -> Optional[TaskScheduleRun]:
+        """Transition a deferred run into the normal running lifecycle."""
+        run = self.get_run_by_id(run_id)
+        if not run or run.status != TaskScheduleRun.STATUS_DEFERRED:
+            return None
+        run.status = TaskScheduleRun.STATUS_RUNNING
+        run.started_at = datetime.now()
+        run.finished_at = None
+        run.worker_id = worker_id
+        self.db.commit()
+        self.db.refresh(run)
+        return run
+
+    def is_slot_claimed(self, schedule_id: int, scheduled_for: datetime) -> bool:
+        """Return True if a scheduled slot is already running, deferred, or complete."""
+        claimed_statuses = {
+            TaskScheduleRun.STATUS_RUNNING,
+            TaskScheduleRun.STATUS_DEFERRED,
+            TaskScheduleRun.STATUS_COMPLETED,
+        }
+        runs = self.db.query(TaskScheduleRun).filter(
+            TaskScheduleRun.schedule_id == schedule_id,
+            TaskScheduleRun.status.in_(claimed_statuses),
+        ).all()
+        return any(self._snapshot_scheduled_for(run) == scheduled_for for run in runs)
+
     def complete_run(
         self,
         run_id: int,

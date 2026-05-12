@@ -105,7 +105,7 @@ class TaskScheduleRun(Base):
 
     # 상태
     status = Column(String(20), nullable=False, default="running", index=True)
-    # running, completed, failed
+    # running, deferred, completed, failed
 
     # 결과 통계
     collected_count = Column(Integer, default=0)
@@ -129,6 +129,7 @@ class TaskScheduleRun(Base):
 
     # 상태 상수
     STATUS_RUNNING = "running"
+    STATUS_DEFERRED = "deferred"
     STATUS_COMPLETED = "completed"
     STATUS_FAILED = "failed"
 

@@ -208,23 +208,22 @@ async def test_main_loop_iteration_consumes_manual_run_without_duplicate_start(s
 
 
 @pytest.mark.asyncio
-async def test_main_loop_iteration_records_instagram_exact_slot_scheduled_for(session_factory):
+async def test_main_loop_iteration_records_instagram_range_slot_scheduled_for(session_factory):
     from app.modules.instagram.schedulers.feed_schedule import InstagramFeedScheduler
     from app.worker.schedule_handler_base import HandlerRunOutcome
 
     now = datetime.now().replace(second=0, microsecond=0)
-    slot = now.strftime("%H:%M")
     with session_factory() as db:
         _create_schedule(
             db,
-            name="instagram-feed-exact-slot",
+            name="instagram-feed-range-slot",
             target_type=TaskSchedule.TARGET_TYPE_INSTAGRAM_FEED,
             target_config={"service_account_id": 1, "min_interval_hours": 0},
             schedule_type=TaskSchedule.SCHEDULE_TYPE_TIME_WINDOW,
             schedule_value=json.dumps(
                 {
                     "daily_runs": 1,
-                    "time_windows": [{"start": slot, "end": slot}],
+                    "time_windows": [{"start": "00:00", "end": "23:59"}],
                 }
             ),
         )
@@ -232,7 +231,10 @@ async def test_main_loop_iteration_records_instagram_exact_slot_scheduled_for(se
     worker = _build_worker(session_factory)
     worker._handlers = [InstagramFeedScheduler()]
 
-    with patch.object(
+    with patch(
+        "app.modules.instagram.schedulers.feed_schedule.InstagramScheduler.get_due_run_time",
+        return_value=now,
+    ), patch.object(
         InstagramFeedScheduler,
         "execute",
         AsyncMock(return_value=HandlerRunOutcome(collected_count=0, saved_count=0)),

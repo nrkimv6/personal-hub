@@ -160,9 +160,9 @@ class TestCreateScheduleRight:
             "schedule_value": {
                 "daily_runs": 3,
                 "time_windows": [
-                    {"start": "09:00", "end": "09:00"},
-                    {"start": "12:00", "end": "12:00"},
-                    {"start": "18:00", "end": "18:00"},
+                    {"start": "09:00", "end": "12:00"},
+                    {"start": "12:00", "end": "15:00"},
+                    {"start": "18:00", "end": "21:00"},
                 ]
             }
         })
@@ -732,7 +732,7 @@ class TestUpdateScheduleTargetConfig:
             "schedule_type": "time_window",
             "schedule_value": {
                 "daily_runs": 1,
-                "time_windows": [{"start": "09:00", "end": "09:00"}]
+                "time_windows": [{"start": "09:00", "end": "12:00"}]
             }
         })
         assert resp.status_code == 200
@@ -759,7 +759,7 @@ class TestUpdateScheduleTargetConfig:
             "schedule_type": "time_window",
             "schedule_value": {
                 "daily_runs": 1,
-                "time_windows": [{"start": "09:00", "end": "09:00"}]
+                "time_windows": [{"start": "09:00", "end": "12:00"}]
             }
         })
         schedule_id = resp.json()["id"]
@@ -934,6 +934,63 @@ class TestUpdateScheduleTargetConfig:
         updated_tc = updated.get("target_config") or {}
         assert "llm_provider" not in updated_tc
         assert "llm_model" not in updated_tc
+
+
+class TestScheduleTimeWindowContract:
+    """time_windows start/end range contract."""
+
+    def test_create_exact_time_window_rejected(self, client, sample_service_account):
+        response = client.post(f"{API_PREFIX}/collect/schedules", json={
+            "target_type": "instagram_feed",
+            "target_config": {"service_account_id": sample_service_account.id},
+            "schedule_type": "time_window",
+            "schedule_value": {
+                "daily_runs": 1,
+                "time_windows": [{"start": "09:00", "end": "09:00"}],
+            },
+        })
+
+        assert response.status_code == 422
+        assert "start" in response.json()["detail"]
+
+    def test_exact_legacy_detail_requires_repair_and_update_path_blocks_resave(
+        self,
+        client,
+        test_db,
+        sample_service_account,
+    ):
+        schedule = TaskSchedule(
+            name="instagram_feed_account_legacy_exact",
+            target_type=TaskSchedule.TARGET_TYPE_INSTAGRAM_FEED,
+            schedule_type=TaskSchedule.SCHEDULE_TYPE_TIME_WINDOW,
+            enabled=True,
+            schedule_value='{"daily_runs": 1, "time_windows": [{"start": "09:00", "end": "09:00"}]}',
+        )
+        schedule.set_target_config({"service_account_id": sample_service_account.id})
+        test_db.add(schedule)
+        test_db.commit()
+        test_db.refresh(schedule)
+
+        detail = client.get(f"{API_PREFIX}/collect/schedules/{schedule.id}")
+        assert detail.status_code == 200
+        assert detail.json()["requires_time_window_repair"] is True
+
+        blocked = client.put(f"{API_PREFIX}/collect/schedules/{schedule.id}", json={
+            "schedule_value": {
+                "daily_runs": 1,
+                "time_windows": [{"start": "09:00", "end": "09:00"}],
+            }
+        })
+        assert blocked.status_code == 422
+
+        repaired = client.put(f"{API_PREFIX}/collect/schedules/{schedule.id}", json={
+            "schedule_value": {
+                "daily_runs": 1,
+                "time_windows": [{"start": "09:00", "end": "12:00"}],
+            }
+        })
+        assert repaired.status_code == 200
+        assert repaired.json()["requires_time_window_repair"] is False
 
 
 # ============================================================

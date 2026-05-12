@@ -11,8 +11,8 @@ from ..models.schemas import TimeWindow
 class InstagramScheduler:
     """Time-window based scheduler.
 
-    동일한 날짜에는 동일한 스케줄을 생성합니다. ``start == end``는 하루
-    전체 범위가 아니라 정확한 실행 시각으로 처리합니다.
+    동일한 날짜에는 동일한 스케줄을 생성합니다. ``start == end``는 더 이상
+    정확한 실행 시각으로 해석하지 않으며 legacy repair 대상으로 둡니다.
     """
 
     def __init__(
@@ -100,29 +100,20 @@ class InstagramScheduler:
             return []
 
         times: list[datetime] = []
-        exact_seen: set[int] = set()
-        exact_windows: list[tuple[int, TimeWindow]] = []
         range_windows: list[tuple[int, int, TimeWindow]] = []
 
         for window in self.time_windows:
             start_minutes, end_minutes = self._window_to_minutes(window)
             if start_minutes == end_minutes:
-                if start_minutes not in exact_seen:
-                    exact_windows.append((start_minutes, window))
-                    exact_seen.add(start_minutes)
+                # Legacy exact-slot data is invalid under the random range
+                # contract. Ignore it so callers can surface repair-required.
                 continue
             if end_minutes < start_minutes:
                 end_minutes += 24 * 60
             range_windows.append((start_minutes, end_minutes, window))
 
-        # Exact windows are explicit slots. When only exact slots exist, daily_runs is
-        # an upper bound because inventing extra times would change the saved intent.
-        for exact_minutes, _window in exact_windows[:self.daily_runs]:
-            times.append(self._datetime_from_minutes(date, exact_minutes))
-
-        remaining_runs = self.daily_runs - len(times)
-        if remaining_runs > 0 and range_windows:
-            for index in range(remaining_runs):
+        if range_windows:
+            for index in range(self.daily_runs):
                 start_minutes, end_minutes, _window = range_windows[index % len(range_windows)]
                 random_minutes = rng.randint(start_minutes, end_minutes)
                 times.append(self._datetime_from_minutes(date, random_minutes))

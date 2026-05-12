@@ -5,7 +5,7 @@
 	import { onMount } from 'svelte';
 	import { collectApi, llmApi, type ProviderInfo } from '$lib/api';
 	import { planRecordsApi, type PlanArchiveHealth } from '$lib/api/plan-records';
-	import type { CrawlSchedule, ServiceAccountWithProfile, CrawlScheduleRepairResponse } from '$lib/types';
+	import type { CrawlSchedule, ServiceAccountWithProfile, CrawlScheduleRepairResponse, TimeWindow } from '$lib/types';
 	import InstagramCrawlSettings from '$lib/components/InstagramCrawlSettings.svelte';
 	import {
 		Instagram,
@@ -48,7 +48,11 @@
 	// 선택값
 	let selectedType = $state(''); // 'instagram_feed' | 'google_search' | 'writing_task'
 	let selectedTarget = $state<{ id: number; name: string } | null>(null);
-	let scheduleTimes = $state<string[]>(['09:00', '12:00', '18:00']);
+	let scheduleWindows = $state<TimeWindow[]>([
+		{ start: '09:00', end: '12:00' },
+		{ start: '14:00', end: '17:00' },
+		{ start: '19:00', end: '22:00' }
+	]);
 
 	// pytest_run 설정
 	let pytestTestPath = $state('tests/');
@@ -93,7 +97,8 @@
 	let editLoading = $state(false);
 	let editSaving = $state(false);
 	let editDisplayName = $state('');
-	let editTimes = $state<string[]>([]);
+	let editWindows = $state<TimeWindow[]>([]);
+	let editRequiresTimeWindowRepair = $state(false);
 	// Google 검색 수정 전용
 	let editGoogleQuery = $state('');
 	let editGoogleName = $state('');
@@ -147,6 +152,26 @@
 		{ value: 'countryJP', label: '일본' }
 	];
 
+	function defaultScheduleWindows(): TimeWindow[] {
+		return [
+			{ start: '09:00', end: '12:00' },
+			{ start: '14:00', end: '17:00' },
+			{ start: '19:00', end: '22:00' }
+		];
+	}
+
+	function hasInvalidWindows(windows: TimeWindow[]): boolean {
+		return windows.some((window) => window.start === window.end);
+	}
+
+	function normalizeWindows(rawWindows: TimeWindow[] | undefined): TimeWindow[] {
+		if (!rawWindows || rawWindows.length === 0) return [{ start: '09:00', end: '12:00' }];
+		return rawWindows.map((window) => ({
+			start: window.start || '09:00',
+			end: window.end || '12:00'
+		}));
+	}
+
 	// ============ Instagram 설정 모달 ============
 
 	function openInstagramSettings(schedule: CrawlSchedule) {
@@ -167,7 +192,7 @@
 		addStep = 1;
 		selectedType = '';
 		selectedTarget = null;
-		scheduleTimes = ['09:00', '12:00', '18:00'];
+		scheduleWindows = defaultScheduleWindows();
 		pytestLlmUseSystemDefaults = true;
 		resetNewSearchForm();
 	}
@@ -243,12 +268,12 @@
 		addStep = 3;
 	}
 
-	function addTime() {
-		scheduleTimes = [...scheduleTimes, '12:00'];
+	function addWindow() {
+		scheduleWindows = [...scheduleWindows, { start: '09:00', end: '12:00' }];
 	}
 
-	function removeTime(index: number) {
-		scheduleTimes = scheduleTimes.filter((_, i) => i !== index);
+	function removeWindow(index: number) {
+		scheduleWindows = scheduleWindows.filter((_, i) => i !== index);
 	}
 
 	async function createSchedule() {
@@ -277,8 +302,8 @@
 					isCronType
 						? { time: cronTime }
 						: {
-								daily_runs: scheduleTimes.length,
-								time_windows: scheduleTimes.map((t) => ({ start: t, end: t }))
+								daily_runs: scheduleWindows.length,
+								time_windows: scheduleWindows
 							}
 			};
 
@@ -350,12 +375,11 @@
 
 			// 시간 설정 복원
 			if (detail.schedule_value?.time_windows) {
-				editTimes = (detail.schedule_value.time_windows as { start: string; end: string }[]).map(
-					(tw) => tw.start
-				);
+				editWindows = normalizeWindows(detail.schedule_value.time_windows as TimeWindow[]);
 			} else {
-				editTimes = ['09:00'];
+				editWindows = [{ start: '09:00', end: '12:00' }];
 			}
+			editRequiresTimeWindowRepair = Boolean(detail.requires_time_window_repair) || hasInvalidWindows(editWindows);
 
 			// Google 검색 파라미터 복원
 			if (schedule.target_type === 'google_search' && detail.saved_search) {
@@ -427,8 +451,8 @@
 			updateData.schedule_value = isEditCronType
 				? { time: editCronTime }
 				: {
-						daily_runs: editTimes.length,
-						time_windows: editTimes.map((t) => ({ start: t, end: t }))
+						daily_runs: editWindows.length,
+						time_windows: editWindows
 					};
 
 			// Google 검색 파라미터
@@ -468,12 +492,12 @@
 		}
 	}
 
-	function editAddTime() {
-		editTimes = [...editTimes, '12:00'];
+	function editAddWindow() {
+		editWindows = [...editWindows, { start: '09:00', end: '12:00' }];
 	}
 
-	function editRemoveTime(index: number) {
-		editTimes = editTimes.filter((_, i) => i !== index);
+	function editRemoveWindow(index: number) {
+		editWindows = editWindows.filter((_, i) => i !== index);
 	}
 
 	// ============ 기본 기능 ============
@@ -777,6 +801,11 @@
 									<span class="px-2 py-0.5 text-xs rounded-full {resolutionBadge.class}">
 										{resolutionBadge.text}
 									</span>
+									{#if schedule.requires_time_window_repair}
+										<span class="px-2 py-0.5 text-xs rounded-full bg-amber-100 text-amber-800">
+											범위 수정 필요
+										</span>
+									{/if}
 								</div>
 								<div class="text-sm text-muted-foreground mt-1 flex gap-4">
 									<span>마지막 실행: {formatDateTime(schedule.last_run_at)}</span>
@@ -1319,7 +1348,7 @@
 				{:else if addStep === 3}
 					<!-- Step 3: 시간 설정 -->
 					<div class="mb-4">
-						<p class="text-muted-foreground mb-2">실행 시간을 설정하세요</p>
+						<p class="text-muted-foreground mb-2">실행 시간 범위를 설정하세요</p>
 						{#if selectedType === 'google_search' && newSearchQuery}
 							<p class="text-sm text-primary">
 								검색어: {newSearchQuery}
@@ -1335,31 +1364,43 @@
 					</div>
 
 					<div class="space-y-3 mb-4">
-						{#each scheduleTimes as time, i}
-							<div class="flex items-center gap-2">
-								<input
-									type="time"
-									bind:value={scheduleTimes[i]}
-									class="flex-1 px-3 py-2 border rounded-lg focus:ring-2 focus:ring-ring focus:border-ring"
-								/>
-								{#if scheduleTimes.length > 1}
-									<button
-										onclick={() => removeTime(i)}
-										class="p-2 text-error hover:bg-error-light rounded-lg"
-										title="삭제"
-									>
-										<X size={18} />
-									</button>
+						{#each scheduleWindows as window, i}
+							<div>
+								<div class="grid grid-cols-[1fr_1fr_auto] items-center gap-2">
+									<input
+										type="time"
+										bind:value={scheduleWindows[i].start}
+										class="min-w-0 px-3 py-2 border rounded-lg focus:ring-2 focus:ring-ring focus:border-ring"
+									/>
+									<input
+										type="time"
+										bind:value={scheduleWindows[i].end}
+										class="min-w-0 px-3 py-2 border rounded-lg focus:ring-2 focus:ring-ring focus:border-ring"
+									/>
+									{#if scheduleWindows.length > 1}
+										<button
+											onclick={() => removeWindow(i)}
+											class="p-2 text-error hover:bg-error-light rounded-lg"
+											title="삭제"
+										>
+											<X size={18} />
+										</button>
+									{:else}
+										<div class="w-9"></div>
+									{/if}
+								</div>
+								{#if window.start === window.end}
+									<p class="mt-1 text-xs text-error">시작/종료 시각이 같을 수 없습니다</p>
 								{/if}
 							</div>
 						{/each}
 					</div>
 
 					<button
-						onclick={addTime}
+						onclick={addWindow}
 						class="w-full py-2 border-2 border-dashed border-border rounded-lg text-muted-foreground hover:border-blue-500 hover:text-primary transition-colors flex items-center justify-center gap-1"
 					>
-						<Plus size={16} /> 시간 추가
+						<Plus size={16} /> 범위 추가
 					</button>
 
 					<div class="mt-6 flex justify-end gap-2">
@@ -1368,7 +1409,7 @@
 						</Button>
 						<button
 							onclick={createSchedule}
-							disabled={creating}
+							disabled={creating || hasInvalidWindows(scheduleWindows)}
 							class="btn btn-primary"
 						>
 							{#if creating}
@@ -1583,31 +1624,48 @@
 									<p class="text-xs text-muted-foreground mt-1">매일 1회 실행 (±5분 허용)</p>
 								</div>
 							{:else}
+								{#if editRequiresTimeWindowRepair || hasInvalidWindows(editWindows)}
+									<div class="mb-3 rounded border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+										기존 고정 슬롯 - 범위로 수정 필요
+									</div>
+								{/if}
 								<div class="space-y-3 mb-3">
-									{#each editTimes as time, i}
-										<div class="flex items-center gap-2">
-											<input
-												type="time"
-												bind:value={editTimes[i]}
-												class="flex-1 px-3 py-2 border rounded-lg focus:ring-2 focus:ring-ring focus:border-ring"
-											/>
-											{#if editTimes.length > 1}
-												<button
-													onclick={() => editRemoveTime(i)}
-													class="p-2 text-error hover:bg-error-light rounded-lg"
-													title="삭제"
-												>
-													<X size={18} />
-												</button>
+									{#each editWindows as window, i}
+										<div>
+											<div class="grid grid-cols-[1fr_1fr_auto] items-center gap-2">
+												<input
+													type="time"
+													bind:value={editWindows[i].start}
+													class="min-w-0 px-3 py-2 border rounded-lg focus:ring-2 focus:ring-ring focus:border-ring"
+												/>
+												<input
+													type="time"
+													bind:value={editWindows[i].end}
+													class="min-w-0 px-3 py-2 border rounded-lg focus:ring-2 focus:ring-ring focus:border-ring"
+												/>
+												{#if editWindows.length > 1}
+													<button
+														onclick={() => editRemoveWindow(i)}
+														class="p-2 text-error hover:bg-error-light rounded-lg"
+														title="삭제"
+													>
+														<X size={18} />
+													</button>
+												{:else}
+													<div class="w-9"></div>
+												{/if}
+											</div>
+											{#if window.start === window.end}
+												<p class="mt-1 text-xs text-error">시작/종료 시각이 같을 수 없습니다</p>
 											{/if}
 										</div>
 									{/each}
 								</div>
 								<button
-									onclick={editAddTime}
+									onclick={editAddWindow}
 									class="w-full py-2 border-2 border-dashed border-border rounded-lg text-muted-foreground hover:border-blue-500 hover:text-primary transition-colors text-sm flex items-center justify-center gap-1"
 								>
-									<Plus size={14} /> 시간 추가
+									<Plus size={14} /> 범위 추가
 								</button>
 							{/if}
 						</div>
@@ -1618,7 +1676,7 @@
 							</Button>
 							<button
 								onclick={saveEdit}
-								disabled={editSaving}
+								disabled={editSaving || (!['pytest_run', 'plan_archive_analyze', 'devguide_staleness', 'auto_dev_runner'].includes(editSchedule.target_type) && hasInvalidWindows(editWindows))}
 								class="btn btn-primary"
 							>
 								{#if editSaving}

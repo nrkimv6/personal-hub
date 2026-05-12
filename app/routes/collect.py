@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.services.collect_service import CollectService
+from app.services.schedule_contracts import has_exact_time_window, validate_no_exact_time_windows
 from app.services.task_schedule_service import TaskScheduleService
 from app.modules.google_search.services.queue_service import enqueue_google_search
 from app.schemas.collect import CollectedPostList, CollectedPostBase, CrawlHistoryList
@@ -127,6 +128,7 @@ class ScheduleResponse(BaseModel):
     resolved_model: Optional[str] = None
     resolution_source: Optional[str] = None
     legacy_placeholder_candidate: bool = False
+    requires_time_window_repair: bool = False
 
     class Config:
         from_attributes = True
@@ -202,6 +204,10 @@ def _schedule_response_kwargs(schedule: TaskSchedule, audit_item: Optional[Dict[
         "resolved_model": audit_item.get("resolved_model"),
         "resolution_source": audit_item.get("resolution_source"),
         "legacy_placeholder_candidate": bool(audit_item.get("legacy_placeholder_candidate", False)),
+        "requires_time_window_repair": (
+            schedule.target_type == TaskSchedule.TARGET_TYPE_INSTAGRAM_FEED
+            and has_exact_time_window(schedule.schedule_value)
+        ),
     }
 
 
@@ -237,6 +243,10 @@ async def create_schedule(
     - devguide_staleness: dev-guide 갱신 점검
     """
     schedule_service = TaskScheduleService(db)
+    try:
+        validate_no_exact_time_windows(data.schedule_value)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
 
     # 타입별 검증 및 중복 체크
     if data.target_type == "instagram_feed":
@@ -490,6 +500,10 @@ async def update_schedule(
     if data.display_name is not None:
         updates["display_name"] = data.display_name
     if data.schedule_value is not None:
+        try:
+            validate_no_exact_time_windows(data.schedule_value)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
         updates["schedule_value"] = json.dumps(data.schedule_value)
 
     if updates:

@@ -47,25 +47,38 @@ class InstagramFeedScheduler(ScheduleHandler):
             daily_runs=schedule_value.get("daily_runs", 3),
             time_windows=parse_time_windows(schedule_value.get("time_windows", [])),
         )
+        deferred_run = svc.get_oldest_deferred_run(schedule.id)
+        if deferred_run and not svc.has_active_run(schedule.id):
+            claimed = svc.claim_deferred_run(deferred_run.id, worker_id=ctx.worker_name)
+            if claimed:
+                logger.info(
+                    "[%s] deferred Instagram slot claimed: schedule_id=%s run_id=%s",
+                    ctx.worker_name,
+                    schedule.id,
+                    claimed.id,
+                )
+                return ClaimedRun(
+                    run_id=claimed.id,
+                    schedule_id=schedule.id,
+                    task_name=f"instagram_schedule_{schedule.id}_run_{claimed.id}",
+                )
+
         last_run = svc.get_latest_run(schedule.id)
         last_run_time = last_run.started_at if last_run else None
-        min_interval = config.get("min_interval_hours", 2)
 
         due_run_time = scheduler.get_due_run_time(
             last_run=last_run_time,
             now=ctx.now,
-            min_interval_hours=min_interval,
         )
         if due_run_time is None:
             next_due = scheduler.get_next_run_time(now=ctx.now)
             logger.debug(
                 "[%s] Instagram schedule not due: schedule_id=%s next_due=%s last_run=%s "
-                "min_interval_hours=%s daily_runs=%s time_windows_count=%s",
+                "daily_runs=%s time_windows_count=%s",
                 ctx.worker_name,
                 schedule.id,
                 next_due.isoformat() if next_due else None,
                 last_run_time.isoformat() if last_run_time else None,
-                min_interval,
                 schedule_value.get("daily_runs", 3),
                 len(schedule_value.get("time_windows", [])),
             )
@@ -77,8 +90,13 @@ class InstagramFeedScheduler(ScheduleHandler):
             schedule.id,
             due_run_time.isoformat(),
         )
-        if svc.has_active_run(schedule.id):
-            logger.info("[%s] 이미 활성 실행 존재, 스킵", ctx.worker_name)
+        if svc.is_slot_claimed(schedule.id, due_run_time):
+            logger.info(
+                "[%s] 이미 claim된 Instagram slot: schedule_id=%s, scheduled_for=%s",
+                ctx.worker_name,
+                schedule.id,
+                due_run_time.isoformat(),
+            )
             return None
 
         config_snapshot = dict(config)
@@ -88,10 +106,20 @@ class InstagramFeedScheduler(ScheduleHandler):
                 "schedule_params": {
                     "daily_runs": schedule_value.get("daily_runs", 3),
                     "time_windows": schedule_value.get("time_windows", []),
-                    "min_interval_hours": min_interval,
+                    "min_interval_hours": config.get("min_interval_hours"),
                 },
             }
         )
+
+        if svc.has_active_run(schedule.id):
+            svc.get_or_create_deferred_run(
+                schedule_id=schedule.id,
+                scheduled_for=due_run_time,
+                worker_id=ctx.worker_name,
+                config_snapshot=config_snapshot,
+            )
+            logger.info("[%s] 활성 실행 존재, due slot deferred 보존", ctx.worker_name)
+            return None
 
         return start_claimed_run(
             schedule=schedule,
