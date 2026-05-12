@@ -10,6 +10,7 @@ from pydantic import BaseModel
 
 from app.database import get_db
 from app.models import TaskSchedule, TaskScheduleRun
+from app.services.schedule_contracts import validate_no_exact_time_windows
 from app.services.task_schedule_service import TaskScheduleService
 
 logger = logging.getLogger(__name__)
@@ -112,6 +113,10 @@ async def create_schedule(
     existing = service.get_schedule_by_name(data.name)
     if existing:
         raise HTTPException(status_code=400, detail="Schedule name already exists")
+    try:
+        validate_no_exact_time_windows(data.schedule_value)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
 
     schedule = service.create_schedule(
         name=data.name,
@@ -168,6 +173,11 @@ async def update_schedule(
     service = TaskScheduleService(db)
 
     updates = data.model_dump(exclude_unset=True)
+    if "schedule_value" in updates:
+        try:
+            validate_no_exact_time_windows(updates["schedule_value"])
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
     schedule = service.update_schedule(schedule_id, **updates)
 
     if not schedule:

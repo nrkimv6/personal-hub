@@ -9,6 +9,7 @@ from sqlalchemy import desc
 from sqlalchemy.orm import Session
 
 from app.models import TaskSchedule, TaskScheduleRun, ServiceAccount, InstagramPost
+from app.services.schedule_contracts import validate_no_exact_time_windows
 from app.services.task_schedule_service import TaskScheduleService
 from .crawler import InstagramCrawler, CrawlOptions, PostData
 from .post_service import PostService
@@ -614,7 +615,7 @@ class CrawlService:
         time_windows: List[TimeWindow],
         min_interval_hours: int,
     ) -> None:
-        """Reject saved schedules that cannot represent the requested run count."""
+        """Validate random range schedule configuration."""
         if daily_runs < 1:
             raise ValueError("daily_runs는 1 이상이어야 합니다.")
         if not time_windows:
@@ -622,40 +623,7 @@ class CrawlService:
         if min_interval_hours < 0:
             raise ValueError("min_interval_hours는 0 이상이어야 합니다.")
 
-        exact_minutes: list[int] = []
-        range_count = 0
-        for window in time_windows:
-            start_hour, start_minute = [int(part) for part in window.start.split(":")]
-            end_hour, end_minute = [int(part) for part in window.end.split(":")]
-            start_minutes = start_hour * 60 + start_minute
-            end_minutes = end_hour * 60 + end_minute
-            if start_minutes == end_minutes:
-                exact_minutes.append(start_minutes)
-            else:
-                range_count += 1
-
-        unique_exact_minutes = sorted(set(exact_minutes))
-        if len(unique_exact_minutes) != len(exact_minutes):
-            raise ValueError("exact slot time_windows에 중복 시각이 있습니다.")
-
-        if exact_minutes and range_count == 0 and len(unique_exact_minutes) != daily_runs:
-            raise ValueError(
-                "exact slot만 사용할 때 daily_runs는 중복 제거된 time_windows 개수와 같아야 합니다."
-            )
-
-        if min_interval_hours and len(unique_exact_minutes) > 1:
-            gaps = [
-                later - earlier
-                for earlier, later in zip(unique_exact_minutes, unique_exact_minutes[1:])
-            ]
-            gaps.append((unique_exact_minutes[0] + 24 * 60) - unique_exact_minutes[-1])
-            min_gap = min(gaps)
-            if min_gap < min_interval_hours * 60:
-                raise ValueError(
-                    "min_interval_hours가 exact slot 간격보다 커서 일부 예약이 실행될 수 없습니다."
-                )
-        elif min_interval_hours and daily_runs > 1 and min_interval_hours * (daily_runs - 1) >= 24:
-            raise ValueError("min_interval_hours가 daily_runs에 비해 커서 하루 실행 횟수를 만족할 수 없습니다.")
+        validate_no_exact_time_windows({"time_windows": [window.model_dump() for window in time_windows]})
 
     def update_schedule_config(
         self,

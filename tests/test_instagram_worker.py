@@ -117,8 +117,8 @@ class TestInstagramSchedulerBoundary:
 
         assert len(schedule) == 10
 
-    def test_exact_time_windows_are_fixed_slots(self):
-        """start == end 윈도우는 24시간 랜덤이 아니라 정확한 시각."""
+    def test_exact_time_windows_are_ignored_for_repair(self):
+        """start == end legacy 윈도우는 실행 슬롯으로 해석하지 않음."""
         run_date = datetime(2026, 5, 3).date()
         scheduler = InstagramScheduler(
             daily_runs=3,
@@ -131,11 +131,7 @@ class TestInstagramSchedulerBoundary:
 
         schedule = scheduler.generate_daily_schedule(run_date)
 
-        assert schedule == [
-            datetime(2026, 5, 3, 7, 0),
-            datetime(2026, 5, 3, 12, 0),
-            datetime(2026, 5, 3, 18, 30),
-        ]
+        assert schedule == []
 
     def test_default_time_windows(self):
         """기본 시간 윈도우 사용."""

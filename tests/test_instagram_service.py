@@ -161,7 +161,7 @@ class TestSchedulerBoundary:
         assert len(schedule) == 10
 
     def test_exact_time_windows_schedule(self):
-        """start == end 시간 윈도우는 정확한 예약 시각으로 생성"""
+        """start == end legacy 윈도우는 실행 슬롯으로 생성하지 않음"""
         from app.modules.instagram.services.scheduler import InstagramScheduler
 
         run_date = date(2026, 5, 3)
@@ -175,12 +175,7 @@ class TestSchedulerBoundary:
             ],
         )
 
-        assert scheduler.generate_daily_schedule(run_date) == [
-            datetime(2026, 5, 3, 7, 0),
-            datetime(2026, 5, 3, 9, 0),
-            datetime(2026, 5, 3, 12, 0),
-            datetime(2026, 5, 3, 15, 0),
-        ]
+        assert scheduler.generate_daily_schedule(run_date) == []
 
     def test_default_time_windows(self):
         """기본 시간 윈도우 사용"""
@@ -521,13 +516,19 @@ class TestCrawlService:
         from app.models.task_schedule import TaskScheduleRun
 
         today = date.today()
-        scheduled_for = datetime.combine(today, datetime.min.time().replace(hour=9))
+        from app.modules.instagram.services.scheduler import InstagramScheduler
+
+        time_windows = [{"start": "09:00", "end": "09:05"}]
+        scheduled_for = InstagramScheduler(
+            daily_runs=1,
+            time_windows=[TimeWindow(**time_windows[0])],
+        ).generate_daily_schedule(today)[0]
         schedule_config = MagicMock()
         schedule_config.enabled = True
         schedule_config.schedule_value = json.dumps(
             {
                 "daily_runs": 1,
-                "time_windows": [{"start": "09:00", "end": "09:00"}],
+                "time_windows": time_windows,
             }
         )
 
@@ -544,18 +545,18 @@ class TestCrawlService:
         result = service.get_today_schedule()
 
         assert len(result) == 1
-        assert result[0].scheduled_time == "09:00"
+        assert result[0].scheduled_time == scheduled_for.strftime("%H:%M")
         assert result[0].status == "completed"
         assert result[0].run_id == 77
 
     def test_update_schedule_config_rejects_exact_slot_daily_runs_mismatch(self, mock_db):
-        """exact slot만 있을 때 daily_runs와 슬롯 개수 불일치를 거부"""
+        """start == end exact slot 저장을 거부"""
         from app.modules.instagram.services.crawl_service import CrawlService
 
         service = CrawlService(mock_db)
         service.get_schedule_config = MagicMock(return_value=None)
 
-        with pytest.raises(ValueError, match="daily_runs"):
+        with pytest.raises(ValueError, match="start"):
             service.update_schedule_config(
                 daily_runs=3,
                 time_windows=[
@@ -566,13 +567,13 @@ class TestCrawlService:
             )
 
     def test_update_schedule_config_rejects_exact_slot_min_interval_conflict(self, mock_db):
-        """exact slot 간격보다 큰 min_interval_hours를 거부"""
+        """min_interval과 무관하게 start == end exact slot 저장을 거부"""
         from app.modules.instagram.services.crawl_service import CrawlService
 
         service = CrawlService(mock_db)
         service.get_schedule_config = MagicMock(return_value=None)
 
-        with pytest.raises(ValueError, match="min_interval_hours"):
+        with pytest.raises(ValueError, match="start"):
             service.update_schedule_config(
                 daily_runs=2,
                 time_windows=[

@@ -117,8 +117,8 @@ class TestTaskScheduleConstants:
 class TestGoogleScheduleResults:
     """Google 검색 스케줄 결과 테스트."""
 
-    def test_exact_slot_time_window_is_not_randomized(self):
-        """Google 검색도 공유 due checker의 exact slot 의미를 따른다."""
+    def test_exact_slot_time_window_requires_repair(self):
+        """공유 due checker는 exact slot을 실행 시각으로 해석하지 않는다."""
         scheduler = InstagramScheduler(
             daily_runs=1,
             time_windows=[TimeWindow(start="09:00", end="09:00")],
@@ -127,7 +127,7 @@ class TestGoogleScheduleResults:
 
         run_time = scheduler.generate_daily_schedule(datetime(2026, 5, 3).date())
 
-        assert run_time == [datetime(2026, 5, 3, 9, 0)]
+        assert run_time == []
 
     def test_schedule_creation_with_google_search_type(self, db_session, sample_saved_search):
         """Google 검색 타입으로 스케줄 생성."""

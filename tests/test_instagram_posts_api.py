@@ -166,14 +166,14 @@ def clean_instagram_schedule(schedule_db_session):
 class TestInstagramScheduleAPI:
     """GET/PUT /api/v1/instagram/schedule 계약 테스트."""
 
-    def test_update_exact_slots_and_today_schedule_returns_all_slots(
+    def test_update_range_windows_and_today_schedule_returns_random_slots(
         self,
         schedule_client,
         clean_instagram_schedule,
     ):
-        """exact slot 10개 저장 후 today 응답도 10개 슬롯을 반환."""
+        """range window 저장 후 today 응답도 요청 횟수만큼 반환."""
         windows = [
-            {"start": f"{hour:02d}:00", "end": f"{hour:02d}:00"}
+            {"start": f"{hour:02d}:00", "end": f"{hour + 1:02d}:00"}
             for hour in range(0, 20, 2)
         ]
 
@@ -196,17 +196,14 @@ class TestInstagramScheduleAPI:
 
         assert today_response.status_code == 200
         today_items = today_response.json()
-        assert [item["scheduled_time"] for item in today_items] == [
-            window["start"] for window in windows
-        ]
         assert len(today_items) == 10
 
-    def test_update_exact_slots_rejects_min_interval_conflict(
+    def test_update_exact_slots_rejected(
         self,
         schedule_client,
         clean_instagram_schedule,
     ):
-        """exact slot 간격보다 큰 min_interval_hours는 API 422로 거부."""
+        """start == end exact slot 저장은 API 422로 거부."""
         response = schedule_client.put(
             "/api/v1/instagram/schedule",
             json={
@@ -221,7 +218,7 @@ class TestInstagramScheduleAPI:
         )
 
         assert response.status_code == 422
-        assert "min_interval_hours" in response.json()["detail"]
+        assert "start" in response.json()["detail"]
 
     def test_schedule_client_uses_lightweight_app_without_posts_fixture(
         self,
