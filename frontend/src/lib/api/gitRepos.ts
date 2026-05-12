@@ -239,20 +239,34 @@ export const gitReposApi = {
    */
   async executeAndPoll(
     action: () => Promise<GitTaskResponse>,
-    options?: { interval?: number; maxRetries?: number }
+    options?: { interval?: number; maxRetries?: number; onPending?: (attempt: number) => void }
   ): Promise<GitTaskResult> {
     const interval = options?.interval ?? 1000;
     const maxRetries = options?.maxRetries ?? 60;
 
     const taskResponse = await action();
     const taskId = taskResponse.task_id;
+    if (!taskId) {
+      throw new Error('작업 ID가 없습니다.');
+    }
 
     for (let i = 0; i < maxRetries; i++) {
       await new Promise((resolve) => setTimeout(resolve, interval));
       const result = await gitReposApi.getTaskResult(taskId);
-      if (result.status !== 'pending') {
-        return result;
+      if (result.status === 'pending') {
+        options?.onPending?.(i + 1);
+        continue;
       }
+      if (result.status === 'failed') {
+        const failure =
+          result.result?.stderr ||
+          result.result?.stdout ||
+          result.result?.message ||
+          (result as GitTaskResult & { error?: string }).error ||
+          '작업 실패';
+        throw new Error(failure);
+      }
+      return result;
     }
 
     throw new Error(`작업 타임아웃: task_id=${taskId} (${maxRetries}회 폴링 초과)`);

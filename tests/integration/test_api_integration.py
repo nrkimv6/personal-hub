@@ -33,6 +33,16 @@ class TestHealthEndpoint:
 
         assert response.status_code == 200
 
+    @pytest.mark.http_live
+    def test_system_status_read_model_fields_live_smoke(self, integration_server):
+        """live HTTP smoke: system/status read-model 필드가 응답 payload에 포함된다."""
+        response = requests.get(f"{integration_server}/api/v1/system/status", timeout=10)
+
+        assert response.status_code == 200
+        data = response.json()
+        for field in ("worker_status", "current_mode", "schedule_health_hint", "global_pause"):
+            assert field in data, f"{field} 필드 없음: {data}"
+
 
 class TestBusinessAPI:
     """Business API 통합 테스트"""
