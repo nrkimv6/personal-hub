@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from pathlib import Path
 from unittest.mock import MagicMock
 
 from app.modules.dev_runner.services.log_file_resolver import LogFileResolver
@@ -54,3 +55,8 @@ def test_log_evidence_matrix_service_lock_merge_lines_count_as_runner_output_R(t
     )
 
     assert _resolver(tmp_path).find_filesystem_log(runner_id) == main_file
+
+
+def test_runner_id_parser_does_not_treat_legacy_stream_prefix_as_runner_id():
+    legacy = Path("plan-runner-stream-20260513_172900.log")
+    assert LogFileResolver._runner_id_from_log_name(legacy) is None

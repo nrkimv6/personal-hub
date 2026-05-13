@@ -85,6 +85,8 @@ class LogFileResolver:
 
         runner_id 자체에 '-'가 포함될 수 있으므로 뒤쪽 timestamp 구간을 기준으로 자른다.
         """
+        if re.match(r"^plan-runner-stream-\d{8}_\d{6}\.log$", path.name):
+            return None
         match = re.match(
             r"^plan-runner(?:-stream)?-(?P<runner_id>.+?)-\d{8}(?:[-_]\d{6})?\.log$",
             path.name,
