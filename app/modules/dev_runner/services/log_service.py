@@ -604,27 +604,14 @@ class LogService:
             candidates: list[tuple[float, Path, str]] = []
             scan_limit = max(HISTORY_FILE_SCAN_LIMIT, offset + limit)
 
-            self._sync_resolver()
-            try:
-                evidence_by_runner = self.resolver.discover_runner_log_evidence(log_dir)
-            except Exception:
-                evidence_by_runner = {}
-
-            for runner_id, evidence in evidence_by_runner.items():
-                path = Path(str(evidence.get("log_file") or ""))
-                if not path.exists():
-                    continue
-                mtime = evidence.get("log_mtime")
-                if mtime is None:
-                    try:
-                        mtime = path.stat().st_mtime
-                    except OSError:
-                        continue
-                candidates.append((float(mtime), path, runner_id))
-
+            grouped_paths: dict[str, list[Path]] = {}
             for log_path in glob.glob(str(log_dir / "plan-runner-stream-*.log")):
                 path = Path(log_path)
                 fname = path.name
+                runner_id = LogFileResolver._runner_id_from_log_name(path)
+                if runner_id:
+                    grouped_paths.setdefault(runner_id, []).append(path)
+                    continue
                 # 레거시 형식 plan-runner-stream-{timestamp}.log
                 m2 = re.match(r"plan-runner-stream-(\d{8}_\d{6})\.log$", fname)
                 if not m2:
@@ -636,6 +623,31 @@ class LogService:
                 except OSError:
                     continue
                 candidates.append((mtime, path, runner_id))
+
+            for log_path in glob.glob(str(log_dir / "plan-runner-*.log")):
+                path = Path(log_path)
+                if path.name.startswith("plan-runner-stream-"):
+                    continue
+                runner_id = LogFileResolver._runner_id_from_log_name(path)
+                if not runner_id:
+                    continue
+                grouped_paths.setdefault(runner_id, []).append(path)
+
+            for runner_id, paths in grouped_paths.items():
+                stream_path = LogFileResolver._best_display_candidate(
+                    p for p in paths if p.name.startswith("plan-runner-stream-")
+                )
+                log_path = LogFileResolver._best_display_candidate(
+                    p for p in paths if not p.name.startswith("plan-runner-stream-")
+                )
+                selected = LogFileResolver.select_display_log(stream_path, log_path)
+                if not selected:
+                    continue
+                try:
+                    mtime = selected.stat().st_mtime
+                except OSError:
+                    continue
+                candidates.append((mtime, selected, runner_id))
 
             candidates.sort(key=lambda item: item[0], reverse=True)
             for mtime, path, runner_id in candidates[:scan_limit]:
