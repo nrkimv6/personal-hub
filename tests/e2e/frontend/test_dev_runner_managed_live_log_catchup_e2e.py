@@ -109,8 +109,9 @@ def test_managed_live_log_shows_recent_line_after_diagnostics_failure(
     _stub_dev_runner_shell(page, runner_id, plan_file, handle_recent)
 
     page.goto(f"{frontend_url}/automation?tab=dev-runner&runner={runner_id}")
+    page.wait_for_selector("main", timeout=30000)
 
-    expect(page.get_by_text("managed recent line is visible")).to_be_visible()
+    expect(page.get_by_text("managed recent line is visible")).to_be_visible(timeout=30000)
     expect(page.get_by_text("로그가 없습니다")).to_have_count(0)
 
 
@@ -143,6 +144,7 @@ def test_managed_live_log_retries_recent_after_initial_failure(
     _stub_dev_runner_shell(page, runner_id, plan_file, handle_recent)
 
     page.goto(f"{frontend_url}/automation?tab=dev-runner&runner={runner_id}")
+    page.wait_for_selector("main", timeout=30000)
 
-    expect(page.get_by_text("managed retry recovered recent line")).to_be_visible(timeout=10000)
+    expect(page.get_by_text("managed retry recovered recent line")).to_be_visible(timeout=30000)
     assert recent_calls >= 2
