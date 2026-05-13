@@ -196,6 +196,31 @@ def test_http_history_accepts_non_hex_runner_id_log_pair(local_client, tmp_path)
 
 
 @pytest.mark.http
+def test_http_history_scans_non_hex_pairs_without_per_runner_glob(local_client, tmp_path):
+    """R: non-hex history discovery uses one grouped evidence scan, not per-runner glob loops."""
+    for idx in range(40):
+        runner_id = f"approval-runner-{idx:02d}"
+        stream_file = tmp_path / f"plan-runner-stream-{runner_id}-20260513_120000.log"
+        main_file = tmp_path / f"plan-runner-{runner_id}-20260513_115900.log"
+        stream_file.write_text("[2026-05-13T12:00:00] START | log_path=main.log\n", encoding="utf-8")
+        main_file.write_text(
+            "[TRIGGER] user | plan=2026-05-13_fix-service-lock.md\n"
+            "[RUN_META] started_at=2026-05-13T11:59:00 | execution_count=1 | plan_key=service-lock\n"
+            "MERGE_PRECHECK_FAILED[service_lock]: blocked\n",
+            encoding="utf-8",
+        )
+
+    patches = _filesystem_only_log_service(tmp_path)
+    with patches[0], patches[1], patches[2], \
+         patch("app.modules.dev_runner.services.log_service.LogService._find_filesystem_log") as fallback_scan:
+        response = local_client.get(f"{BASE_URL}/logs/history", params={"visible_only": "true", "limit": 50})
+
+    assert response.status_code == 200
+    assert fallback_scan.call_count == 0
+    assert any(item["runner_id"] == "approval-runner-00" for item in response.json()["runs"])
+
+
+@pytest.mark.http
 def test_http_recent_uses_main_log_when_redis_has_start_only_stream_pair(local_client, tmp_path):
     runner_id = "d31509ad"
     stream_file, main_file = _write_start_only_pair(tmp_path, runner_id)

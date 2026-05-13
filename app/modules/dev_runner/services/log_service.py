@@ -601,43 +601,36 @@ class LogService:
         # 2. 로그 파일 스캔 — 종료된 runner 포함
         log_dir = self._get_log_dir()
         if log_dir.exists():
-            raw_candidates: list[tuple[str, Path, str]] = []
             candidates: list[tuple[float, Path, str]] = []
-            seen_candidate_paths: set[Path] = set()
+            scan_limit = max(HISTORY_FILE_SCAN_LIMIT, offset + limit)
+
+            self._sync_resolver()
+            try:
+                evidence_by_runner = self.resolver.discover_runner_log_evidence(log_dir)
+            except Exception:
+                evidence_by_runner = {}
+
+            for runner_id, evidence in evidence_by_runner.items():
+                path = Path(str(evidence.get("log_file") or ""))
+                if not path.exists():
+                    continue
+                mtime = evidence.get("log_mtime")
+                if mtime is None:
+                    try:
+                        mtime = path.stat().st_mtime
+                    except OSError:
+                        continue
+                candidates.append((float(mtime), path, runner_id))
+
             for log_path in glob.glob(str(log_dir / "plan-runner-stream-*.log")):
                 path = Path(log_path)
                 fname = path.name
-                runner_id = LogFileResolver._runner_id_from_log_name(path)
-                if runner_id:
-                    sort_token = path.stem
-                else:
-                    # 레거시 형식 plan-runner-stream-{timestamp}.log
-                    m2 = re.match(r"plan-runner-stream-(\d{8}_\d{6})\.log$", fname)
-                    if not m2:
-                        continue
-                    ts = m2.group(1)
-                    runner_id = f"lg-{hashlib.md5(ts.encode()).hexdigest()[:5]}"
-                    sort_token = ts
-                raw_candidates.append((sort_token, path, runner_id))
-                seen_candidate_paths.add(path)
-
-            for log_path in glob.glob(str(log_dir / "plan-runner-*.log")):
-                path = Path(log_path)
-                if path.name.startswith("plan-runner-stream-"):
+                # 레거시 형식 plan-runner-stream-{timestamp}.log
+                m2 = re.match(r"plan-runner-stream-(\d{8}_\d{6})\.log$", fname)
+                if not m2:
                     continue
-                if path in seen_candidate_paths:
-                    continue
-                runner_id = LogFileResolver._runner_id_from_log_name(path)
-                if not runner_id:
-                    continue
-                raw_candidates.append((path.stem, path, runner_id))
-
-            scan_limit = max(HISTORY_FILE_SCAN_LIMIT, offset + limit)
-            if len(raw_candidates) > scan_limit:
-                raw_candidates.sort(key=lambda item: item[0], reverse=True)
-                raw_candidates = raw_candidates[:scan_limit]
-
-            for _sort_token, path, runner_id in raw_candidates:
+                ts = m2.group(1)
+                runner_id = f"lg-{hashlib.md5(ts.encode()).hexdigest()[:5]}"
                 try:
                     mtime = path.stat().st_mtime
                 except OSError:
@@ -648,14 +641,6 @@ class LogService:
             for mtime, path, runner_id in candidates[:scan_limit]:
                 if runner_id.startswith("lg-"):
                     self._legacy_map[runner_id] = path
-                else:
-                    paired_path = self._find_filesystem_log(runner_id, log_dir)
-                    if paired_path and paired_path.exists():
-                        path = paired_path
-                        try:
-                            mtime = path.stat().st_mtime
-                        except OSError:
-                            pass
 
                 # 이미 Redis에서 수집한 running runner면 log_file만 보정
                 if runner_id in runs:
