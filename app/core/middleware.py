@@ -64,6 +64,7 @@ ADMIN_ONLY_READ_PREFIXES = (
     "/api/v1/ss",
     "/api/ic",
     "/api/fc",
+    "/api/v1/list-board",  # list board admin only
 )
 
 
