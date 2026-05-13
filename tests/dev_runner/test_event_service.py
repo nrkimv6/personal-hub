@@ -38,6 +38,11 @@ def _status_values(**overrides):
         "stop_stage": None,
         "error": None,
         "execution_count": None,
+        "worktree_exists": None,
+        "branch_exists": None,
+        "branch_merged_to_main": None,
+        "metadata_checked_at": None,
+        "gate_evidence_summary": None,
     }
     assert set(defaults.keys()) >= set(STATUS_FIELDS), (
         f"_status_values defaults missing: {set(STATUS_FIELDS) - set(defaults.keys())}"
@@ -153,3 +158,44 @@ class TestBuildStatusPayloadExecutionCount:
         payload = svc._build_status_payload("runner-no-ec")
         assert payload is not None
         assert payload.get("execution_count") is None
+
+
+def test_fallback_includes_recent_approval_required_runner_R():
+    """R: active set에서 빠진 approval_required runner도 SSE fallback 관측 대상이다."""
+    svc = _make_service()
+    svc._sync.smembers.return_value = set()
+    svc._sync.zrevrange.return_value = ["runner-approval"]
+    svc._log_tailer = MagicMock()
+
+    def _mget(keys):
+        runner_id = keys[0].split(":")[2]
+        assert runner_id == "runner-approval"
+        return _status_values(
+            status="completed",
+            trigger="user",
+            merge_status="approval_required",
+            merge_reason="service_lock",
+            merge_message="MERGE_PRECHECK_FAILED[service_lock]",
+        )
+
+    svc._sync.mget.side_effect = _mget
+
+    assert svc._list_visible_active_runner_ids() == ["runner-approval"]
+    svc._log_tailer.drop_tail_state.assert_not_called()
+
+
+def test_fallback_does_not_drop_approval_tail_state_P():
+    """P: status가 running이 아니어도 approval_required면 tail state를 보존한다."""
+    svc = _make_service()
+    svc._sync.smembers.return_value = {"runner-approval"}
+    svc._sync.zrevrange.return_value = []
+    svc._log_tailer = MagicMock()
+    svc._sync.mget.return_value = _status_values(
+        status="completed",
+        trigger="user",
+        merge_status="approval_required",
+        merge_reason="service_lock",
+    )
+
+    assert svc._list_visible_active_runner_ids() == ["runner-approval"]
+    svc._log_tailer.drop_tail_state.assert_not_called()

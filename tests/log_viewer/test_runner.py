@@ -121,7 +121,17 @@ def _make_redis_mock(runners: list[dict]) -> MagicMock:
     r = MagicMock()
 
     # smembers → set of bytes
-    r.smembers.return_value = {rid["runner_id"].encode() for rid in runners}
+    r.smembers.return_value = {
+        rid["runner_id"].encode()
+        for rid in runners
+        if rid.get("active", True)
+    }
+    r.zrevrange.return_value = [
+        rid["runner_id"].encode()
+        for rid in runners
+        if rid.get("recent", False)
+    ]
+    r.zrange.return_value = r.zrevrange.return_value
 
     def _get(key: str):
         key_str = key if isinstance(key, str) else key.decode()
@@ -133,6 +143,7 @@ def _make_redis_mock(runners: list[dict]) -> MagicMock:
                 f"{prefix}:stream_log_path": runner.get("stream_path"),
                 f"{prefix}:plan_file": runner.get("plan_file"),
                 f"{prefix}:pid": runner.get("pid"),
+                f"{prefix}:merge_status": runner.get("merge_status"),
             }
             if key_str in mapping:
                 val = mapping[key_str]
@@ -235,6 +246,27 @@ class TestGetActiveRunners:
         assert info.log_path is None
         assert info.display_name == "cccc3333"  # plan_file=None → fallback to runner_id
         assert info.short_id == ""
+
+    def test_runner_sources_include_recent_approval_required_R(self):
+        """R: active set에 없어도 recent approval_required runner는 PR/PS source 후보가 된다."""
+        mock_data = [
+            {
+                "runner_id": "approval-runner",
+                "active": False,
+                "recent": True,
+                "merge_status": "approval_required",
+                "log_path": None,
+                "stream_path": "D:/logs/plan-runner-stream-approval-runner-20260513_120000.log",
+                "plan_file": "D:/work/2026-05-13_fix-service-lock.md",
+                "pid": None,
+            }
+        ]
+        r = _make_redis_mock(mock_data)
+        result = get_active_runners(r)
+
+        assert len(result) == 1
+        assert result[0].runner_id == "approval-runner"
+        assert result[0].short_id == "approval-runner"
 
 
 # ---------------------------------------------------------------------------

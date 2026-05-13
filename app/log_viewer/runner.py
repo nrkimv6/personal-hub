@@ -26,6 +26,8 @@ class RunnerInfo:
         self.short_id = get_runner_file_id(
             Path(self.log_path).name if self.log_path else ""
         )
+        if not self.short_id and self.stream_path:
+            self.short_id = get_runner_stream_file_id(Path(self.stream_path).name)
         self.display_name = get_runner_display_name(self.plan_file or "", fallback=self.runner_id)
 
 
@@ -80,6 +82,14 @@ def get_runner_file_id(filename: str) -> str:
     return ""
 
 
+def get_runner_stream_file_id(filename: str) -> str:
+    """plan-runner stream 로그 파일명에서 runner_id를 추출한다."""
+    m = re.search(r"plan-runner-stream-(.+?)-\d{8}(?:[-_]\d{6})?\.log", filename)
+    if m:
+        return m.group(1)
+    return ""
+
+
 def get_active_runners(redis_client: Any = None) -> list[RunnerInfo]:
     """
     Redis에서 활성 plan-runner 목록을 조회한다.
@@ -111,9 +121,16 @@ def get_active_runners(redis_client: Any = None) -> list[RunnerInfo]:
             return []
 
     try:
-        raw_ids = redis_client.smembers("plan-runner:active_runners")
+        raw_ids = set(redis_client.smembers("plan-runner:active_runners") or set())
     except Exception:
         return []
+    try:
+        recent_ids = redis_client.zrevrange("plan-runner:recent_runners", 0, 49) or []
+    except Exception:
+        try:
+            recent_ids = redis_client.zrange("plan-runner:recent_runners", 0, 49) or []
+        except Exception:
+            recent_ids = []
 
     def _get(key: str) -> str | None:
         try:
@@ -125,8 +142,17 @@ def get_active_runners(redis_client: Any = None) -> list[RunnerInfo]:
             return None
 
     runners: list[RunnerInfo] = []
+    seen: set[str] = set()
+    for rid_b in recent_ids:
+        rid = rid_b.decode("utf-8") if isinstance(rid_b, bytes) else str(rid_b)
+        if _get(f"plan-runner:runners:{rid}:merge_status") == "approval_required":
+            raw_ids.add(rid)
+
     for rid_b in raw_ids:
         rid = rid_b.decode("utf-8") if isinstance(rid_b, bytes) else str(rid_b)
+        if rid in seen:
+            continue
+        seen.add(rid)
         prefix = f"plan-runner:runners:{rid}"
         runners.append(
             RunnerInfo(

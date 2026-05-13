@@ -39,3 +39,18 @@ def test_find_filesystem_log_prefers_populated_main_over_latest_start_only_strea
     main_file.write_text("[20:00:00] [PLAN-RUNNER] populated main log\n", encoding="utf-8")
 
     assert _resolver(tmp_path).find_filesystem_log(runner_id) == main_file
+
+
+def test_log_evidence_matrix_service_lock_merge_lines_count_as_runner_output_R(tmp_path):
+    """R: service_lock/MERGE final lines are real runner output, not START-only noise."""
+    runner_id = "approval-001"
+    stream_file = tmp_path / f"plan-runner-stream-{runner_id}-20260513_120000.log"
+    main_file = tmp_path / f"plan-runner-{runner_id}-20260513_115900.log"
+    stream_file.write_text("[2026-05-13T12:00:00] START | log_path=main.log\n", encoding="utf-8")
+    main_file.write_text(
+        "MERGE_PRECHECK_FAILED[service_lock]: blocked\n"
+        "[MERGE] approval_required service_lock\n",
+        encoding="utf-8",
+    )
+
+    assert _resolver(tmp_path).find_filesystem_log(runner_id) == main_file

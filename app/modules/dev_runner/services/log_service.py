@@ -607,9 +607,10 @@ class LogService:
             for log_path in glob.glob(str(log_dir / "plan-runner-stream-*.log")):
                 path = Path(log_path)
                 fname = path.name
-                # runner_id 추출: 신규 형식 plan-runner-stream-{8hex}-*.log
-                m = re.match(r"plan-runner-stream-([0-9a-f]{8})-(.+)\.log$", fname)
-                if not m:
+                runner_id = LogFileResolver._runner_id_from_log_name(path)
+                if runner_id:
+                    sort_token = path.stem
+                else:
                     # 레거시 형식 plan-runner-stream-{timestamp}.log
                     m2 = re.match(r"plan-runner-stream-(\d{8}_\d{6})\.log$", fname)
                     if not m2:
@@ -617,20 +618,19 @@ class LogService:
                     ts = m2.group(1)
                     runner_id = f"lg-{hashlib.md5(ts.encode()).hexdigest()[:5]}"
                     sort_token = ts
-                else:
-                    runner_id = m.group(1)
-                    sort_token = m.group(2)
                 raw_candidates.append((sort_token, path, runner_id))
                 seen_candidate_paths.add(path)
 
-            for log_path in glob.glob(str(log_dir / "plan-runner-[0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f]-*.log")):
+            for log_path in glob.glob(str(log_dir / "plan-runner-*.log")):
                 path = Path(log_path)
+                if path.name.startswith("plan-runner-stream-"):
+                    continue
                 if path in seen_candidate_paths:
                     continue
-                m = re.match(r"plan-runner-([0-9a-f]{8})-(.+)\.log$", path.name)
-                if not m:
+                runner_id = LogFileResolver._runner_id_from_log_name(path)
+                if not runner_id:
                     continue
-                raw_candidates.append((m.group(2), path, m.group(1)))
+                raw_candidates.append((path.stem, path, runner_id))
 
             scan_limit = max(HISTORY_FILE_SCAN_LIMIT, offset + limit)
             if len(raw_candidates) > scan_limit:

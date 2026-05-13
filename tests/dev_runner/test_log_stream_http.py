@@ -173,6 +173,29 @@ def test_http_history_uses_main_log_pair_as_representative(local_client, tmp_pat
 
 
 @pytest.mark.http
+def test_http_history_accepts_non_hex_runner_id_log_pair(local_client, tmp_path):
+    runner_id = "approval-runner"
+    stream_file = tmp_path / f"plan-runner-stream-{runner_id}-20260513_120000.log"
+    main_file = tmp_path / f"plan-runner-{runner_id}-20260513_115900.log"
+    stream_file.write_text("[2026-05-13T12:00:00] START | log_path=main.log\n", encoding="utf-8")
+    main_file.write_text(
+        "[TRIGGER] user | plan=2026-05-13_fix-service-lock.md\n"
+        "[RUN_META] started_at=2026-05-13T11:59:00 | execution_count=1 | plan_key=service-lock\n"
+        "MERGE_PRECHECK_FAILED[service_lock]: blocked\n",
+        encoding="utf-8",
+    )
+
+    patches = _filesystem_only_log_service(tmp_path)
+    with patches[0], patches[1], patches[2]:
+        response = local_client.get(f"{BASE_URL}/logs/history", params={"visible_only": "true"})
+
+    assert response.status_code == 200
+    payload = response.json()
+    run = next(item for item in payload["runs"] if item["runner_id"] == runner_id)
+    assert run["log_file"] == str(main_file)
+
+
+@pytest.mark.http
 def test_http_recent_uses_main_log_when_redis_has_start_only_stream_pair(local_client, tmp_path):
     runner_id = "d31509ad"
     stream_file, main_file = _write_start_only_pair(tmp_path, runner_id)

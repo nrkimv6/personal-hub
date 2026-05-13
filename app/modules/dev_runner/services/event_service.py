@@ -151,26 +151,52 @@ class EventService:
         except Exception:
             pass
 
-    def _list_visible_active_runner_ids(self) -> list:
+    def _list_visible_live_observed_runner_ids(self) -> list:
         try:
-            runner_ids = self._sync.smembers(ACTIVE_RUNNERS_KEY) or set()
+            runner_ids = {str(rid) for rid in (self._sync.smembers(ACTIVE_RUNNERS_KEY) or set())}
         except Exception:
-            return []
+            runner_ids = set()
 
-        visible_running_ids = []
-        for rid in runner_ids:
+        try:
+            recent_ids = self._sync.zrevrange(RECENT_RUNNERS_KEY, 0, MAX_RECENT_IN_SSE - 1) or []
+        except Exception:
+            try:
+                recent_ids = self._sync.zrange(RECENT_RUNNERS_KEY, 0, MAX_RECENT_IN_SSE - 1) or []
+            except Exception:
+                recent_ids = []
+        for rid in recent_ids:
             runner_id = str(rid)
             payload = build_status_payload(self._sync, runner_id)
             if (
                 payload
                 and payload.get("visible", False)
-                and payload.get("status") == "running"
+                and payload.get("merge_status") == "approval_required"
             ):
-                self._log_tailer._completed_runners.pop(runner_id, None)
+                runner_ids.add(runner_id)
+
+        visible_running_ids = []
+        for rid in runner_ids:
+            runner_id = str(rid)
+            payload = build_status_payload(self._sync, runner_id)
+            is_approval_required = bool(
+                payload
+                and payload.get("visible", False)
+                and payload.get("merge_status") == "approval_required"
+            )
+            if (
+                payload
+                and payload.get("visible", False)
+                and (payload.get("status") == "running" or is_approval_required)
+            ):
+                if payload.get("status") == "running":
+                    self._log_tailer._completed_runners.pop(runner_id, None)
                 visible_running_ids.append(runner_id)
             else:
                 self._log_tailer.drop_tail_state(runner_id)
         return visible_running_ids
+
+    def _list_visible_active_runner_ids(self) -> list:
+        return self._list_visible_live_observed_runner_ids()
 
     def _build_status_payload(self, runner_id: str):
         """[shim] event_payload.build_status_payload()"""
@@ -292,10 +318,11 @@ class EventService:
                                         yield sse_format("status", {"runners": [payload]})
                                     else:
                                         self._log_tailer.drop_tail_state(runner_id)
-                                    if payload.get("status") != "running":
+                                    if payload.get("status") != "running" and payload.get("merge_status") != "approval_required":
                                         self._log_tailer.drop_tail_state(runner_id)
                                     else:
-                                        self._log_tailer._completed_runners.pop(runner_id, None)
+                                        if payload.get("status") == "running":
+                                            self._log_tailer._completed_runners.pop(runner_id, None)
                         elif event_type == "tracking":
                             payload = build_tracking_payload(self._sync)
                             if payload:
