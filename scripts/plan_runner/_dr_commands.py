@@ -30,8 +30,27 @@ def _transition_merge_status(redis_client: redis.Redis, runner_id: str, status: 
     return MergePersistence(redis_client, runner_id).transition(
         status,
         message=message,
-        action=RetryAction.APPROVED_RETRY.value if action in {"retry-merge", "direct-merge", "resolve-conflict"} else action,
+        action=action,
     )
+
+
+def _is_service_lock_approval_required(redis_client: redis.Redis, runner_id: str) -> bool:
+    merge_status = _redis_text(redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_status"))
+    merge_reason = _redis_text(redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_reason"))
+    return merge_status == "approval_required" and merge_reason == "service_lock"
+
+
+def _set_service_lock_approved_flag(redis_client: redis.Redis, runner_id: str) -> str:
+    key = f"{RUNNER_KEY_PREFIX}:{runner_id}:service_lock_approved"
+    redis_client.set(key, "true", ex=RECENT_RUNNERS_TTL)
+    return key
+
+
+def _clear_service_lock_approved_flag(redis_client: redis.Redis, runner_id: str) -> None:
+    try:
+        redis_client.delete(f"{RUNNER_KEY_PREFIX}:{runner_id}:service_lock_approved")
+    except Exception:
+        pass
 
 
 def _redis_text(value) -> str | None:
@@ -118,8 +137,23 @@ def _do_retry_merge(runner_id: str, redis_client: redis.Redis, command_id: str, 
         _pub_and_log(runner_id, msg, redis_client, "MERGE")
 
     result = {"success": False, "message": "unknown error", "action": "retry-merge"}
+    approved_service_lock = bool((command or {}).get("approve_service_lock"))
+    flag_written = False
     try:
         _log_memory_stage("retry-merge", "start", runner_id, redis_client)
+        if _is_service_lock_approval_required(redis_client, runner_id) and not approved_service_lock:
+            result = {
+                "success": False,
+                "message": "service_lock approval required",
+                "merge_status": "approval_required",
+                "reason": "service_lock",
+                "action": "retry-merge",
+            }
+            return
+        if approved_service_lock:
+            _set_service_lock_approved_flag(redis_client, runner_id)
+            flag_written = True
+            _pub("[RETRY-MERGE] service_lock 승인 플래그 설정 (one-shot)")
         # Redis 키 만료 시 command payload로 재발급
         worktree_path_str = redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:worktree_path")
         if not worktree_path_str and command:
@@ -184,7 +218,8 @@ def _do_retry_merge(runner_id: str, redis_client: redis.Redis, command_id: str, 
         # lock + subprocess + 결과 처리는 공통 헬퍼에 위임
         _log_memory_stage("retry-merge", "mid", runner_id, redis_client)
         _refresh_runner_ownership_snapshot(runner_id, worktree_path_str, action="retry-merge")
-        merge_result = _execute_merge_with_lock(runner_id, redis_client, action_name="retry-merge")
+        action_name = RetryAction.APPROVED_RETRY.value if approved_service_lock else "retry-merge"
+        merge_result = _execute_merge_with_lock(runner_id, redis_client, action_name=action_name)
         result = merge_result
 
     except Exception as e:
@@ -192,6 +227,8 @@ def _do_retry_merge(runner_id: str, redis_client: redis.Redis, command_id: str, 
         result = {"success": False, "message": str(e), "action": "retry-merge"}
 
     finally:
+        if flag_written:
+            _clear_service_lock_approved_flag(redis_client, runner_id)
         _log_memory_stage("retry-merge", "end", runner_id, redis_client)
         _cleanup_process_state(runner_id, redis_client)
         redis_client.lpush(result_key, json.dumps(result, ensure_ascii=False))
@@ -224,7 +261,7 @@ def retry_merge(command: Dict, redis_client: redis.Redis) -> None:
     return None
 
 
-def _do_direct_merge(branch: str, worktree_path_str, plan_file, redis_client: redis.Redis, command_id: str) -> None:
+def _do_direct_merge(branch: str, worktree_path_str, plan_file, redis_client: redis.Redis, command_id: str, approve_service_lock: bool = False) -> None:
     """direct-merge 실제 작업 (백그라운드 스레드에서 실행) — 임시 runner_id로 _do_inline_merge 호출"""
     result_key = f"{RESULTS_KEY}:{command_id}" if command_id else RESULTS_KEY
     from uuid import uuid4
@@ -233,6 +270,7 @@ def _do_direct_merge(branch: str, worktree_path_str, plan_file, redis_client: re
     result = {"success": False, "message": "unknown error", "action": "direct-merge", "runner_id": runner_id}
     logger.info(f"[direct_merge] _do_direct_merge 스레드 진입: runner_id={runner_id}, branch={branch}, worktree={worktree_path_str}")
     _log_memory_stage("direct-merge", "start", runner_id, redis_client)
+    flag_written = False
 
     try:
         # worktree_path 결정
@@ -285,6 +323,9 @@ def _do_direct_merge(branch: str, worktree_path_str, plan_file, redis_client: re
         redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:trigger", "user")
         if plan_file:
             redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:plan_file", plan_file)
+        if approve_service_lock:
+            _set_service_lock_approved_flag(redis_client, runner_id)
+            flag_written = True
         # TTL 설정 (24시간)
         for suffix in ("status", "worktree_path", "branch", "start_time", "merge_status", "plan_file", "trigger"):
             redis_client.expire(f"{RUNNER_KEY_PREFIX}:{runner_id}:{suffix}", RECENT_RUNNERS_TTL)
@@ -320,6 +361,8 @@ def _do_direct_merge(branch: str, worktree_path_str, plan_file, redis_client: re
         logger.error(f"[direct_merge] 실패: {e}\n{traceback.format_exc()}")
         result = {"success": False, "message": str(e), "action": "direct-merge", "runner_id": runner_id}
     finally:
+        if flag_written:
+            _clear_service_lock_approved_flag(redis_client, runner_id)
         _log_memory_stage("direct-merge", "end", runner_id, redis_client)
         # merge_status Redis 키 보장 (스레드 실패 시에도 상태 추적 가능)
         try:
@@ -348,6 +391,7 @@ def direct_merge(command: Dict, redis_client: redis.Redis) -> None:
     worktree_path = command.get("worktree_path")
     plan_file = command.get("plan_file")
     command_id = command.get("command_id", "")
+    approve_service_lock = bool(command.get("approve_service_lock"))
 
     result_key = f"{RESULTS_KEY}:{command_id}" if command_id else RESULTS_KEY
     accepted = {
@@ -362,7 +406,7 @@ def direct_merge(command: Dict, redis_client: redis.Redis) -> None:
     logger.info(f"[direct_merge] accepted 응답 즉시 반환 (branch: {branch})")
     thread = threading.Thread(
         target=_do_direct_merge,
-        args=(branch, worktree_path, plan_file, redis_client, command_id),
+        args=(branch, worktree_path, plan_file, redis_client, command_id, approve_service_lock),
         daemon=False,
     )
     thread.start()
@@ -373,6 +417,17 @@ def _do_resolve_conflict(runner_id: str, redis_client: redis.Redis, command_id: 
     """resolve-conflict 실제 작업 (백그라운드 스레드에서 실행)."""
     result_key = f"{RESULTS_KEY}:{command_id}" if command_id else RESULTS_KEY
     try:
+        if _is_service_lock_approval_required(redis_client, runner_id):
+            result = {
+                "success": False,
+                "message": "service_lock approval_required 상태는 conflict resolver 대상이 아닙니다.",
+                "merge_status": "approval_required",
+                "reason": "service_lock",
+                "action": "resolve-conflict",
+            }
+            redis_client.lpush(result_key, json.dumps(result, ensure_ascii=False))
+            redis_client.expire(result_key, 60)
+            return
         worktree_path_str = redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:worktree_path")
         if not worktree_path_str:
             result = {"success": False, "message": f"worktree_path not found for runner {runner_id}"}

@@ -34,19 +34,19 @@ def test_terminal_statuses_reject_inline_and_retry_merge():
         assert not is_transition_allowed(status, QUEUED, RetryAction.RETRY_MERGE)
 
 
-def test_direct_merge_policy_is_no_wider_than_approved_retry():
-    """override: direct-merge enum must not bypass more states than approved retry."""
+def test_direct_merge_policy_does_not_bypass_service_lock_approval_required():
+    """override: direct-merge is not an implicit service_lock approval."""
     from _dr_merge_state import OVERRIDE_MATRIX, RetryAction
 
-    assert OVERRIDE_MATRIX[RetryAction.DIRECT_MERGE] == OVERRIDE_MATRIX[RetryAction.APPROVED_RETRY]
+    assert "approval_required" not in OVERRIDE_MATRIX[RetryAction.DIRECT_MERGE]
+    assert OVERRIDE_MATRIX[RetryAction.DIRECT_MERGE] < OVERRIDE_MATRIX[RetryAction.APPROVED_RETRY]
 
 
-def test_listener_call_sites_normalize_direct_merge_to_approved_retry():
-    """override: runtime direct-merge action uses the approved retry transition policy."""
+def test_listener_call_sites_do_not_normalize_direct_merge_to_approved_retry():
+    """override: runtime direct-merge action stays distinct from service_lock approval."""
     from _dr_merge import _transition_action
-    from _dr_merge_state import RetryAction
 
-    assert _transition_action("direct-merge") == RetryAction.APPROVED_RETRY.value
+    assert _transition_action("direct-merge") == "direct-merge"
 
 
 def test_should_enter_inline_merge_blocks_terminal_approval():

@@ -962,7 +962,7 @@ class TestMergeApprovalPayload:
         """override: POST /merge/{runner_id}/retry forwards approve_service_lock command payload."""
         rid = "merge-retry-001"
         mocked = AsyncMock(return_value={"success": True, "message": "ok"})
-        with patch.object(executor_service, "_send_command", new=mocked):
+        with patch.object(executor_service, "_enqueue_command", new=mocked):
             response = await client.post(
                 f"/api/v1/dev-runner/merge/{rid}/retry",
                 json={
@@ -985,7 +985,7 @@ class TestMergeApprovalPayload:
         """override/boundary: legacy retry-merge endpoint also forwards approve_service_lock."""
         rid = "merge-retry-legacy-001"
         mocked = AsyncMock(return_value={"success": True, "message": "ok"})
-        with patch.object(executor_service, "_send_command", new=mocked):
+        with patch.object(executor_service, "_enqueue_command", new=mocked):
             response = await client.post(
                 f"/api/v1/dev-runner/runners/{rid}/retry-merge",
                 json={"approve_service_lock": True},
@@ -999,7 +999,7 @@ class TestMergeApprovalPayload:
     async def test_direct_merge_request_forwards_approve_service_lock(self, client):
         """override: POST /merge/direct forwards approve_service_lock for listener policy normalization."""
         mocked = AsyncMock(return_value={"success": True, "message": "ok"})
-        with patch.object(executor_service, "_send_command", new=mocked):
+        with patch.object(executor_service, "_enqueue_command", new=mocked):
             response = await client.post(
                 "/api/v1/dev-runner/merge/direct",
                 json={

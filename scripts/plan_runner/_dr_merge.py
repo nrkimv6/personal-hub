@@ -51,8 +51,12 @@ _INLINE_MERGE_PRESERVE_STATUSES = TERMINAL_STATUSES
 
 
 def _transition_action(action_name: str) -> str:
-    if action_name in {"retry-merge", "direct-merge", "resolve-conflict"}:
+    if action_name == RetryAction.APPROVED_RETRY.value:
         return RetryAction.APPROVED_RETRY.value
+    if action_name == "retry-merge":
+        return RetryAction.RETRY_MERGE.value
+    if action_name == "direct-merge":
+        return RetryAction.DIRECT_MERGE.value
     return action_name or RetryAction.INLINE_MERGE.value
 
 

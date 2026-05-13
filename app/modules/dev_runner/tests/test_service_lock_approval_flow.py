@@ -56,6 +56,9 @@ class _FakeRedis:
         self.lpush_items.append((key, value))
         return True
 
+    def sadd(self, key: str, value: str):
+        return True
+
 
 def _import_plan_runner_modules():
     repo_root = Path(__file__).resolve().parents[4]
@@ -119,6 +122,7 @@ def test_retry_merge_sets_and_clears_service_lock_approved_flag():
 
     def _stub_execute_merge_with_lock(_rid, redis_client, action_name="retry-merge", _test_fix_attempt=0):
         assert redis_client.get(flag_key) == "true"
+        assert action_name == "approved-retry"
         return {"success": False, "merge_status": "approval_required", "message": "blocked", "reason": "service_lock"}
 
     with patch("plan_runner.core.stages.pre_merge_gate", return_value=(True, "ok")), \
@@ -133,6 +137,91 @@ def test_retry_merge_sets_and_clears_service_lock_approved_flag():
         )
 
     assert fake.get(flag_key) is None
+
+
+def test_retry_merge_without_approval_preserves_service_lock():
+    """override: plain retry-merge cannot leave service_lock approval_required."""
+    _dr_merge, _dr_commands, merge_queue = _import_plan_runner_modules()
+
+    rid = "t-approval-plain-retry-001"
+    prefix = f"plan-runner:runners:{rid}"
+    fake = _FakeRedis(
+        {
+            f"{prefix}:worktree_path": "D:/tmp/wt",
+            f"{prefix}:merge_status": "approval_required",
+            f"{prefix}:merge_reason": "service_lock",
+            f"{prefix}:merge_message": "MERGE_PRECHECK_FAILED[service_lock]: blocked",
+        }
+    )
+
+    with patch("plan_runner.core.stages.pre_merge_gate", side_effect=AssertionError("plain retry must stop before pre_merge_gate")), \
+         patch.object(_dr_commands, "_execute_merge_with_lock", side_effect=AssertionError("plain retry must not merge")), \
+         patch.object(_dr_commands, "_cleanup_process_state", return_value=None):
+        _dr_commands._do_retry_merge(rid, fake, "cmd-plain", command={"approve_service_lock": False})  # noqa: SLF001
+
+    result = json.loads(fake.lpush_items[-1][1])
+    assert result["success"] is False
+    assert result["merge_status"] == "approval_required"
+    assert result["reason"] == "service_lock"
+    assert fake.get(f"{prefix}:merge_status") == "approval_required"
+    assert fake.get(f"{prefix}:service_lock_approved") is None
+
+
+def test_direct_merge_sets_and_clears_service_lock_approved_flag(tmp_path):
+    """override: direct-merge approve_service_lock=true writes one-shot flag for the temp runner."""
+    _dr_merge, _dr_commands, merge_queue = _import_plan_runner_modules()
+
+    fake = _FakeRedis()
+    seen = {}
+
+    def _stub_inline_merge(runner_id, redis_client):
+        seen["runner_id"] = runner_id
+        seen["flag"] = redis_client.get(f"plan-runner:runners:{runner_id}:service_lock_approved")
+        redis_client.set(f"plan-runner:runners:{runner_id}:merge_status", "approval_required")
+        redis_client.set(f"plan-runner:runners:{runner_id}:merge_reason", "service_lock")
+
+    with patch.object(_dr_commands, "_do_inline_merge", side_effect=_stub_inline_merge), \
+         patch.object(_dr_commands, "_cleanup_process_state", return_value=None):
+        _dr_commands._do_direct_merge(  # noqa: SLF001
+            "impl/test",
+            str(tmp_path),
+            "docs/plan/test.md",
+            fake,
+            "cmd-direct",
+            approve_service_lock=True,
+        )
+
+    runner_id = seen["runner_id"]
+    assert seen["flag"] == "true"
+    assert fake.get(f"plan-runner:runners:{runner_id}:service_lock_approved") is None
+
+
+def test_resolve_conflict_rejects_service_lock_approval_required():
+    """boundary: service_lock approval_required is not a conflict resolver input."""
+    _dr_merge, _dr_commands, merge_queue = _import_plan_runner_modules()
+
+    rid = "t-approval-resolve-001"
+    prefix = f"plan-runner:runners:{rid}"
+    fake = _FakeRedis(
+        {
+            f"{prefix}:worktree_path": "D:/tmp/wt",
+            f"{prefix}:merge_status": "approval_required",
+            f"{prefix}:merge_reason": "service_lock",
+        }
+    )
+
+    with patch.object(
+        _dr_commands,
+        "_launch_conflict_resolver_process",
+        side_effect=AssertionError("service_lock must not launch conflict resolver"),
+    ):
+        _dr_commands._do_resolve_conflict(rid, fake, "cmd-resolve")  # noqa: SLF001
+
+    result = json.loads(fake.lpush_items[-1][1])
+    assert result["success"] is False
+    assert result["merge_status"] == "approval_required"
+    assert result["reason"] == "service_lock"
+    assert (f"{prefix}:merge_status", "resolving") not in fake.set_calls
 
 
 def test_stream_cleanup_preserves_approval_required_even_when_merge_requested_leftover_R():
@@ -228,8 +317,8 @@ def test_execute_merge_with_lock_preserves_existing_approval_required_before_que
     assert (f"{prefix}:merge_status", "queued") not in fake.set_calls
 
 
-def test_execute_merge_with_lock_retry_merge_bypasses_existing_approval_required_guard_R():
-    """override: explicit retry-merge may proceed from approval_required."""
+def test_execute_merge_with_lock_approved_retry_bypasses_existing_approval_required_guard_R():
+    """override: approved retry may proceed from approval_required."""
     _dr_merge, _dr_commands, merge_queue = _import_plan_runner_modules()
 
     rid = "t-approval-retry-001"
@@ -250,11 +339,11 @@ def test_execute_merge_with_lock_retry_merge_bypasses_existing_approval_required
          patch.object(merge_queue, "_get_repo_id", return_value="repo"), \
          patch.object(_dr_merge, "_check_stale_merge_gate", return_value=(None, None)), \
          patch.object(_dr_merge.subprocess, "run", return_value=SimpleNamespace(returncode=5)):
-        result = _dr_merge._execute_merge_with_lock(rid, fake, action_name="retry-merge")  # noqa: SLF001
+        result = _dr_merge._execute_merge_with_lock(rid, fake, action_name="approved-retry")  # noqa: SLF001
 
     acquire_mock.assert_called_once()
     assert result["merge_status"] == "approval_required"
-    assert result["action"] == "retry-merge"
+    assert result["action"] == "approved-retry"
     assert (f"{prefix}:merge_status", "queued") in fake.set_calls
 
 
