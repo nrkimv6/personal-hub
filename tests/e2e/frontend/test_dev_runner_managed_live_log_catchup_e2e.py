@@ -18,6 +18,19 @@ def _fulfill_json(route, payload, status: int = 200):
 
 
 def _stub_dev_runner_shell(page: Page, runner_id: str, plan_file: str, recent_handler) -> None:
+    runner_payload = {
+        "runner_id": runner_id,
+        "plan_file": plan_file,
+        "engine": "codex",
+        "status": "running",
+        "running": True,
+        "pid": 12345,
+        "current_cycle": 1,
+        "start_time": "2026-05-04T23:35:00",
+        "trigger": "user",
+        "visible": True,
+        "execution_count": 1,
+    }
     gate_snapshot = {
         "state": "open",
         "reason": "test gate open",
@@ -54,23 +67,10 @@ def _stub_dev_runner_shell(page: Page, runner_id: str, plan_file: str, recent_ha
         "**/api/v1/dev-runner/runners",
         lambda route: _fulfill_json(
             route,
-            [
-                {
-                    "runner_id": runner_id,
-                    "plan_file": plan_file,
-                    "engine": "codex",
-                    "status": "running",
-                    "running": True,
-                    "pid": 12345,
-                    "current_cycle": 1,
-                    "start_time": "2026-05-04T23:35:00",
-                    "trigger": "user",
-                    "visible": True,
-                    "execution_count": 1,
-                }
-            ],
+            [runner_payload],
         ),
     )
+    page.route("**/api/v1/dev-runner/runners/orphans", lambda route: _fulfill_json(route, []))
     page.route("**/api/v1/dev-runner/tasks/current-tracking", lambda route: _fulfill_json(route, None))
     page.route("**/api/v1/dev-runner/plans", lambda route: _fulfill_json(route, []))
     page.route("**/api/v1/dev-runner/logs/diagnostics", lambda route: route.fulfill(status=503, body="diagnostics down"))
@@ -81,7 +81,7 @@ def _stub_dev_runner_shell(page: Page, runner_id: str, plan_file: str, recent_ha
         lambda route: route.fulfill(
             status=200,
             content_type="text/event-stream",
-            body='event: status\ndata: {"runners": []}\n\n',
+            body=f"event: status\ndata: {json.dumps({'runners': [runner_payload]})}\n\n",
         ),
     )
 
