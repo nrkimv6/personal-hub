@@ -20,7 +20,13 @@ REDIS_DB = 0
 LOG_CHANNEL_PREFIX = "plan-runner:logs"
 
 
-def _collect_sse_data_lines(url: str, timeout: float = 8.0) -> list[str]:
+def _collect_sse_data_lines(
+    url: str,
+    timeout: float = 8.0,
+    *,
+    target_substring: str | None = None,
+    max_lines: int = 3,
+) -> list[str]:
     """SSE 스트림에서 data: 라인을 수집"""
     collected = []
     deadline = time.monotonic() + timeout
@@ -33,7 +39,9 @@ def _collect_sse_data_lines(url: str, timeout: float = 8.0) -> list[str]:
                     data = raw_line[5:].strip()
                     if data and data != "ok":
                         collected.append(data)
-                if len(collected) >= 3:
+                        if target_substring and target_substring in data:
+                            break
+                if not target_substring and len(collected) >= max_lines:
                     break
     except Exception:
         pass
@@ -118,8 +126,14 @@ def test_e2e_log_stream_fallback_on_no_pubsub(r, tmp_path):
     t.start()
 
     try:
-        # 총 18초 대기: 8초 append 시작 + 파일 폴링 반영 마진
-        collected = _collect_sse_data_lines(url, timeout=18.0)
+        # 총 18초 대기: 8초 append 시작 + 파일 폴링 반영 마진.
+        # fallback 진입 시 기존 tail이 먼저 올 수 있으므로 목표 신규 라인까지 수집한다.
+        collected = _collect_sse_data_lines(
+            url,
+            timeout=18.0,
+            target_substring="fallback-line",
+            max_lines=20,
+        )
         t.join(timeout=5)
         if not collected:
             pytest.skip("Admin API emitted no SSE data in fallback window")
