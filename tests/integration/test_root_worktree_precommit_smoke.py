@@ -87,6 +87,17 @@ def test_root_worktree_blocks_impl_scope_stage(tmp_path):
     assert "root_worktree_impl_scope_blocked" in (result.stdout + result.stderr)
 
 
+def test_root_worktree_allows_root_operator_docs(tmp_path):
+    repo = _init_repo(tmp_path)
+    for name in ("AGENTS.md", "CLAUDE.md"):
+        (repo / name).write_text(f"# {name}\n", encoding="utf-8")
+        _run(["git", "add", name], repo)
+
+    result = _run_hook(repo)
+
+    assert result.returncode == 0
+
+
 def test_root_worktree_blocks_mirror_stage_without_merge_head(tmp_path):
     repo = _init_repo(tmp_path)
     target = repo / ".claude" / "skills" / "done" / "SKILL.md"

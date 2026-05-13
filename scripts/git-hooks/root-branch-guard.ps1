@@ -80,7 +80,7 @@ function Test-AllowedRootCommitPath {
     param([string]$PathValue)
 
     $p = ConvertTo-RelativeGitPath $PathValue
-    if ($p -in @("MANUAL_TASKS.md", "CHANGELOG.md", ".gitignore")) {
+    if ($p -in @("AGENTS.md", "CLAUDE.md", "MANUAL_TASKS.md", "CHANGELOG.md", ".gitignore")) {
         return $true
     }
     if ($p -match "^docs/(archive/|plan/)") {
