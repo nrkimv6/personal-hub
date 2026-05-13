@@ -40,7 +40,7 @@ def mock_executor_redis():
         yield {"async": fake_async, "sync": fake_sync}
 
 
-@pytest.fixture
+@pytest.fixture(autouse=True)
 def runner_state_db():
     engine = create_engine(
         "sqlite://",
@@ -51,7 +51,8 @@ def runner_state_db():
     DevRunnerMergeRequest.__table__.create(bind=engine, checkfirst=True)
     Session = sessionmaker(bind=engine, autocommit=False, autoflush=False)
     session = Session()
-    with patch("app.database.SessionLocal", Session):
+    with patch("app.database.SessionLocal", Session), \
+         patch("app.core.database.SessionLocal", Session):
         try:
             yield session
         finally:
@@ -325,14 +326,16 @@ class TestStartRun:
 
     async def test_start_brpop_timeout_504(self, client, mock_executor_redis):
         fake_async = mock_executor_redis["async"]
-        # listener heartbeat 세팅 (사전 확인 통과)
         await fake_async.set("plan-runner:listener:heartbeat", datetime.now().isoformat())
-        # status: not running (None), brpop: timeout → None 반환
-        # fakeredis는 데이터 없을 때 brpop이 즉시 None 반환
-        response = await client.post("/api/v1/dev-runner/run", json={
-            "plan_file": "test.md"
-        })
-        assert response.status_code == 504
+
+        with patch.object(fake_async, "brpop", new=AsyncMock(return_value=None)) as mock_brpop:
+            response = await client.post("/api/v1/dev-runner/run", json={
+                "plan_file": "test.md"
+            })
+
+        assert response.status_code == 200
+        assert response.json()["running"] is True
+        mock_brpop.assert_not_awaited()
 
     async def test_start_reserved_status_is_reported_via_async_command_result(self, client, mock_executor_redis):
         """비동기 start 계약에서는 예약대기 listener 결과를 command result로 조회한다."""
@@ -519,22 +522,28 @@ class TestStartRun:
         assert "지원되지 않는 엔진" in response.text
 
     async def test_start_run_codex_preflight_failure_returns_422(self, client, mock_executor_redis):
-        """codex preflight 실패는 5xx가 아닌 422로 반환"""
+        """codex preflight 실패는 accepted 이후 command result에서 실패로 조회된다."""
         fake_async = mock_executor_redis["async"]
         await fake_async.set("plan-runner:listener:heartbeat", datetime.now().isoformat())
 
-        brpop_result = (
-            "plan-runner:command_results:abc123",
-            json.dumps({"success": False, "message": "codex 인증 실패: CLI 로그인/토큰 상태를 확인하세요."}),
-        )
-        with patch.object(fake_async, "brpop", new=AsyncMock(return_value=brpop_result)):
+        with patch.object(fake_async, "brpop", new=AsyncMock(return_value=None)) as mock_brpop:
             response = await client.post("/api/v1/dev-runner/run", json={
                 "plan_file": "test-plan.md",
                 "engine": "codex",
             })
 
-        assert response.status_code == 422
-        assert "codex 인증 실패" in response.text
+        assert response.status_code == 200
+        mock_brpop.assert_not_awaited()
+        command = json.loads((await fake_async.lrange("plan-runner:commands", 0, -1))[0])
+        command_id = command["command_id"]
+        await fake_async.lpush(
+            f"{RESULTS_KEY}:{command_id}",
+            json.dumps({"success": False, "message": "codex 인증 실패: CLI 로그인/토큰 상태를 확인하세요."}, ensure_ascii=False),
+        )
+        result = await client.get(f"/api/v1/dev-runner/commands/{command_id}")
+        assert result.status_code == 200
+        assert result.json()["status"] == "failed"
+        assert "codex 인증 실패" in result.json()["message"]
 
     async def test_start_run_codex_runtime_failure_not_preflight_422(self, client, mock_executor_redis):
         """codex 요청이 accepted된 경우 runtime 실패는 start 단계 preflight 422 대상이 아님"""
@@ -556,12 +565,23 @@ class TestStartRun:
         assert response.json()["running"] is True
 
     async def test_start_run_codex_runtime_failure_marker_detected_in_message(self, client, mock_executor_redis):
-        """model_reasoning_effort/xhigh 문자열은 preflight(422)가 아닌 runtime 실패(500)로 분류"""
+        """model_reasoning_effort/xhigh 문자열은 accepted 이후 command result 실패로 보존된다."""
         fake_async = mock_executor_redis["async"]
         await fake_async.set("plan-runner:listener:heartbeat", datetime.now().isoformat())
 
-        brpop_result = (
-            "plan-runner:command_results:abc123",
+        with patch.object(fake_async, "brpop", new=AsyncMock(return_value=None)) as mock_brpop:
+            response = await client.post("/api/v1/dev-runner/run", json={
+                "plan_file": "test-plan.md",
+                "engine": "codex",
+                "fix_engine": "codex",
+            })
+
+        assert response.status_code == 200
+        mock_brpop.assert_not_awaited()
+        command = json.loads((await fake_async.lrange("plan-runner:commands", 0, -1))[0])
+        command_id = command["command_id"]
+        await fake_async.lpush(
+            f"{RESULTS_KEY}:{command_id}",
             json.dumps(
                 {
                     "success": False,
@@ -569,33 +589,34 @@ class TestStartRun:
                 }
             ),
         )
-        with patch.object(fake_async, "brpop", new=AsyncMock(return_value=brpop_result)):
-            response = await client.post("/api/v1/dev-runner/run", json={
-                "plan_file": "test-plan.md",
-                "engine": "codex",
-                "fix_engine": "codex",
-            })
-
-        assert response.status_code == 500
-        assert "model_reasoning_effort" in response.text
+        result = await client.get(f"/api/v1/dev-runner/commands/{command_id}")
+        assert result.status_code == 200
+        assert result.json()["status"] == "failed"
+        assert "model_reasoning_effort" in result.json()["message"]
 
     async def test_start_run_non_codex_failure_keeps_500(self, client, mock_executor_redis):
-        """codex와 무관한 listener 실패는 기존대로 500 유지"""
+        """codex와 무관한 listener 실패도 accepted 이후 command result에서 조회된다."""
         fake_async = mock_executor_redis["async"]
         await fake_async.set("plan-runner:listener:heartbeat", datetime.now().isoformat())
 
-        brpop_result = (
-            "plan-runner:command_results:abc123",
-            json.dumps({"success": False, "message": "Already running (PID: 12345)"}),
-        )
-        with patch.object(fake_async, "brpop", new=AsyncMock(return_value=brpop_result)):
+        with patch.object(fake_async, "brpop", new=AsyncMock(return_value=None)) as mock_brpop:
             response = await client.post("/api/v1/dev-runner/run", json={
                 "plan_file": "test-plan.md",
                 "engine": "claude",
             })
 
-        assert response.status_code == 500
-        assert "Already running" in response.text
+        assert response.status_code == 200
+        mock_brpop.assert_not_awaited()
+        command = json.loads((await fake_async.lrange("plan-runner:commands", 0, -1))[0])
+        command_id = command["command_id"]
+        await fake_async.lpush(
+            f"{RESULTS_KEY}:{command_id}",
+            json.dumps({"success": False, "message": "Already running (PID: 12345)"}),
+        )
+        result = await client.get(f"/api/v1/dev-runner/commands/{command_id}")
+        assert result.status_code == 200
+        assert result.json()["status"] == "failed"
+        assert "Already running" in result.json()["message"]
 
 
 class TestStopRun:
@@ -607,11 +628,20 @@ class TestStopRun:
     async def test_stop_running_process(self, client, mock_executor_redis):
         from app.modules.dev_runner.services.executor_service import ACTIVE_RUNNERS_KEY, RUNNER_KEY_PREFIX
         fake_async = mock_executor_redis["async"]
+        fake_sync = mock_executor_redis["sync"]
         rid = "stop-test-runner"
         await fake_async.set("plan-runner:listener:heartbeat", "2026-02-19T10:00:00")
         await fake_async.sadd(ACTIVE_RUNNERS_KEY, rid)
         await fake_async.set(f"{RUNNER_KEY_PREFIX}:{rid}:status", "running")
         await fake_async.set(f"{RUNNER_KEY_PREFIX}:{rid}:pid", "55555")
+        await fake_async.set(f"{RUNNER_KEY_PREFIX}:{rid}:trigger", "tc:stop-running")
+        await fake_async.set(f"{RUNNER_KEY_PREFIX}:{rid}:plan_file", "docs/plan/stop.md")
+        fake_sync.set("plan-runner:listener:heartbeat", "2026-02-19T10:00:00")
+        fake_sync.sadd(ACTIVE_RUNNERS_KEY, rid)
+        fake_sync.set(f"{RUNNER_KEY_PREFIX}:{rid}:status", "running")
+        fake_sync.set(f"{RUNNER_KEY_PREFIX}:{rid}:pid", "55555")
+        fake_sync.set(f"{RUNNER_KEY_PREFIX}:{rid}:trigger", "tc:stop-running")
+        fake_sync.set(f"{RUNNER_KEY_PREFIX}:{rid}:plan_file", "docs/plan/stop.md")
 
         brpop_result = (f"plan-runner:command_results:abc123", json.dumps({"success": True, "message": "Stopped"}))
         with patch.object(fake_async, 'brpop', new=AsyncMock(return_value=brpop_result)), \
