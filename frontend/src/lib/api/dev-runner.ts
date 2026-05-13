@@ -285,6 +285,7 @@ async function devRunnerRequest<T>(endpoint: string, options: RequestInit = {}, 
 	const url = `${DEV_RUNNER_BASE}${endpoint}`;
 
 	// dev-runner uses fetchWithTimeout directly, so apply the same gate policy here.
+	await apiGate.ensureInitialStatus();
 	if (apiGate.state !== 'open') {
 		throw new ApiGateClosedError();
 	}

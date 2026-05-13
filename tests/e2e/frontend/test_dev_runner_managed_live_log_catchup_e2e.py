@@ -18,6 +18,21 @@ def _fulfill_json(route, payload, status: int = 200):
 
 
 def _stub_dev_runner_shell(page: Page, runner_id: str, plan_file: str, recent_handler) -> None:
+    gate_snapshot = {
+        "state": "open",
+        "reason": "test gate open",
+        "since": None,
+        "apiPort": 8001,
+    }
+    page.route("**/__local/api-gate/status", lambda route: _fulfill_json(route, gate_snapshot))
+    page.route(
+        "**/__local/api-gate/stream",
+        lambda route: route.fulfill(
+            status=200,
+            content_type="text/event-stream",
+            body=f"event: gate_state\ndata: {json.dumps(gate_snapshot)}\n\n",
+        ),
+    )
     page.route(
         "**/api/v1/dev-runner/status",
         lambda route: _fulfill_json(
