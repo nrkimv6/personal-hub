@@ -29,7 +29,8 @@
 		error = null;
 		try {
 			const res = await devRunnerLogApi.history(listPager.limit, listPager.offset, true);
-			items = reset ? res.runs : [...items, ...res.runs];
+			const visibleRuns = res.runs.filter((run) => run.visible !== false);
+			items = reset ? visibleRuns : [...items, ...visibleRuns];
 			listPager.advance(res.runs.length, res.total);
 		} catch (e) {
 			error = '히스토리를 불러오지 못했습니다.';

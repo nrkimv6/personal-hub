@@ -26,8 +26,8 @@
 		loading = true;
 		error = null;
 		try {
-			const res = await devRunnerLogApi.history(10, 0);
-			runs = res.runs;
+			const res = await devRunnerLogApi.history(10, 0, true);
+			runs = res.runs.filter((run) => run.visible !== false);
 			runsWithLogs = runs.map((run) => ({
 				run,
 				lines: [],

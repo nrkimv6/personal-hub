@@ -595,6 +595,7 @@ export interface RunHistoryItem {
 	branch: string | null;
 	merge_status: string | null;
 	trigger?: string | null;
+	visible: boolean;
 	execution_count?: number | null;
 }
 
@@ -631,8 +632,8 @@ export const devRunnerLogApi = {
 		return new EventSource(`${DEV_RUNNER_BASE}/merge-log/stream?runner_id=${runnerId}`);
 	},
 
-	history: (limit: number = 20, offset: number = 0, visibleOnly: boolean = false) =>
-		devRunnerRequest<RunHistoryResponse>(`/logs/history?limit=${limit}&offset=${offset}${visibleOnly ? '&visible_only=true' : ''}`),
+	history: (limit: number = 20, offset: number = 0, visibleOnly: boolean = true) =>
+		devRunnerRequest<RunHistoryResponse>(`/logs/history?limit=${limit}&offset=${offset}&visible_only=${visibleOnly ? 'true' : 'false'}`),
 
 	full: (runnerId: string, offset: number = 0, limit: number = 500) =>
 		devRunnerRequest<FullLogResponse>(`/logs/full?runner_id=${runnerId}&offset=${offset}&limit=${limit}`),

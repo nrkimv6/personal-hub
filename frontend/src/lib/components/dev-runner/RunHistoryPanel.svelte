@@ -19,8 +19,8 @@
 		loading = true;
 		error = null;
 		try {
-			const res = await devRunnerLogApi.history(limit, offset);
-			runs = res.runs;
+			const res = await devRunnerLogApi.history(limit, offset, true);
+			runs = res.runs.filter((run) => run.visible !== false);
 			total = res.total;
 		} catch (e) {
 			error = String(e);

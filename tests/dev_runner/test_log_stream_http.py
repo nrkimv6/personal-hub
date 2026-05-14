@@ -848,8 +848,8 @@ def test_http_logs_history_visible_only_true():
 
 
 @pytest.mark.http_live
-def test_http_logs_history_visible_only_default_false():
-    """T5-41: GET /logs/history (파라미터 없음) → 200 + runs 배열 반환 (visible_only=False 기본값)"""
+def test_http_logs_history_visible_only_default_true():
+    """T5-41: GET /logs/history (파라미터 없음) → 200 + runs 배열 반환 (visible_only=True 기본값)"""
     url = f"{ADMIN_API}/api/v1/dev-runner/logs/history"
     try:
         resp = _live_get(url)

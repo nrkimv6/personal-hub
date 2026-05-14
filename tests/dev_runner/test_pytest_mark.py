@@ -297,7 +297,7 @@ class TestHttpRunnerMarkerContract:
         "test_cleanup_stale_and_dismiss_order_is_consistent",
         "test_logs_history_visible_only_returns_user_runner",
         "test_logs_history_visible_only_excludes_tc_runner",
-        "test_logs_history_default_not_visible_only",
+        "test_logs_history_default_visible_only",
     ]
 
     def test_http_marker_collects_all_testclient_cases(self):

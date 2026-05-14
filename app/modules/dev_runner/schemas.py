@@ -1075,6 +1075,8 @@ class RunHistoryItem(BaseModel):
     branch: Optional[str] = None
     merge_status: Optional[str] = None
     trigger: Optional[str] = None
+    visible: bool = False
+    execution_count: Optional[int] = None
 
 
 class RunHistoryResponse(BaseModel):
