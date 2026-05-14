@@ -1,5 +1,6 @@
 """Static and metadata checks for llm_requests child FK ondelete contracts."""
 
+import re
 from pathlib import Path
 
 from app.models.writing import GeneratedWriting
@@ -29,7 +30,10 @@ def test_writings_fk_R_no_code_surface():
     matches = []
     for path in scanned_files:
         text = path.read_text(encoding="utf-8", errors="ignore")
-        if "writings.llm_request_id" in text or "__tablename__ = \"writings\"" in text:
+        if (
+            re.search(r"(?<!generated_)writings\.llm_request_id", text)
+            or "__tablename__ = \"writings\"" in text
+        ):
             matches.append(str(path.relative_to(PROJECT_ROOT)))
 
     assert matches == []
@@ -53,6 +57,17 @@ def test_llm_request_fk_migration_B_drops_existing_constraints():
 
     assert "DROP CONSTRAINT IF EXISTS generated_writings_llm_request_id_fkey" in sql
     assert "DROP CONSTRAINT IF EXISTS generated_reports_llm_request_id_fkey" in sql
+
+
+def test_llm_request_fk_migration_B_nulls_orphan_child_refs_before_constraint_add():
+    sql = MIGRATION.read_text(encoding="utf-8")
+
+    for table in ("generated_writings", "generated_reports"):
+        update_position = sql.index(f"UPDATE {table}")
+        constraint_position = sql.index(f"ADD CONSTRAINT {table}_llm_request_id_fkey")
+        assert update_position < constraint_position
+        assert "NOT EXISTS" in sql[update_position:constraint_position]
+        assert "SET llm_request_id = NULL" in sql[update_position:constraint_position]
 
 
 def test_llm_request_fk_migration_E_no_cascade_for_child_rows():
