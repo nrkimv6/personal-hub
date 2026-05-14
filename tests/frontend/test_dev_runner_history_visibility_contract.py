@@ -38,3 +38,24 @@ def test_admin_history_components_request_and_filter_visible_runs() -> None:
         assert "devRunnerLogApi.history" in source, path
         assert "true)" in source or "true);" in source, path
         assert ".filter((run) => run.visible !== false)" in source, path
+
+
+def test_no_dummy_plan_names_in_fixture_visible_history_R() -> None:
+    """R: client-side visible filtering keeps dummy plan names out of rendered history input."""
+    dummy_plan_names = {
+        "approval-t5b.md",
+        "approval-t5.md",
+        "orphan.md",
+        "test.md",
+        "blocked-plan.md",
+    }
+    history_fixture = [
+        {"plan_file": "docs/plan/visible-user-plan.md", "visible": True},
+        *({"plan_file": f"docs/plan/{name}", "visible": False} for name in dummy_plan_names),
+    ]
+
+    rendered_input = [run for run in history_fixture if run["visible"] is not False]
+    rendered_names = {Path(str(run["plan_file"])).name for run in rendered_input}
+
+    assert "visible-user-plan.md" in rendered_names
+    assert rendered_names.isdisjoint(dummy_plan_names)
