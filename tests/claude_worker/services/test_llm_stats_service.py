@@ -96,6 +96,18 @@ class TestCleanupStaleProcessing:
 
 
 class TestCleanupOldHistory:
+    def test_cleanup_old_history_R_default_soft_delete(self, db, svc):
+        """R: hard_delete 생략 시 soft delete."""
+        old_time = datetime.now() - timedelta(days=10)
+        r = _req(db, "oh-default", status="completed", processed_at=old_time)
+
+        count = svc.cleanup_old_history(days=7)
+
+        assert count == 1
+        db.refresh(r)
+        assert r.deleted_at is not None
+        assert db.get(LLMRequest, r.id) is not None
+
     def test_cleanup_old_history_B_boundary_days(self, db, svc):
         """B: days 경계값 — 오래된 completed → 삭제, 최근 → 유지."""
         old_time = datetime.now() - timedelta(days=10)
@@ -120,6 +132,21 @@ class TestCleanupOldHistory:
         old_time = datetime.now() - timedelta(days=10)
         r = _req(db, "oh4", status="pending", requested_at=old_time)
         count = svc.cleanup_old_history(days=7)
+        assert count == 0
+
+    def test_cleanup_old_history_E_already_deleted_excluded_with_default(self, db, svc):
+        """E: 이미 soft delete된 오래된 요청은 기본 cleanup에서 제외."""
+        old_time = datetime.now() - timedelta(days=10)
+        _req(
+            db,
+            "oh-deleted",
+            status="completed",
+            processed_at=old_time,
+            deleted_at=datetime.now() - timedelta(days=1),
+        )
+
+        count = svc.cleanup_old_history(days=7)
+
         assert count == 0
 
 

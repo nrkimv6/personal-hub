@@ -394,7 +394,7 @@ class LLMService:
     def cleanup_stale_processing(self, timeout_minutes: int = None) -> int:
         return self._stats_svc.cleanup_stale_processing(timeout_minutes)
 
-    def cleanup_old_history(self, days: int = None, hard_delete: bool = True) -> int:
+    def cleanup_old_history(self, days: int = None, hard_delete: bool = False) -> int:
         return self._stats_svc.cleanup_old_history(days, hard_delete)
 
     def run_cleanup(self) -> dict:

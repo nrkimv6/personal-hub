@@ -32,7 +32,7 @@ class GeneratedReport(Base):
     # {"total_tasks": 15, "success_rate": 93.3, ...}
 
     # LLM 요청 연결
-    llm_request_id = Column(Integer, ForeignKey("llm_requests.id"), nullable=True)
+    llm_request_id = Column(Integer, ForeignKey("llm_requests.id", ondelete="SET NULL"), nullable=True)
 
     # 스케줄 연결
     schedule_run_id = Column(Integer, ForeignKey("task_schedule_runs.id"), nullable=True)
