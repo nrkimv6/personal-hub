@@ -150,7 +150,7 @@ class TestCleanupStaleProcessing:
     def test_cardinality_multiple_stale_requests(self, test_session, llm_service):
         """여러 stale 요청 모두 처리되어야 함."""
         # Given: 3개의 stale processing 요청
-        stale_time = datetime.now() - timedelta(minutes=15)
+        stale_time = datetime.now() - timedelta(minutes=70)
         for i in range(3):
             request = LLMRequest(
                 caller_type="test",
@@ -171,6 +171,28 @@ class TestCleanupStaleProcessing:
 
 class TestCleanupOldHistory:
     """Tests for cleanup_old_history()."""
+
+    def test_right_default_soft_delete_mode(self, test_session, llm_service):
+        """hard_delete 생략 시 오래된 completed 요청은 soft delete되어야 함."""
+        old_time = datetime.now() - timedelta(days=8)
+        request = LLMRequest(
+            caller_type="test",
+            caller_id="default-soft",
+            prompt="test prompt",
+            status="completed",
+            requested_at=old_time - timedelta(hours=1),
+            processed_at=old_time,
+        )
+        test_session.add(request)
+        test_session.commit()
+        request_id = request.id
+
+        count = llm_service.cleanup_old_history(days=7)
+
+        assert count == 1
+        persisted = test_session.query(LLMRequest).filter(LLMRequest.id == request_id).first()
+        assert persisted is not None
+        assert persisted.deleted_at is not None
 
     def test_right_old_completed_deleted(self, test_session, llm_service):
         """오래된 completed 요청이 삭제되어야 함."""
@@ -312,7 +334,7 @@ class TestRunCleanup:
     def test_right_runs_both_cleanups(self, test_session, llm_service):
         """stale과 history cleanup 모두 실행되어야 함."""
         # Given: stale processing 1개, old history 1개
-        stale_time = datetime.now() - timedelta(minutes=15)
+        stale_time = datetime.now() - timedelta(minutes=70)
         old_time = datetime.now() - timedelta(days=10)
 
         stale_request = LLMRequest(
@@ -339,14 +361,16 @@ class TestRunCleanup:
         # Then: 둘 다 처리됨
         assert result["stale_processing"] == 1
         assert result["old_history"] == 1
+        test_session.refresh(old_request)
+        assert old_request.deleted_at is not None
 
 
 class TestDefaultTimeoutValues:
     """Tests for default timeout constants."""
 
     def test_right_stale_timeout_default(self, llm_service):
-        """기본 stale timeout이 10분이어야 함."""
-        assert llm_service.STALE_PROCESSING_TIMEOUT_MINUTES == 10
+        """기본 stale timeout이 65분이어야 함."""
+        assert llm_service.STALE_PROCESSING_TIMEOUT_MINUTES == 65
 
     def test_right_history_retention_default(self, llm_service):
         """기본 이력 보관 기간이 7일이어야 함."""

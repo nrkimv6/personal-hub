@@ -198,6 +198,18 @@ def test_live_llm_bootstrap_returns_200_and_serialized_items():
     assert "items" in data["list"]
     assert "stats" in data
     assert "worker_status" in data
+
+
+def test_cleanup_history_http_live_openapi_default_is_soft_delete():
+    """R: live OpenAPI 계약에서 cleanup history hard_delete 기본값은 false."""
+    resp = _get("/openapi.json", timeout=10)
+    assert resp.status_code == 200
+    operation = resp.json()["paths"]["/api/v1/llm/cleanup/history"]["post"]
+    hard_delete_param = next(
+        param for param in operation["parameters"] if param["name"] == "hard_delete"
+    )
+
+    assert hard_delete_param["schema"]["default"] is False
     for item in data["list"]["items"]:
         if item.get("result") is not None:
             assert not isinstance(item["result"], str), f"result가 문자열로 남음: {item}"

@@ -51,7 +51,7 @@ class TestFacadeExecuteLlm:
         mock_dispatch.assert_called_once_with(
             "claude", "test prompt",
             model="m", timeout=120, parse_json=True,
-            enable_tools=False, cli_options=None,
+            enable_tools=False, cli_options=None, profile=None,
         )
         assert result["success"] is True
 
@@ -85,6 +85,22 @@ class TestFacadeDelegation:
             result = facade.run_cleanup()
         mock_rc.assert_called_once()
         assert "stale_processing" in result
+
+    def test_facade_cleanup_old_history_R_default_false(self, db, facade):
+        """R: cleanup_old_history 기본 hard_delete=False 위임."""
+        with patch.object(facade._stats_svc, "cleanup_old_history", return_value=1) as mock_cleanup:
+            result = facade.cleanup_old_history(days=7)
+
+        assert result == 1
+        mock_cleanup.assert_called_once_with(7, False)
+
+    def test_facade_cleanup_old_history_B_explicit_true(self, db, facade):
+        """B: cleanup_old_history hard_delete=True 명시 위임 유지."""
+        with patch.object(facade._stats_svc, "cleanup_old_history", return_value=1) as mock_cleanup:
+            result = facade.cleanup_old_history(days=7, hard_delete=True)
+
+        assert result == 1
+        mock_cleanup.assert_called_once_with(7, True)
 
     def test_facade_delegates_list_requests(self, db, facade):
         """R: list_requests Facade 위임 확인."""

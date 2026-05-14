@@ -142,12 +142,13 @@ class LLMStatsService:
 
         return count
 
-    def cleanup_old_history(self, days: int = None, hard_delete: bool = True) -> int:
+    def cleanup_old_history(self, days: int = None, hard_delete: bool = False) -> int:
         """오래된 이력 삭제.
 
         Args:
             days: 보관 기간 (일). 기본값: HISTORY_RETENTION_DAYS
-            hard_delete: True면 물리 삭제, False면 soft delete
+            hard_delete: True면 물리 삭제, False면 soft delete.
+                기본값은 FK 마이그레이션 완료 전까지 soft delete.
 
         Returns:
             삭제된 요청 수

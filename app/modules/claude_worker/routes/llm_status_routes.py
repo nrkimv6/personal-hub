@@ -131,7 +131,7 @@ def cleanup_stale_processing(
 @router.post("/cleanup/history")
 def cleanup_old_history(
     days: int = Query(7, ge=1, le=30, description="보관 기간 (일)"),
-    hard_delete: bool = Query(True, description="물리 삭제 여부"),
+    hard_delete: bool = Query(False, description="정식 FK 수정 전까지 물리 삭제는 명시 요청 시에만 동작"),
     db: Session = Depends(get_db),
 ):
     """오래된 이력만 정리."""
