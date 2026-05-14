@@ -10,10 +10,15 @@ TestClient 기반 오분류 e2e 테스트가 검증하던 API 레벨 동작을
 import pytest
 import httpx
 import time
+from datetime import datetime, timedelta
 from uuid import uuid4
 
+from sqlalchemy import text
+
 from app.database import SessionLocal
+from app.models.writing import GeneratedWriting
 from app.modules.claude_worker.models.llm_request import LLMRequest
+from app.modules.reports.models.generated_report import GeneratedReport
 
 pytestmark = pytest.mark.http_live
 
@@ -84,6 +89,67 @@ def _delete_live_request(request_id: int) -> None:
         if request is not None:
             db.delete(request)
             db.commit()
+    finally:
+        db.close()
+
+
+def _seed_old_completed_request_with_children(caller_id: str) -> tuple[int, int, int]:
+    """hard delete cleanup 대상이 되는 오래된 completed 요청과 자식 row를 삽입한다."""
+    db = SessionLocal()
+    try:
+        processed_at = datetime.now() - timedelta(days=31)
+        request = LLMRequest(
+            caller_type="test_cleanup_history_hard_delete",
+            caller_id=caller_id,
+            prompt="live cleanup hard delete test",
+            status="completed",
+            result='{"ok": true}',
+            requested_at=processed_at,
+            processed_at=processed_at,
+            requested_by="pytest",
+            request_source="http_live",
+        )
+        db.add(request)
+        db.flush()
+        db.execute(
+            text(
+                "SELECT setval(pg_get_serial_sequence('generated_writings','id'), "
+                "COALESCE((SELECT MAX(id) FROM generated_writings), 1), true)"
+            )
+        )
+        db.execute(
+            text(
+                "SELECT setval(pg_get_serial_sequence('generated_reports','id'), "
+                "COALESCE((SELECT MAX(id) FROM generated_reports), 1), true)"
+            )
+        )
+        writing = GeneratedWriting(
+            task_type="random",
+            content="live cleanup generated writing",
+            llm_request_id=request.id,
+        )
+        report = GeneratedReport(
+            report_type="live_cleanup",
+            period_start=processed_at,
+            period_end=processed_at,
+            title="live cleanup report",
+            content="live cleanup generated report",
+            llm_request_id=request.id,
+        )
+        db.add_all([writing, report])
+        db.commit()
+        return request.id, writing.id, report.id
+    finally:
+        db.close()
+
+
+def _cleanup_live_child_rows(writing_id: int, report_id: int) -> None:
+    """테스트가 중간 실패해도 synthetic child row만 정리한다."""
+    db = SessionLocal()
+    try:
+        db.query(GeneratedWriting).filter(GeneratedWriting.id == writing_id).delete()
+        db.query(GeneratedReport).filter(GeneratedReport.id == report_id).delete()
+        db.commit()
     finally:
         db.close()
 
@@ -198,6 +264,11 @@ def test_live_llm_bootstrap_returns_200_and_serialized_items():
     assert "items" in data["list"]
     assert "stats" in data
     assert "worker_status" in data
+    for item in data["list"]["items"]:
+        if item.get("result") is not None:
+            assert not isinstance(item["result"], str), f"result가 문자열로 남음: {item}"
+        if item.get("cli_options") is not None:
+            assert not isinstance(item["cli_options"], str), f"cli_options가 문자열로 남음: {item}"
 
 
 def test_cleanup_history_http_live_openapi_default_is_soft_delete():
@@ -210,11 +281,30 @@ def test_cleanup_history_http_live_openapi_default_is_soft_delete():
     )
 
     assert hard_delete_param["schema"]["default"] is False
-    for item in data["list"]["items"]:
-        if item.get("result") is not None:
-            assert not isinstance(item["result"], str), f"result가 문자열로 남음: {item}"
-        if item.get("cli_options") is not None:
-            assert not isinstance(item["cli_options"], str), f"cli_options가 문자열로 남음: {item}"
+
+
+def test_cleanup_history_hard_delete_http_live_no_fk_violation():
+    """R: live hard delete cleanup succeeds and preserves child rows with NULL FK."""
+    caller_id = f"cleanup-hard-delete-{uuid4()}"
+    request_id, writing_id, report_id = _seed_old_completed_request_with_children(caller_id)
+    try:
+        resp = _post("/api/v1/llm/cleanup/history?days=30&hard_delete=true", timeout=30)
+        assert resp.status_code == 200, resp.text[:500]
+
+        db = SessionLocal()
+        try:
+            assert db.query(LLMRequest).filter(LLMRequest.id == request_id).first() is None
+            writing = db.query(GeneratedWriting).filter(GeneratedWriting.id == writing_id).one()
+            report = db.query(GeneratedReport).filter(GeneratedReport.id == report_id).one()
+            assert writing.llm_request_id is None
+            assert report.llm_request_id is None
+            assert writing.content == "live cleanup generated writing"
+            assert report.content == "live cleanup generated report"
+        finally:
+            db.close()
+    finally:
+        _delete_live_request(request_id)
+        _cleanup_live_child_rows(writing_id, report_id)
 
 
 # ---------------------------------------------------------------------------
