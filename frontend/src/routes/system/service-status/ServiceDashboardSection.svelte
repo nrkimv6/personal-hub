@@ -16,6 +16,7 @@
   import type {
     ConfirmAction,
     DbCircuitStatus,
+    RedisFetchState,
     RestartStep,
     ServiceDashboardActions,
     WorkerStatusVariant
@@ -36,6 +37,7 @@
     workerTierProcs: WorkerProcess[];
     infraTierProcs: WorkerProcess[];
     redisStatus: RedisStatus | null;
+    redisFetchState: RedisFetchState;
     dbStatus: DbCircuitStatus | null;
     devRunnerStatus: RunStatusResponse | null;
     selfRestartState: 'idle' | 'requested' | 'waiting' | 'checking' | 'done' | 'failed';
@@ -80,6 +82,7 @@
     workerTierProcs,
     infraTierProcs,
     redisStatus,
+    redisFetchState,
     dbStatus,
     devRunnerStatus,
     selfRestartState,
@@ -168,6 +171,7 @@
 
   <InfrastructureSection
     {redisStatus}
+    {redisFetchState}
     {dbStatus}
     {devRunnerStatus}
     {allStartups}

@@ -33,7 +33,7 @@
     processWatchKey,
     formatProcessDelta
   } from './service-status/utils';
-  import type { ConfirmAction, DbCircuitStatus, RestartStep, RestartStepKey } from './service-status/types';
+  import type { ConfirmAction, DbCircuitStatus, RedisFetchState, RestartStep, RestartStepKey } from './service-status/types';
 
   interface Props {
     onStatusChange?: (runningCount: number, totalCount: number) => void;
@@ -58,6 +58,7 @@
     used_memory_mb: null,
     connected_clients: null
   });
+  let redisFetchState = $state<RedisFetchState>('loading');
 
   let confirmDialog = $state<{
     open: boolean;
@@ -100,6 +101,25 @@
   const SELF_RESTART_INITIAL_WAIT_REMOTE = 10000;
 
   const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
+
+  async function fetchRedisWithRetry(): Promise<RedisStatus | null> {
+    try {
+      const redis = await serviceDashboardApi.redisStatus();
+      redisFetchState = 'ok';
+      return redis;
+    } catch {
+      await sleep(1000);
+    }
+
+    try {
+      const redis = await serviceDashboardApi.redisStatus();
+      redisFetchState = 'ok';
+      return redis;
+    } catch {
+      redisFetchState = 'error';
+      return null;
+    }
+  }
 
   let allServices = $derived.by(() => {
     if (!status) return [];
@@ -300,18 +320,12 @@
     try {
       const [runnerStatus, redis, systemStatus] = await Promise.all([
         devRunnerRunnerApi.status().catch(() => null),
-        serviceDashboardApi.redisStatus().catch(() => null),
+        fetchRedisWithRetry(),
         systemApi.status().catch(() => null)
       ]);
       if (runnerStatus !== null) devRunnerStatus = runnerStatus;
       dbStatus = systemStatus?.db_status ?? null;
-      redisStatus = redis ?? {
-        connected: false,
-        container_running: null,
-        uptime_seconds: null,
-        used_memory_mb: null,
-        connected_clients: null
-      };
+      if (redis !== null) redisStatus = redis;
     } catch {
       // graceful
     }
@@ -603,6 +617,7 @@
       {workerTierProcs}
       {infraTierProcs}
       {redisStatus}
+      {redisFetchState}
       {dbStatus}
       {devRunnerStatus}
       {selfRestartState}

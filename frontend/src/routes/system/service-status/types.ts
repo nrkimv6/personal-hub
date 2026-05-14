@@ -15,6 +15,7 @@ export type SectionVariant = 'success' | 'warning' | 'error' | 'gray';
 export type WorkerStatusVariant = 'success' | 'warning' | 'error';
 export type SelfRestartState = 'idle' | 'requested' | 'waiting' | 'checking' | 'done' | 'failed';
 export type RestartStepKey = 'requested' | 'waiting' | 'checking' | 'done';
+export type RedisFetchState = 'loading' | 'ok' | 'error';
 
 export interface DbCircuitStatus {
   state: 'closed' | 'open' | 'half_open' | string;
@@ -136,6 +137,7 @@ export interface TasksSectionProps {
 
 export interface InfrastructureSectionProps {
   redisStatus: RedisStatus | null;
+  redisFetchState: RedisFetchState;
   dbStatus: DbCircuitStatus | null;
   devRunnerStatus: RunStatusResponse | null;
   allStartups: StartupProgram[];

@@ -71,3 +71,50 @@ class TestRedisRestartSocketCheck:
 
         assert resp.status_code == 200
         assert resp.json().get("success") is True
+
+
+class TestRedisStatusHttp:
+    """GET /api/v1/system/services/redis — UI status contract."""
+
+    def test_GET_redis_status_connected_false_is_real_disconnected_R(self, client):
+        """connected:false JSON is a successful backend status, not a frontend fetch failure."""
+        payload = {
+            "connected": False,
+            "container_running": True,
+            "uptime_seconds": None,
+            "used_memory_mb": None,
+            "connected_clients": None,
+        }
+
+        with patch("app.modules.system.routes._redis.get_redis_status", new=AsyncMock(return_value=payload)):
+            resp = client.get("/api/v1/system/services/redis")
+
+        assert resp.status_code == 200
+        assert resp.json() == payload
+
+    def test_GET_redis_status_connected_true_is_success_payload_R(self, client):
+        """connected:true JSON is the success payload that restores the frontend ok state."""
+        payload = {
+            "connected": True,
+            "container_running": True,
+            "uptime_seconds": 120,
+            "used_memory_mb": 2.5,
+            "connected_clients": 1,
+        }
+
+        with patch("app.modules.system.routes._redis.get_redis_status", new=AsyncMock(return_value=payload)):
+            resp = client.get("/api/v1/system/services/redis")
+
+        assert resp.status_code == 200
+        assert resp.json() == payload
+
+    def test_GET_redis_status_failure_returns_http_error_E(self):
+        """A backend exception is an HTTP failure, distinct from connected:false JSON."""
+        with TestClient(app, raise_server_exceptions=False) as local_client:
+            with patch(
+                "app.modules.system.routes._redis.get_redis_status",
+                new=AsyncMock(side_effect=RuntimeError("redis probe unavailable")),
+            ):
+                resp = local_client.get("/api/v1/system/services/redis")
+
+        assert resp.status_code == 500

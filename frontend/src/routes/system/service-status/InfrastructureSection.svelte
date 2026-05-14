@@ -5,6 +5,7 @@
 
   let {
     redisStatus,
+    redisFetchState,
     dbStatus,
     devRunnerStatus,
     allStartups,
@@ -32,6 +33,17 @@
     if (state === 'half_open') return '복구 확인 중';
     return '정상';
   };
+
+  const redisVariant = (): 'success' | 'warning' | 'error' => {
+    if (redisFetchState !== 'ok') return 'warning';
+    return redisStatus?.connected ? 'success' : 'error';
+  };
+
+  const redisLabel = () => {
+    if (redisFetchState === 'loading') return '확인 중';
+    if (redisFetchState === 'error') return '확인 실패';
+    return redisStatus?.connected ? 'Connected' : 'Disconnected';
+  };
 </script>
 
 <div class="bg-card rounded-lg border border-border shadow-card p-4">
@@ -41,10 +53,10 @@
     <div class="mb-3 pb-3 border-b border-border">
       <div class="flex items-center justify-between mb-2">
         <div class="flex items-center gap-2">
-          <StatusDot variant={redisStatus.connected ? 'success' : 'error'} size="md" pulse={redisStatus.connected} />
+          <StatusDot variant={redisVariant()} size="md" pulse={redisFetchState === 'ok' && redisStatus.connected} />
           <span class="font-medium text-sm">Redis</span>
-          <StatusBadge variant={redisStatus.connected ? 'success' : 'error'} size="sm">
-            {redisStatus.connected ? 'Connected' : 'Disconnected'}
+          <StatusBadge variant={redisVariant()} size="sm">
+            {redisLabel()}
           </StatusBadge>
         </div>
         <button
@@ -60,7 +72,7 @@
           Container: {redisStatus.container_running ? 'Running' : 'Stopped'}
         </div>
       {/if}
-      {#if redisStatus.connected}
+      {#if redisFetchState === 'ok' && redisStatus.connected}
         <div class="flex gap-3 text-[10px] text-muted-foreground px-1">
           <span>Uptime: {formatUptime(redisStatus.uptime_seconds)}</span>
           <span>Mem: {redisStatus.used_memory_mb ?? '-'}MB</span>
