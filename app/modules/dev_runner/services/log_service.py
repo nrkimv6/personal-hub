@@ -521,7 +521,7 @@ class LogService:
         except Exception:
             return {}
 
-    def get_run_history(self, limit: int = 20, offset: int = 0, visible_only: bool = False) -> RunHistoryResponse:
+    def get_run_history(self, limit: int = 20, offset: int = 0, visible_only: bool = True) -> RunHistoryResponse:
         """실행 이력 조회: Redis active_runners + 로그 파일 스캔 병합, start_time DESC 정렬"""
         runs: dict[str, RunHistoryItem] = {}
 
@@ -569,7 +569,8 @@ class LogService:
                     trigger = self._parse_trigger_from_log(log_file_path)
                 if trigger is None:
                     trigger = recent_meta.get("trigger")
-                if visible_only and not is_visible_runner(trigger, runner_id):
+                visible = is_visible_runner(trigger, runner_id)
+                if visible_only and not visible:
                     continue
                 # execution_count: Redis에서 우선 조회
                 execution_count = None
@@ -593,6 +594,7 @@ class LogService:
                     branch=branch,
                     merge_status=merge_status,
                     trigger=trigger,
+                    visible=visible,
                     execution_count=execution_count,
                 )
         except redis.ConnectionError:
@@ -676,7 +678,8 @@ class LogService:
                 file_engine = recent_meta.get("engine")
                 if file_trigger is None:
                     file_trigger = recent_meta.get("trigger")
-                if visible_only and not is_visible_runner(file_trigger, runner_id):
+                visible = is_visible_runner(file_trigger, runner_id)
+                if visible_only and not visible:
                     continue
                 # RUN_META.started_at 우선, 없으면 mtime fallback
                 if file_started_at:
@@ -695,6 +698,7 @@ class LogService:
                     log_file=str(path),
                     has_log=True,
                     trigger=file_trigger,
+                    visible=visible,
                     execution_count=file_execution_count,
                 )
 

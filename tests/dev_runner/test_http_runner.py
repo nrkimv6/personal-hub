@@ -281,9 +281,9 @@ class TestHttpLogHistoryVisibleOnly:
         assert data["total"] == 0
         assert data["runs"] == []
 
-    def test_logs_history_default_not_visible_only(self, client):
-        """visible_only 파라미터 없이 호출 시 → visible_only=False로 동작"""
-        from unittest.mock import patch, call
+    def test_logs_history_default_visible_only(self, client):
+        """visible_only 파라미터 없이 호출 시 → visible_only=True로 동작"""
+        from unittest.mock import patch
         from app.modules.dev_runner.schemas import RunHistoryResponse
 
         mock_resp = RunHistoryResponse(runs=[], total=0)
@@ -295,6 +295,5 @@ class TestHttpLogHistoryVisibleOnly:
             response = client.get(f"{BASE_URL}/logs/history")
 
         assert response.status_code == 200
-        # visible_only=False가 기본값
         call_kwargs = mock_get.call_args[1] if mock_get.call_args else {}
-        assert call_kwargs.get("visible_only", False) is False
+        assert call_kwargs.get("visible_only") is True

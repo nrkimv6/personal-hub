@@ -75,3 +75,25 @@ def test_logs_history_route_forwards_visible_only_true_to_service():
     assert response.status_code == 200
     assert response.json() == {"runs": [], "total": 0}
     assert captured == {"limit": 7, "offset": 2, "visible_only": True}
+
+
+def test_logs_history_route_defaults_visible_only_true_to_service():
+    """R: visible_only 생략 시에도 user-visible 이력만 조회한다."""
+    captured = {}
+
+    def _fake_get_run_history(*, limit: int, offset: int, visible_only: bool):
+        captured.update(limit=limit, offset=offset, visible_only=visible_only)
+        return RunHistoryResponse(runs=[], total=0)
+
+    with patch(
+        "app.modules.dev_runner.routes.logs.log_service.get_run_history",
+        side_effect=_fake_get_run_history,
+    ):
+        response = _logs_client().get(
+            f"{BASE_URL}/logs/history",
+            params={"limit": 7, "offset": 2},
+        )
+
+    assert response.status_code == 200
+    assert response.json() == {"runs": [], "total": 0}
+    assert captured == {"limit": 7, "offset": 2, "visible_only": True}

@@ -209,7 +209,7 @@ class TestGetRunHistoryRegexMatch:
         )
 
         with patch.object(svc, "_get_log_dir", return_value=tmp_path):
-            result = svc.get_run_history()
+            result = svc.get_run_history(visible_only=False)
 
         assert any(r.runner_id == runner_id for r in result.runs)
         run = next(r for r in result.runs if r.runner_id == runner_id)
@@ -225,7 +225,7 @@ class TestGetRunHistoryRegexMatch:
         expected_pseudo = f"lg-{hashlib.md5(ts.encode()).hexdigest()[:5]}"
 
         with patch.object(svc, "_get_log_dir", return_value=tmp_path):
-            result = svc.get_run_history()
+            result = svc.get_run_history(visible_only=False)
 
         assert any(r.runner_id == expected_pseudo for r in result.runs)
         run = next(r for r in result.runs if r.runner_id == expected_pseudo)
@@ -239,10 +239,10 @@ class TestGetRunHistoryRegexMatch:
         (tmp_path / f"plan-runner-stream-{ts}.log").write_text("log\n", encoding="utf-8")
 
         with patch.object(svc, "_get_log_dir", return_value=tmp_path):
-            result1 = svc.get_run_history()
+            result1 = svc.get_run_history(visible_only=False)
         LogService._legacy_map.clear()
         with patch.object(svc, "_get_log_dir", return_value=tmp_path):
-            result2 = svc.get_run_history()
+            result2 = svc.get_run_history(visible_only=False)
 
         ids1 = [r.runner_id for r in result1.runs]
         ids2 = [r.runner_id for r in result2.runs]
@@ -255,7 +255,7 @@ class TestGetRunHistoryRegexMatch:
         (tmp_path / f"plan-runner-stream-{ts}.log").write_text("log\n", encoding="utf-8")
 
         with patch.object(svc, "_get_log_dir", return_value=tmp_path):
-            result = svc.get_run_history()
+            result = svc.get_run_history(visible_only=False)
 
         for run in result.runs:
             if run.runner_id.startswith("lg-"):
@@ -270,7 +270,7 @@ class TestGetRunHistoryRegexMatch:
         (tmp_path / f"plan-runner-stream-{ts}.log").write_text("legacy\n", encoding="utf-8")
 
         with patch.object(svc, "_get_log_dir", return_value=tmp_path):
-            result = svc.get_run_history()
+            result = svc.get_run_history(visible_only=False)
 
         assert len(result.runs) == 2
         runner_ids = [r.runner_id for r in result.runs]
@@ -285,7 +285,7 @@ class TestGetRunHistoryRegexMatch:
         (tmp_path / "plan-runner-stream-abc.log").write_text("bad2\n", encoding="utf-8")
 
         with patch.object(svc, "_get_log_dir", return_value=tmp_path):
-            result = svc.get_run_history()
+            result = svc.get_run_history(visible_only=False)
 
         assert len(result.runs) == 0
 
@@ -299,7 +299,7 @@ class TestGetRunHistoryRegexMatch:
         expected_pseudo = f"lg-{hashlib.md5(ts.encode()).hexdigest()[:5]}"
 
         with patch.object(svc, "_get_log_dir", return_value=tmp_path):
-            svc.get_run_history()
+            svc.get_run_history(visible_only=False)
 
         assert expected_pseudo in LogService._legacy_map
         assert LogService._legacy_map[expected_pseudo] == log_file
@@ -505,7 +505,7 @@ class TestLegacyFullPipelineIntegration:
             )
 
         with patch.object(svc, "_get_log_dir", return_value=tmp_path):
-            history = svc.get_run_history()
+            history = svc.get_run_history(visible_only=False)
 
         assert len(history.runs) == 5
 
