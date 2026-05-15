@@ -23,7 +23,7 @@ class Business(Base):
 
     # 기본 정보
     name = Column(String, nullable=False)  # 업체명
-    service_type = Column(String, nullable=False, default="naver")  # naver/coupang
+    service_type = Column(String, nullable=False, default="naver")  # naver/coupang/popply
     category = Column(String, nullable=True)  # 카테고리
     service_name = Column(String, nullable=True)  # 서비스명 (예: "디저트 뮤지엄")
 
