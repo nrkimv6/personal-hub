@@ -13,6 +13,12 @@ import re
 from typing import Dict, List, Optional, TYPE_CHECKING
 
 from app.core.config import settings
+from app.modules.availability.types import AvailabilityCheckResult
+from app.modules.availability.services.event_writer import write_availability_event
+from app.modules.coupang_travel.services.availability_adapter import (
+    is_vendor_item_available,
+    vendor_items_to_availability_result,
+)
 from app.modules.coupang_travel.services.api_client import CoupangApiClient, VendorItem
 from app.services.event_logger import EventLogger
 
@@ -21,9 +27,6 @@ if TYPE_CHECKING:
     from app.shared.notification import NotificationService
 
 logger = logging.getLogger(__name__)
-
-_NON_AVAILABLE_STATUSES = {"SOLDOUT", "SOLD_OUT", "STOP_SALE", "OFF_SALE"}
-
 
 @dataclass
 class VendorItemStatus:
@@ -132,7 +135,6 @@ class CoupangMonitorService:
                 )
                 continue
 
-            date_changes: List[StatusChange] = []
             for idx, vi in enumerate(items):
                 vendor_key = _make_vendor_key(vi, idx)
                 state_key = f"{product_id}_{date}_{vendor_key}"
@@ -160,7 +162,6 @@ class CoupangMonitorService:
                         new_stock=current.stock_count,
                     )
                     changes.append(change)
-                    date_changes.append(change)
                     self._previous_statuses[state_key] = current
                     core_notify = self._is_within_notify_times(notify_times)
                     kakao_notify = self._should_send_kakao_alert(date, change)
@@ -197,15 +198,13 @@ class CoupangMonitorService:
                         },
                     )
 
-            slots_info = self._build_slots_info(items)
-            available_count = sum(1 for item in items if self._is_item_available(item))
-            status_name = self._map_monitor_status(items, date_changes, api_error=False)
-            self._log_monitoring_event(
-                schedule_id=schedule_id,
-                status=status_name,
-                available_count=available_count,
-                slots_info=slots_info,
+            result = vendor_items_to_availability_result(
+                items,
                 response_time_ms=response_time_ms,
+            )
+            self._log_availability_event(
+                schedule_id=schedule_id,
+                result=result,
                 event_timestamp=event_timestamp,
             )
 
@@ -245,8 +244,7 @@ class CoupangMonitorService:
 
     @staticmethod
     def _is_item_available(item: VendorItem) -> bool:
-        sale_status = (item.sale_status or "").upper()
-        return item.stock_count > 0 and sale_status not in _NON_AVAILABLE_STATUSES
+        return is_vendor_item_available(item)
 
     @staticmethod
     def _build_slots_info(items: List[VendorItem]) -> List[dict]:
@@ -376,6 +374,34 @@ class CoupangMonitorService:
                 slots_info=slots_info,
                 error_message=error_message,
                 response_time_ms=response_time_ms,
+            )
+        except Exception as e:
+            logger.error(
+                "[CoupangMonitorService] DB 이벤트 로깅 실패 (schedule_id=%s): %s",
+                schedule_id,
+                e,
+            )
+
+    def _log_availability_event(
+        self,
+        schedule_id: Optional[int],
+        result: AvailabilityCheckResult,
+        event_timestamp: Optional[datetime] = None,
+    ) -> None:
+        if not self._db_logging:
+            return
+        if schedule_id is None:
+            logger.warning(
+                "[CoupangMonitorService] schedule_id 없음으로 DB 이벤트 로깅 생략"
+            )
+            return
+
+        try:
+            write_availability_event(
+                schedule_id=schedule_id,
+                result=result,
+                timestamp=event_timestamp,
+                event_logger=EventLogger,
             )
         except Exception as e:
             logger.error(

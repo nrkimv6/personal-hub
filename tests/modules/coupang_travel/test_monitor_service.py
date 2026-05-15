@@ -101,8 +101,9 @@ async def test_check_and_notify_kakao_bypasses_notify_times():
     api_client.fetch_vendor_items = AsyncMock(return_value=[
         VendorItem(vendor_item_name="옵션A", sale_status="ON_SALE", stock_count=1)
     ])
-    with patch.object(service, "_is_within_notify_times", return_value=False):
-        changes = await service.check_and_notify("123", "pkg", ["2026-04-17"], make_page())
+    with patch.object(service_module.settings, "MEGABEAUTY_KAKAO_ALERT_ENABLED", True):
+        with patch.object(service, "_is_within_notify_times", return_value=False):
+            changes = await service.check_and_notify("123", "pkg", ["2026-04-17"], make_page())
 
     assert len(changes) == 1
     notification.send_notification_message.assert_called_once()
@@ -146,9 +147,10 @@ async def test_check_and_notify_kakao_allows_multiple_dates():
     api_client.fetch_vendor_items = AsyncMock(return_value=[
         VendorItem(vendor_item_name="옵션A", sale_status="ON_SALE", stock_count=1)
     ])
-    with patch.object(service_module.settings, "MEGABEAUTY_KAKAO_ALERT_DATES", "2026-04-17, 2026-04-18"):
-        with patch.object(service, "_is_within_notify_times", return_value=False):
-            changes = await service.check_and_notify("123", "pkg", ["2026-04-18"], make_page())
+    with patch.object(service_module.settings, "MEGABEAUTY_KAKAO_ALERT_ENABLED", True):
+        with patch.object(service_module.settings, "MEGABEAUTY_KAKAO_ALERT_DATES", "2026-04-17, 2026-04-18"):
+            with patch.object(service, "_is_within_notify_times", return_value=False):
+                changes = await service.check_and_notify("123", "pkg", ["2026-04-18"], make_page())
 
     assert len(changes) == 1
     notification.send_notification_message.assert_called_once()
@@ -169,9 +171,10 @@ async def test_check_and_notify_kakao_allows_wildcard_dates():
     api_client.fetch_vendor_items = AsyncMock(return_value=[
         VendorItem(vendor_item_name="옵션A", sale_status="ON_SALE", stock_count=1)
     ])
-    with patch.object(service_module.settings, "MEGABEAUTY_KAKAO_ALERT_DATES", "*"):
-        with patch.object(service, "_is_within_notify_times", return_value=False):
-            changes = await service.check_and_notify("123", "pkg", ["2026-04-18"], make_page())
+    with patch.object(service_module.settings, "MEGABEAUTY_KAKAO_ALERT_ENABLED", True):
+        with patch.object(service_module.settings, "MEGABEAUTY_KAKAO_ALERT_DATES", "*"):
+            with patch.object(service, "_is_within_notify_times", return_value=False):
+                changes = await service.check_and_notify("123", "pkg", ["2026-04-18"], make_page())
 
     assert len(changes) == 1
     notification.send_notification_message.assert_called_once()
@@ -192,9 +195,10 @@ async def test_check_and_notify_kakao_allows_any_token_dates():
     api_client.fetch_vendor_items = AsyncMock(return_value=[
         VendorItem(vendor_item_name="옵션A", sale_status="ON_SALE", stock_count=1)
     ])
-    with patch.object(service_module.settings, "MEGABEAUTY_KAKAO_ALERT_DATES", "any"):
-        with patch.object(service, "_is_within_notify_times", return_value=False):
-            changes = await service.check_and_notify("123", "pkg", ["2026-04-18"], make_page())
+    with patch.object(service_module.settings, "MEGABEAUTY_KAKAO_ALERT_ENABLED", True):
+        with patch.object(service_module.settings, "MEGABEAUTY_KAKAO_ALERT_DATES", "any"):
+            with patch.object(service, "_is_within_notify_times", return_value=False):
+                changes = await service.check_and_notify("123", "pkg", ["2026-04-18"], make_page())
 
     assert len(changes) == 1
     notification.send_notification_message.assert_called_once()
@@ -215,9 +219,10 @@ async def test_check_and_notify_kakao_fail_open_on_blank_dates():
     api_client.fetch_vendor_items = AsyncMock(return_value=[
         VendorItem(vendor_item_name="옵션A", sale_status="ON_SALE", stock_count=1)
     ])
-    with patch.object(service_module.settings, "MEGABEAUTY_KAKAO_ALERT_DATES", " , ; \n "):
-        with patch.object(service, "_is_within_notify_times", return_value=False):
-            changes = await service.check_and_notify("123", "pkg", ["2026-04-18"], make_page())
+    with patch.object(service_module.settings, "MEGABEAUTY_KAKAO_ALERT_ENABLED", True):
+        with patch.object(service_module.settings, "MEGABEAUTY_KAKAO_ALERT_DATES", " , ; \n "):
+            with patch.object(service, "_is_within_notify_times", return_value=False):
+                changes = await service.check_and_notify("123", "pkg", ["2026-04-18"], make_page())
 
     assert len(changes) == 1
     notification.send_notification_message.assert_called_once()
@@ -370,6 +375,10 @@ async def test_check_and_notify_slots_info_not_double_serialized():
     kwargs = log_event.call_args.kwargs
     assert isinstance(kwargs["slots_info"], list)
     assert kwargs["slots_info"][0]["vendorItemName"] == "옵션A"
+    assert kwargs["slots_info"][0]["saleStatus"] == "ON_SALE"
+    assert kwargs["slots_info"][0]["stockCount"] == 2
+    assert kwargs["slots_info"][0]["sourceType"] == "coupang"
+    assert kwargs["slots_info"][0]["availableCount"] == 2
 
 
 @pytest.mark.asyncio
