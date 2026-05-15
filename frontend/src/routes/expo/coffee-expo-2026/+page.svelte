@@ -184,13 +184,16 @@
 </svelte:head>
 
 <main class="mx-auto flex min-h-screen w-full max-w-7xl flex-col gap-6 bg-[linear-gradient(180deg,_#fff9ef_0%,_#f6f3ec_100%)] px-4 py-6 lg:px-6">
-  <PageHeader title={expo.title} subtitle={`${expo.venue} · ${expo.dateRange}`} />
+  <PageHeader title={expo.title} />
 
   <section class="rounded-[32px] border border-white/70 bg-[radial-gradient(circle_at_top_left,_rgba(251,191,36,0.2),_transparent_28%),linear-gradient(135deg,_rgba(255,255,255,0.94),_rgba(255,247,237,0.92))] p-6 shadow-[0_30px_80px_rgba(148,163,184,0.14)]">
     <div class="grid gap-6 lg:grid-cols-[minmax(0,1fr)_360px]">
       <div class="space-y-6">
         <div class="space-y-3">
-          <p class="text-xs font-semibold uppercase tracking-[0.3em] text-amber-700">Public Floor Guide</p>
+          <p class="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs font-semibold text-amber-700">
+            <span class="uppercase tracking-[0.3em]">Public Floor Guide</span>
+            <span class="text-amber-800/80">{expo.venue} · {expo.dateRange}</span>
+          </p>
           <h2 class="text-3xl font-semibold tracking-tight text-slate-900 lg:text-5xl">
             현장 동선은 가볍게, 부스 정보는 바로.
           </h2>

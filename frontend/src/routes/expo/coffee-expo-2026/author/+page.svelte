@@ -23,7 +23,7 @@
 </svelte:head>
 
 <main class="mx-auto flex min-h-screen w-full max-w-7xl flex-col gap-6 bg-[linear-gradient(180deg,_#fffaf2_0%,_#f6f1e8_100%)] px-4 py-6 lg:px-6">
-  <PageHeader title={`${expo.title} 좌표 작성`} subtitle="내부 제작/보정 전용 author helper" />
+  <PageHeader title={`${expo.title} 좌표 작성`} />
   <ExpoAdminWorkspace
     existingBooths={expo.booths}
     map={expo.map}

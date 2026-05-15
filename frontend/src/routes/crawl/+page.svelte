@@ -1,13 +1,5 @@
 <script lang="ts">
 	import { Button } from '$lib/components/ui';
-	import PageHeader from '$lib/components/layout/PageHeader.svelte';
-	import TabNav from '$lib/components/layout/TabNav.svelte';
-
-	const crawlTabs = [
-		{ id: 'history', label: '이력', href: '/crawl', exact: true },
-		{ id: 'requests', label: '단건 요청', href: '/crawl/requests' },
-		{ id: 'schedules', label: '스케줄', href: '/crawl/schedules' }
-	];
 
 	/**
 	 * 크롤링 요청 이력 페이지
@@ -202,16 +194,14 @@
 	<title>크롤링 이력</title>
 </svelte:head>
 
-<div class="p-4 md:p-6">
-	<!-- 헤더 + 탭 -->
-	<PageHeader title="크롤링 이력">
-		{#if $isAdmin}
+<div class="space-y-4">
+	{#if $isAdmin}
+		<div class="flex justify-end">
 			<Button variant="primary" size="sm" onclick={() => (showAddModal = true)}>
 				+ URL 크롤링 요청
 			</Button>
-		{/if}
-	</PageHeader>
-	<TabNav tabs={crawlTabs} variant="primary" urlBased size="compact" />
+		</div>
+	{/if}
 
 	<!-- 필터 -->
 	<div class="mb-4 flex flex-wrap gap-2">

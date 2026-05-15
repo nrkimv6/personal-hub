@@ -77,7 +77,6 @@
 
 <TabbedPageLayout
   title="메모"
-  subtitle="메모, 아카이브, 태그 관리를 같은 규약으로 다룹니다."
   actions={headerActions}
   primaryTabs={noteTabs}
   bind:activePrimaryTab={activeTab}

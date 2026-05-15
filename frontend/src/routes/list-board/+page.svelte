@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { ChevronUp, ChevronDown, ChevronsUpDown } from 'lucide-svelte';
+	import PageHeader from '$lib/components/layout/PageHeader.svelte';
 	import { listBoardApi, type ListBoardItem, type ListBoardColumn } from '$lib/api';
 	import { createPagePagination } from '$lib/utils/pagination.svelte';
 	import ListBoardCell from './ListBoardCell.svelte';
@@ -145,7 +146,7 @@
 </script>
 
 <div class="flex flex-col gap-4 p-4">
-	<h1 class="text-lg font-semibold">리스트 보드</h1>
+	<PageHeader title="리스트 보드" />
 
 	<!-- Import 섹션 -->
 	<section class="rounded border border-zinc-700 bg-zinc-900 p-4">

@@ -31,10 +31,20 @@
 	<title>AI / 글쓰기 | Monitor Page</title>
 </svelte:head>
 
-<div class="p-4 lg:p-6 space-y-4">
-	<PageHeader title="AI / 글쓰기" />
+{#snippet pageNavigation()}
+	<TabNav
+		tabs={writingTabs}
+		bind:activeTab={mainTab}
+		variant="primary"
+		level="primary"
+		queryParam="tab"
+		size="header"
+		overflow="scroll"
+	/>
+{/snippet}
 
-	<TabNav tabs={writingTabs} bind:activeTab={mainTab} variant="primary" queryParam="tab" />
+<div class="p-4 lg:p-6 space-y-4">
+	<PageHeader title="AI / 글쓰기" navigation={pageNavigation} />
 
 	{#if mainTab === 'writings'}
 		<WritingTab />

@@ -1,6 +1,8 @@
 <script lang="ts">
 	import { onMount, onDestroy } from 'svelte';
 	import { RefreshCw, Play, RotateCw } from 'lucide-svelte';
+	import PageHeader from '$lib/components/layout/PageHeader.svelte';
+	import TabNav, { type TabItem } from '$lib/components/layout/TabNav.svelte';
 	import {
 		PlanRecordsRequestError,
 		archiveScheduleApi,
@@ -158,7 +160,7 @@
 		toastTimer = setTimeout(() => { toastMessage = null; }, 3500);
 	}
 
-	const tabs: Array<{ id: TabId; label: string }> = [
+	const tabs: TabItem[] = [
 		{ id: 'candidates', label: '후보 목록' },
 		{ id: 'queue', label: 'LLM 요청' },
 		{ id: 'history', label: '이력' },
@@ -170,16 +172,15 @@
 </svelte:head>
 
 <div class="flex h-full flex-col gap-3 overflow-auto p-4 lg:p-6">
-	<div class="flex items-center gap-2">
-		<h1 class="text-lg font-semibold">Plan Archive 운영</h1>
+	<PageHeader title="Plan Archive 운영">
 		<button
-			class="ml-auto inline-flex items-center gap-1 rounded border border-border px-3 py-1 text-xs hover:bg-muted"
+			class="inline-flex items-center gap-1 rounded border border-border px-3 py-1 text-xs hover:bg-muted disabled:opacity-50"
 			onclick={fetchDashboard}
 			disabled={dashboardLoading}
 		>
 			<RefreshCw class="h-3 w-3 {dashboardLoading ? 'animate-spin' : ''}" />새로고침
 		</button>
-	</div>
+	</PageHeader>
 
 	<!-- Summary panel -->
 	<PlanArchiveSummaryPanel
@@ -193,7 +194,7 @@
 		onRefresh={fetchDashboard}
 	/>
 
-	<!-- Target selector -->
+	<!-- Target selector and actions -->
 	<div class="flex flex-col gap-2">
 		<PlanArchiveTargetSelector bind:selectedTargets />
 		<div class="flex flex-wrap items-center gap-2">
@@ -217,14 +218,7 @@
 	</div>
 
 	<!-- Tabs -->
-	<div class="flex border-b border-border">
-		{#each tabs as t}
-			<button
-				class="px-4 py-2 text-sm {activeTab === t.id ? 'border-b-2 border-primary font-medium' : 'text-muted-foreground hover:text-foreground'}"
-				onclick={() => { activeTab = t.id; }}
-			>{t.label}</button>
-		{/each}
-	</div>
+	<TabNav tabs={tabs} bind:activeTab variant="secondary" level="secondary" size="compact" />
 
 	<div class="flex-1 overflow-auto">
 		{#if activeTab === 'candidates'}

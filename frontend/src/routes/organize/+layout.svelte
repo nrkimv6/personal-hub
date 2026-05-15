@@ -28,7 +28,6 @@
 <div class="min-h-screen bg-background text-foreground">
 	<TabbedPageLayout
 		title="파일 정리기"
-		subtitle="상단 규약은 공통으로, 실제 도메인 작업은 각 화면 콘텐츠로 분리합니다."
 		primaryTabs={modules}
 		primaryUrlBased
 		density="compact"

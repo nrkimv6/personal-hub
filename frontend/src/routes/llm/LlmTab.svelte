@@ -973,7 +973,8 @@
 	<TabNav
 		tabs={llmTabs}
 		bind:activeTab
-		variant="primary"
+		variant="secondary"
+		level="secondary"
 		size="compact"
 		onTabChange={(tabId) => switchTab(tabId as Tab)}
 	/>

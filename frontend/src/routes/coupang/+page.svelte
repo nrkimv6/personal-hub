@@ -549,7 +549,6 @@
 
 <TabbedPageLayout
   title="쿠팡 여행상품 모니터링"
-  subtitle="등록, 일정, 히스토리를 같은 상단 계약으로 정렬합니다."
   actions={headerActions}
   primaryTabs={coupangTabs}
   bind:activePrimaryTab={activeTab}

@@ -61,6 +61,8 @@
   const contentWrapperClass = $derived(contentClass || 'min-w-0');
   const primaryTabsInHeader = $derived(primaryTabsPlacement === 'header' && primaryTabs.length > 0);
   const hasHeader = $derived(!!title || !!subtitle || !!actions || primaryTabsInHeader);
+  const resolvedPrimaryQueryParam = $derived(primaryUrlBased ? undefined : primaryQueryParam);
+  const resolvedSecondaryQueryParam = $derived(secondaryUrlBased ? undefined : secondaryQueryParam);
 </script>
 
 {#snippet primaryTabsNavigation()}
@@ -69,7 +71,7 @@
     bind:activeTab={activePrimaryTab}
     variant="primary"
     level="primary"
-    queryParam={primaryQueryParam}
+    queryParam={resolvedPrimaryQueryParam}
     urlBased={primaryUrlBased}
     replaceState={primaryReplaceState}
     size="header"
@@ -103,7 +105,7 @@
         bind:activeTab={activePrimaryTab}
         variant="primary"
         level="primary"
-        queryParam={primaryQueryParam}
+        queryParam={resolvedPrimaryQueryParam}
         urlBased={primaryUrlBased}
         replaceState={primaryReplaceState}
         size={density === 'compact' ? 'compact' : 'default'}
@@ -126,7 +128,7 @@
         bind:activeTab={activeSecondaryTab}
         variant="secondary"
         level="secondary"
-        queryParam={secondaryQueryParam}
+        queryParam={resolvedSecondaryQueryParam}
         urlBased={secondaryUrlBased}
         replaceState={secondaryReplaceState}
         size="compact"

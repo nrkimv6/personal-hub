@@ -376,7 +376,6 @@
       ? currentRepo.alias || currentRepo.path.split(/[/\\]/).pop() || 'Git 저장소'
       : 'Git 저장소';
   });
-  const pageSubtitle = $derived.by(() => repo?.path ?? '저장소 상태, 변경사항, 작업 이력을 관리합니다.');
 </script>
 
 {#snippet headerActions()}
@@ -393,8 +392,12 @@
   {/if}
 {/snippet}
 
+{#snippet repoNavigation()}
+  <TabNav tabs={repoTabs} bind:activeTab variant="primary" level="primary" size="header" />
+{/snippet}
+
 <div class="max-w-5xl mx-auto space-y-4 p-4 md:p-6">
-  <PageHeader title={pageTitle} subtitle={pageSubtitle} density="compact">
+  <PageHeader title={pageTitle} density="compact" navigation={repoNavigation}>
     {@render headerActions()}
   </PageHeader>
 
@@ -407,10 +410,10 @@
     <div class="p-4 rounded-lg bg-red-50 dark:bg-red-900/20 text-red-700 dark:text-red-400">{error}</div>
     {:else if repo}
       {@const r = repo}
-    <TabNav tabs={repoTabs} bind:activeTab variant="primary" />
 
     <!-- 상단 액션 버튼 -->
-    <div class="flex flex-wrap gap-2">
+    <div class="flex flex-wrap items-center gap-2">
+      <span class="max-w-full break-all rounded bg-gray-100 px-2 py-1 font-mono text-xs text-gray-500 dark:bg-gray-800 dark:text-gray-400">{r.path}</span>
       <button class="px-3 py-1.5 text-sm rounded-lg bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50 flex items-center gap-1" onclick={handleFetch} disabled={working}>
         <RefreshCw size={14} /> 페치
       </button>
