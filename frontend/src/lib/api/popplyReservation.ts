@@ -1,4 +1,6 @@
 import { request } from './client';
+import type { MonitoringEventListParams } from './naver-booking';
+import type { MonitoringEventList } from '$lib/types';
 
 const BASE = '/popply';
 
@@ -55,6 +57,26 @@ export const popplyReservationApi = {
 
 	async listSchedules(options?: RequestInit): Promise<PopplySchedule[]> {
 		return request<PopplySchedule[]>(`${BASE}/schedules`, options);
+	},
+
+	async listEvents(
+		params?: Omit<MonitoringEventListParams, 'service_type'>,
+		options?: RequestInit
+	): Promise<MonitoringEventList> {
+		const searchParams = new URLSearchParams();
+		if (params?.schedule_id) searchParams.append('schedule_id', String(params.schedule_id));
+		if (params?.biz_item_id) searchParams.append('biz_item_id', String(params.biz_item_id));
+		if (params?.business_id) searchParams.append('business_id', String(params.business_id));
+		if (params?.status) searchParams.append('status', params.status);
+		if (params?.event_type) searchParams.append('event_type', params.event_type);
+		if (params?.date_from) searchParams.append('date_from', params.date_from);
+		if (params?.date_to) searchParams.append('date_to', params.date_to);
+		if (params?.hours) searchParams.append('hours', params.hours);
+		if (params?.page) searchParams.append('page', String(params.page));
+		if (params?.page_size) searchParams.append('page_size', String(params.page_size));
+		searchParams.append('service_type', 'popply');
+		const query = searchParams.toString();
+		return request<MonitoringEventList>(`/monitoring/events${query ? `?${query}` : ''}`, options);
 	},
 
 	async createSchedules(body: CreatePopplyScheduleRequest): Promise<{ created: number }> {

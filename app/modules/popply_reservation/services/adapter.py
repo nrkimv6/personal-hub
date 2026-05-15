@@ -7,6 +7,7 @@ from typing import Any, Optional
 
 from app.modules.availability.types import AvailabilityCheckResult, AvailabilitySlot
 from app.modules.popply_reservation.services.http_client import PopplyHttpClient
+from app.modules.popply_reservation.utils.hash_normalizer import normalize_schedule_group_hash
 
 
 def _reservation_schedules(payload: Any) -> list[dict]:
@@ -17,6 +18,18 @@ def _reservation_schedules(payload: Any) -> list[dict]:
         payload.get("reservationSchedules"),
         payload.get("data", {}).get("reservationSchedule") if isinstance(payload.get("data"), dict) else None,
         payload.get("data", {}).get("reservationSchedules") if isinstance(payload.get("data"), dict) else None,
+        (
+            payload.get("data", {}).get("reservation", {}).get("reservationSchedule")
+            if isinstance(payload.get("data"), dict)
+            and isinstance(payload.get("data", {}).get("reservation"), dict)
+            else None
+        ),
+        (
+            payload.get("data", {}).get("reservation", {}).get("reservationSchedules")
+            if isinstance(payload.get("data"), dict)
+            and isinstance(payload.get("data", {}).get("reservation"), dict)
+            else None
+        ),
     ]
     for candidate in candidates:
         if isinstance(candidate, list):
@@ -69,10 +82,11 @@ class PopplyReservationAdapter:
             )
 
         current = now or datetime.now()
+        normalized_target_schedule_group = normalize_schedule_group_hash(target_schedule_group)
         slots: list[AvailabilitySlot] = []
         for item in schedules:
             schedule_group = item.get("scheduleGroup")
-            if schedule_group != target_schedule_group:
+            if normalize_schedule_group_hash(schedule_group) != normalized_target_schedule_group:
                 continue
             start_time = _parse_start_time(item.get("reservationStartTime"))
             reservation_date = item.get("reservationDate") or (
