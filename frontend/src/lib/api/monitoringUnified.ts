@@ -6,6 +6,7 @@
 
 import { scheduleApi } from './naver-booking';
 import { coupangTravelApi } from './coupangTravel';
+import { popplyReservationApi } from './popplyReservation';
 import { getConfigs, toggleConfig } from './kakaoMonitor';
 import { activityApi, formatActivityRegion } from './activity';
 import { eventApi } from './system';
@@ -23,6 +24,13 @@ function naverRunStatusToMonitorStatus(runStatus: string, isEnabled: boolean): M
 function coupangStatusToMonitorStatus(isEnabled: boolean, isActive: boolean): MonitorStatus {
 	if (!isEnabled) return 'disabled';
 	if (isActive) return 'running';
+	return 'idle';
+}
+
+function popplyStatusToMonitorStatus(isEnabled: boolean, isActive: boolean, runStatus: string): MonitorStatus {
+	if (!isEnabled) return 'disabled';
+	if (isActive || runStatus === 'running') return 'running';
+	if (runStatus === 'error') return 'error';
 	return 'idle';
 }
 
@@ -55,6 +63,20 @@ export async function fetchCoupangItems(): Promise<UnifiedMonitorItem[]> {
 		status: coupangStatusToMonitorStatus(s.is_enabled, s.is_active),
 		summary: s.business_name ?? undefined,
 		detailHref: '/coupang',
+		toggleable: true
+	}));
+}
+
+export async function fetchPopplyItems(): Promise<UnifiedMonitorItem[]> {
+	const items = await popplyReservationApi.listSchedules();
+	return items.map((s) => ({
+		id: `popply-${s.id}`,
+		type: 'popply' as MonitorType,
+		name: s.item_name ?? `POPPLY 일정 ${s.date}`,
+		status: popplyStatusToMonitorStatus(s.is_enabled, s.is_active, s.run_status),
+		lastChecked: s.last_check_time ?? undefined,
+		summary: s.last_event_status ?? s.store_id ?? undefined,
+		detailHref: '/popply',
 		toggleable: true
 	}));
 }
@@ -111,6 +133,7 @@ export async function fetchAllMonitorItems(types?: MonitorType[]): Promise<Fetch
 	const fetchers: { key: string; type: MonitorType; fn: () => Promise<UnifiedMonitorItem[]> }[] = [
 		{ key: '네이버', type: 'naver', fn: fetchNaverItems },
 		{ key: '쿠팡', type: 'coupang', fn: fetchCoupangItems },
+		{ key: 'POPPLY', type: 'popply', fn: fetchPopplyItems },
 		{ key: '카카오', type: 'kakao', fn: fetchKakaoItems },
 		{ key: '체육센터', type: 'activity', fn: fetchActivityItems },
 		{ key: '이벤트', type: 'event', fn: fetchEventItems }
@@ -153,6 +176,12 @@ export async function toggleMonitorItem(item: UnifiedMonitorItem): Promise<void>
 			await coupangTravelApi.disableSchedule(rawId);
 		} else {
 			await coupangTravelApi.enableSchedule(rawId);
+		}
+	} else if (item.type === 'popply') {
+		if (enabled) {
+			await popplyReservationApi.disableSchedule(rawId);
+		} else {
+			await popplyReservationApi.enableSchedule(rawId);
 		}
 	} else if (item.type === 'kakao') {
 		await toggleConfig(rawId);
