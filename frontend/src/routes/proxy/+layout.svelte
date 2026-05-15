@@ -10,7 +10,6 @@
 
 <TabbedPageLayout
   title="프록시 관리"
-  subtitle="프록시 수집 현황 및 품질 모니터링"
   primaryTabs={navTabs}
   primaryUrlBased
   density="compact"

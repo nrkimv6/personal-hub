@@ -285,13 +285,24 @@
   <title>발표 스캐너</title>
 </svelte:head>
 
+{#snippet pageNavigation()}
+  <TabNav
+    tabs={tabs}
+    bind:activeTab
+    queryParam="tab"
+    variant="primary"
+    level="primary"
+    replaceState={false}
+    size="header"
+    overflow="scroll"
+  />
+{/snippet}
+
 <div class="space-y-4 p-4 md:p-6">
   <PageHeader
     title="발표 사진 원근 보정 스캐너"
-    subtitle="에디터, 갤러리, 모바일 승인 큐를 같은 상단 규약으로 연결해 처리합니다."
+    navigation={pageNavigation}
   />
-
-  <TabNav tabs={tabs} bind:activeTab queryParam="tab" variant="primary" replaceState={false} />
 
   {#if activeTab === 'gallery'}
     <SlideGallery onopen={handleGalleryOpen} />

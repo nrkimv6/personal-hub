@@ -195,15 +195,24 @@
 	<title>문화/체육센터 | Monitor Page</title>
 </svelte:head>
 
+{#snippet pageNavigation()}
+	<TabNav
+		tabs={activityTabs}
+		bind:activeTab
+		variant="primary"
+		level="primary"
+		queryParam="tab"
+		size="header"
+		overflow="scroll"
+	/>
+{/snippet}
+
 <div class="p-4 space-y-4">
-	<PageHeader title="문화/체육센터 강좌" />
+	<PageHeader title="문화/체육센터 강좌" navigation={pageNavigation} />
 
 	{#if error}
 		<div class="mb-4 rounded-lg bg-error-light p-4 text-error">{error}</div>
 	{/if}
-
-	<!-- 탭 네비게이션 -->
-	<TabNav tabs={activityTabs} bind:activeTab variant="primary" queryParam="tab" />
 
 	{#if loading}
 		<div class="text-muted-foreground">로딩 중...</div>

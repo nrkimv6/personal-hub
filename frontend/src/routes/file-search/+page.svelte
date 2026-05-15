@@ -130,18 +130,6 @@
 		}
 		return items;
 	});
-	const pageSubtitle = $derived.by(() => {
-		if (pageTab === 'encoding') {
-			return '텍스트 파일의 인코딩 문제를 점검하고 변환합니다.';
-		}
-		if (pageTab === 'mp4-gif') {
-			return 'MP4 파일을 업로드하고 GIF로 변환합니다.';
-		}
-		if (pageTab === 'image-pdf') {
-			return '여러 이미지 파일을 하나의 PDF로 병합합니다.';
-		}
-		return '로컬 파일 검색, 인코딩 변환, MP4 → GIF 작업을 한곳에서 처리합니다.';
-	});
 	const hasStatusIssue = $derived.by(() => {
 		const currentStatus = status;
 		return currentStatus ? !currentStatus.everything_ok || !currentStatus.ripgrep_ok : false;
@@ -577,7 +565,6 @@
 
 <TabbedPageLayout
 	title="파일 도구"
-	subtitle={pageSubtitle}
 	actions={pageTab === 'search' ? headerActions : undefined}
 	primaryTabs={pageTabs}
 	bind:activePrimaryTab={pageTab}

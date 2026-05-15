@@ -862,7 +862,6 @@
 
 <TabbedPageLayout
 	title="이벤트 관리"
-	subtitle={isExpoTab ? 'System Control Tower · source data 운영 콘솔' : '이벤트와 팝업을 관리합니다'}
 	actions={headerActions}
 	toolbar={filterToolbar}
 	primaryTabs={eventTabs}

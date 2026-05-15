@@ -27,7 +27,6 @@
 	<div class="mx-auto flex w-full max-w-[1600px] flex-1 flex-col">
 		<TabbedPageLayout
 			title="이미지 분류기"
-			subtitle="대시보드, 스캐너, 이미지 리뷰, 규칙 화면을 같은 상단 계약으로 정렬합니다."
 			primaryTabs={modules}
 			primaryUrlBased
 			density="compact"

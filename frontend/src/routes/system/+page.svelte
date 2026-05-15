@@ -77,7 +77,6 @@
 
 <TabbedPageLayout
   title="시스템 / 설정"
-  subtitle="서비스 상태, 부팅 이력, 오류 로그, 시스템 설정을 관리합니다"
   primaryTabs={systemTabs}
   bind:activePrimaryTab={activeTab}
   primaryQueryParam="tab"
