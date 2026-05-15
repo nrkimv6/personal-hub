@@ -83,6 +83,7 @@ try:
     from app.worker.kakao_monitor_worker import KakaoMonitorWorker
     from app.worker.coupang_monitor_worker import CoupangMonitorWorker
     from app.worker.popup_monitor_worker import PopupMonitorWorker
+    from app.worker.popply_monitor_worker import PopplyMonitorWorker
 
     # 크롤러 및 워커 관련 로거들이 워커 로거와 같은 핸들러를 사용하도록 설정
     worker_handlers = logger.handlers
@@ -101,9 +102,12 @@ try:
         'app.worker.file_search_worker',
         'app.worker.plan_archive_listener',
         'app.worker.coupang_monitor_worker',
+        'app.worker.popply_monitor_worker',
         'app.modules.coupang_travel.services.http_client',
         'app.modules.coupang_travel.services.monitor_service',
         'app.modules.coupang_travel.services.api_client',
+        'app.modules.popply_reservation.services.http_client',
+        'app.modules.popply_reservation.services.adapter',
         'app.worker.crawl_worker_base',
         'app.modules.git_repos.worker',
         'instagram.worker_status',
@@ -158,6 +162,7 @@ async def run_with_orchestrator(
     run_plan_archive_listener: bool = True,
     run_coupang: bool = True,
     run_popup: bool = True,
+    run_popply: bool = True,
 ):
     """WorkerOrchestrator를 사용하여 워커들을 실행합니다.
 
@@ -321,6 +326,20 @@ async def run_with_orchestrator(
                     _e,
                 )
 
+        # POPPLY 예약 모니터 워커
+        if run_popply:
+            try:
+                popply_worker = PopplyMonitorWorker(
+                    browser_manager=orchestrator.browser_manager
+                )
+                orchestrator.register_worker("popply_monitor", popply_worker)
+                logger.info("[POPPLY_REGISTER] PopplyMonitorWorker 등록됨")
+            except Exception as _e:
+                logger.warning(
+                    "[POPPLY_REGISTER] 등록 실패: %s",
+                    _e,
+                )
+
         if not orchestrator.workers:
             logger.error("실행할 워커가 없습니다.")
             return
@@ -355,7 +374,8 @@ async def main(args):
             f"video_dl={args.video_dl or args.all}, "
             f"git={args.git or args.all}, "
             f"coupang={args.coupang or args.all}, "
-            f"popup={args.popup or args.all}"
+            f"popup={args.popup or args.all}, "
+            f"popply={args.popply or args.all}"
     )
     logger.info("=" * 50)
 
@@ -373,6 +393,7 @@ async def main(args):
             run_plan_archive_listener=args.all,
             run_coupang=args.coupang or args.all,
             run_popup=args.popup or args.all,
+            run_popply=args.popply or args.all,
         )
     except Exception as e:
         logger.critical(f"워커 치명적 오류: {e}", exc_info=True)
@@ -448,6 +469,11 @@ def parse_args():
         help="네이버 팝업 URL 모니터 워커만 실행",
     )
     parser.add_argument(
+        "--popply",
+        action="store_true",
+        help="POPPLY 예약 모니터 워커만 실행",
+    )
+    parser.add_argument(
         "--all",
         action="store_true",
         default=True,
@@ -457,7 +483,7 @@ def parse_args():
     args = parser.parse_args()
 
     # 개별 옵션이 지정되면 --all은 False
-    if args.naver or args.scheduled or args.ondemand or args.google or args.crawl or args.activity or args.mobile or args.video_dl or args.file_search or args.git or args.coupang or args.popup:
+    if args.naver or args.scheduled or args.ondemand or args.google or args.crawl or args.activity or args.mobile or args.video_dl or args.file_search or args.git or args.coupang or args.popup or args.popply:
         args.all = False
 
     return args

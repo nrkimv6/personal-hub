@@ -1,0 +1,18 @@
+{
+  "reservationSchedule": [
+    {
+      "id": 1,
+      "scheduleGroup": "public-group",
+      "reservationDate": "2026-06-01",
+      "reservationStartTime": "2026-06-01T10:00:00",
+      "currentAvailableGuests": 5
+    },
+    {
+      "id": 2,
+      "scheduleGroup": "q%2Fvz6hSqSFn1IMrEDVkTtDUvIPrnxtkqkn08sdn8T9EA7XyWkp5tej4hrzR0jbrmHagBNt3As8YgLwKGsTL89A%3D%3D",
+      "reservationDate": "2026-06-01",
+      "reservationStartTime": "2026-06-01T11:00:00",
+      "currentAvailableGuests": 0
+    }
+  ]
+}
