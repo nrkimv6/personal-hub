@@ -9,3 +9,4 @@ class ServiceType(str, enum.Enum):
     """모니터링 대상의 서비스 타입"""
     COUPANG = "coupang"
     NAVER = "naver"
+    POPPLY = "popply"
