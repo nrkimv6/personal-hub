@@ -275,10 +275,10 @@
     mobileRefreshKey += 1;
   }
 
-  $: imageUrl = currentSlide ? slideScannerApi.getSlideImageUrl(currentSlide.id) : '';
-  $: canPrev = sequenceIndex > 0;
-  $: canNext = sequenceIndex >= 0 && sequenceIndex < sequenceIds.length - 1;
-  $: aspectRatioLabel = aspectRatio === 'AUTO' ? 'Auto (원본 기준)' : aspectRatio;
+  const imageUrl = $derived(currentSlide ? slideScannerApi.getSlideImageUrl(currentSlide.id) : '');
+  const canPrev = $derived(sequenceIndex > 0);
+  const canNext = $derived(sequenceIndex >= 0 && sequenceIndex < sequenceIds.length - 1);
+  const aspectRatioLabel = $derived(aspectRatio === 'AUTO' ? 'Auto (원본 기준)' : aspectRatio);
 </script>
 
 <svelte:head>
