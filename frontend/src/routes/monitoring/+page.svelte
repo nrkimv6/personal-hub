@@ -9,7 +9,9 @@
 	import { toast } from '$lib/stores/toast';
 	import MonitoringList from './MonitoringList.svelte';
 	import NewMonitorTypeSelector from './NewMonitorTypeSelector.svelte';
-	import PageHeader from '$lib/components/layout/PageHeader.svelte';
+	import TabbedPageLayout from '$lib/components/layout/TabbedPageLayout.svelte';
+	import { Button } from '$lib/components/ui';
+	import { Plus } from 'lucide-svelte';
 
 	// ─── 상태 ────────────────────────────────────────────────────
 
@@ -118,17 +120,69 @@
 	<title>통합 모니터링</title>
 </svelte:head>
 
-<PageHeader title="통합 모니터링" density="compact">
-	<button
-		type="button"
-		class="rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90"
-		onclick={() => (showTypeSelector = true)}
-	>
-		+ 새 모니터링 추가
-	</button>
-</PageHeader>
+{#snippet headerActions()}
+	<Button variant="primary" size="sm" onclick={() => (showTypeSelector = true)}>
+		<Plus size={16} />
+		새 모니터링 추가
+	</Button>
+{/snippet}
 
-<main class="mx-auto max-w-6xl space-y-4 p-4">
+{#snippet filterToolbar()}
+	<div class="flex min-w-0 flex-col gap-2">
+		<div class="flex flex-wrap items-center gap-2">
+			<button
+				type="button"
+				class="rounded-full px-3 py-1 text-xs font-medium transition-colors {selectedType === null
+					? 'bg-primary text-primary-foreground'
+					: 'bg-muted text-muted-foreground hover:bg-muted/80'}"
+				onclick={() => setTypeFilter(null)}
+			>
+				전체
+			</button>
+			{#each TYPE_ENTRIES as [type, meta]}
+				<button
+					type="button"
+					class="rounded-full px-3 py-1 text-xs font-medium transition-colors {selectedType === type
+						? 'bg-primary text-primary-foreground'
+						: 'bg-muted text-muted-foreground hover:bg-muted/80'}"
+					onclick={() => setTypeFilter(selectedType === type ? null : type)}
+				>
+					{meta.label}
+				</button>
+			{/each}
+		</div>
+		<div class="flex flex-wrap items-center gap-2">
+			<button
+				type="button"
+				class="rounded-full px-3 py-1 text-xs font-medium transition-colors {selectedStatus === null
+					? 'bg-secondary text-secondary-foreground'
+					: 'bg-muted text-muted-foreground hover:bg-muted/80'}"
+				onclick={() => setStatusFilter(null)}
+			>
+				모든 상태
+			</button>
+			{#each STATUS_OPTIONS as opt}
+				<button
+					type="button"
+					class="rounded-full px-3 py-1 text-xs font-medium transition-colors {selectedStatus === opt.value
+						? 'bg-secondary text-secondary-foreground'
+						: 'bg-muted text-muted-foreground hover:bg-muted/80'}"
+					onclick={() => setStatusFilter(selectedStatus === opt.value ? null : opt.value)}
+				>
+					{opt.label}
+				</button>
+			{/each}
+		</div>
+	</div>
+{/snippet}
+
+<TabbedPageLayout
+	title="통합 모니터링"
+	actions={headerActions}
+	toolbar={filterToolbar}
+	density="compact"
+	containerClass="space-y-3 p-4 md:p-6"
+>
 	<!-- 에러 배너 -->
 	{#if errors.length > 0}
 		<div class="rounded-lg border border-yellow-300 bg-yellow-50 px-4 py-3 text-sm text-yellow-800">
@@ -137,58 +191,12 @@
 		</div>
 	{/if}
 
-	<!-- 툴바: 타입 필터 + 상태 필터 -->
-	<div class="flex flex-wrap gap-2">
-		<button
-			type="button"
-			class="rounded-full px-3 py-1 text-xs transition-colors {selectedType === null
-				? 'bg-primary text-primary-foreground'
-				: 'bg-muted text-muted-foreground hover:bg-muted/80'}"
-			onclick={() => setTypeFilter(null)}
-		>
-			전체
-		</button>
-		{#each TYPE_ENTRIES as [type, meta]}
-			<button
-				type="button"
-				class="rounded-full px-3 py-1 text-xs transition-colors {selectedType === type
-					? 'bg-primary text-primary-foreground'
-					: 'bg-muted text-muted-foreground hover:bg-muted/80'}"
-				onclick={() => setTypeFilter(selectedType === type ? null : type)}
-			>
-				{meta.label}
-			</button>
-		{/each}
-	</div>
-	<div class="flex flex-wrap gap-2">
-		<button
-			type="button"
-			class="rounded-full px-3 py-1 text-xs transition-colors {selectedStatus === null
-				? 'bg-secondary text-secondary-foreground'
-				: 'bg-muted text-muted-foreground hover:bg-muted/80'}"
-			onclick={() => setStatusFilter(null)}
-		>
-			모든 상태
-		</button>
-		{#each STATUS_OPTIONS as opt}
-			<button
-				type="button"
-				class="rounded-full px-3 py-1 text-xs transition-colors {selectedStatus === opt.value
-					? 'bg-secondary text-secondary-foreground'
-					: 'bg-muted text-muted-foreground hover:bg-muted/80'}"
-				onclick={() => setStatusFilter(selectedStatus === opt.value ? null : opt.value)}
-			>
-				{opt.label}
-			</button>
-		{/each}
-	</div>
-
 	<!-- 목록 -->
 	{#if loading}
 		<div class="py-16 text-center text-muted-foreground">로딩 중...</div>
 	{:else}
 		<MonitoringList items={filteredItems} onToggle={handleToggle} />
 	{/if}
-</main>
+</TabbedPageLayout>
 
 <NewMonitorTypeSelector open={showTypeSelector} onClose={() => (showTypeSelector = false)} />
