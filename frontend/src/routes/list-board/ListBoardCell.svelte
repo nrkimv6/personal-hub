@@ -43,33 +43,33 @@
 		low: 'Low', medium: 'Med', high: 'High', critical: '!!'
 	};
 	const PRIORITY_COLORS: Record<string, string> = {
-		low: 'text-zinc-400',
-		medium: 'text-yellow-400',
-		high: 'text-orange-400',
-		critical: 'text-red-400',
+		low: 'text-muted-foreground',
+		medium: 'text-warning',
+		high: 'text-warning-foreground',
+		critical: 'text-destructive',
 	};
 </script>
 
-<td class="py-0.5 pr-2" class:opacity-50={saving}>
+<td class="px-2 py-2 whitespace-nowrap" class:opacity-50={saving}>
 	{#if column.column_type === 'checkbox'}
 		<input
 			type="checkbox"
 			checked={value === true}
-			class="cursor-pointer accent-blue-500"
+			class="cursor-pointer accent-primary"
 			onchange={handleCheckbox}
 		/>
 	{:else if column.column_type === 'text'}
 		<input
 			type="text"
 			value={textDraft}
-			class="w-full rounded border border-transparent bg-transparent px-1 text-xs text-zinc-300 focus:border-zinc-500 focus:bg-zinc-800 focus:outline-none"
+			class="w-full min-w-32 rounded-md border border-transparent bg-transparent px-1 text-xs text-foreground placeholder:text-muted-foreground focus:border-ring focus:bg-muted/40 focus:outline-none focus:ring-1 focus:ring-ring"
 			placeholder="—"
 			oninput={handleTextInput}
 			onblur={handleTextBlur}
 		/>
 	{:else if column.column_type === 'select'}
 		<select
-			class="rounded border border-transparent bg-transparent text-xs text-zinc-300 focus:border-zinc-500 focus:bg-zinc-800 focus:outline-none"
+			class="rounded-md border border-transparent bg-transparent text-xs text-foreground focus:border-ring focus:bg-muted/40 focus:outline-none focus:ring-1 focus:ring-ring"
 			value={typeof value === 'string' ? value : ''}
 			onchange={handleSelect}
 		>
@@ -80,7 +80,7 @@
 		</select>
 	{:else if column.column_type === 'priority'}
 		<select
-			class="rounded border border-transparent bg-transparent text-xs focus:border-zinc-500 focus:bg-zinc-800 focus:outline-none {value ? PRIORITY_COLORS[value as string] ?? '' : 'text-zinc-500'}"
+			class="rounded-md border border-transparent bg-transparent text-xs focus:border-ring focus:bg-muted/40 focus:outline-none focus:ring-1 focus:ring-ring {value ? PRIORITY_COLORS[value as string] ?? '' : 'text-muted-foreground'}"
 			value={typeof value === 'string' ? value : ''}
 			onchange={handleSelect}
 		>

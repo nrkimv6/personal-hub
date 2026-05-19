@@ -39,6 +39,14 @@ assert(menuSrc.includes('handleCreate'), 'ColumnMenu has handleCreate handler');
 assert(menuSrc.includes('handleDelete'), 'ColumnMenu has handleDelete handler');
 assert(menuSrc.includes("column_type"), 'ColumnMenu handles column_type field');
 assert(menuSrc.includes('options'), 'ColumnMenu handles options for select type');
+assert(menuSrc.includes('border border-border'), 'ColumnMenu uses shared border token');
+assert(menuSrc.includes('bg-background'), 'ColumnMenu uses shared input/button background token');
+assert(menuSrc.includes('text-muted-foreground'), 'ColumnMenu uses shared muted text token');
+assert(menuSrc.includes('bg-primary'), 'ColumnMenu uses primary action token');
+assert(menuSrc.includes('text-destructive'), 'ColumnMenu uses destructive token for errors/delete hover');
+assert(menuSrc.includes('confirm('), 'ColumnMenu keeps existing confirm flow in this scoped redesign');
+assert(menuSrc.includes('alert('), 'ColumnMenu keeps existing alert flow in this scoped redesign');
+assert(!/zinc-|bg-blue-600|text-red-400/.test(menuSrc), 'ColumnMenu has no legacy local color classes');
 
 // page integration
 assert(pageSrc.includes('ColumnMenu'), 'page includes ColumnMenu component');
