@@ -275,7 +275,11 @@
     mobileRefreshKey += 1;
   }
 
-  const imageUrl = $derived(currentSlide ? slideScannerApi.getSlideImageUrl(currentSlide.id) : '');
+  function getImageUrl(slide: SlideDetailResponse | null): string {
+    return slide ? slideScannerApi.getSlideImageUrl(slide.id) : '';
+  }
+
+  const imageUrl = $derived(getImageUrl(currentSlide));
   const canPrev = $derived(sequenceIndex > 0);
   const canNext = $derived(sequenceIndex >= 0 && sequenceIndex < sequenceIds.length - 1);
   const aspectRatioLabel = $derived(aspectRatio === 'AUTO' ? 'Auto (원본 기준)' : aspectRatio);
