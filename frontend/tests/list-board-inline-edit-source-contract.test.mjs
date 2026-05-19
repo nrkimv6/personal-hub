@@ -39,6 +39,13 @@ assert(cellSrc.includes("column_type === 'checkbox'"), 'cell handles checkbox ty
 assert(cellSrc.includes("column_type === 'text'"), 'cell handles text type');
 assert(cellSrc.includes("column_type === 'select'"), 'cell handles select type');
 assert(cellSrc.includes("column_type === 'priority'"), 'cell handles priority type');
+assert(cellSrc.includes('accent-primary'), 'checkbox uses primary accent token');
+assert(cellSrc.includes('text-muted-foreground'), 'cell uses muted text token');
+assert(cellSrc.includes('text-warning'), 'priority medium uses warning token');
+assert(cellSrc.includes('text-warning-foreground'), 'priority high uses warning foreground token');
+assert(cellSrc.includes('text-destructive'), 'priority critical uses destructive token');
+assert(cellSrc.includes('focus:border-ring'), 'cell uses shared focus ring token');
+assert(!/zinc-|accent-blue-500|text-yellow-400|text-orange-400|text-red-400/.test(cellSrc), 'cell has no legacy local color classes');
 
 // cell: debounce for text
 assert(cellSrc.includes('debounceTimer'), 'text cell uses debounce timer');

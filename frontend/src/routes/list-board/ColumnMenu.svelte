@@ -55,9 +55,9 @@
 
 <div class="flex flex-col gap-2">
 	<div class="flex items-center justify-between">
-		<span class="text-xs font-medium text-zinc-400">사용자 컬럼 관리</span>
+		<span class="text-xs font-medium text-muted-foreground">사용자 컬럼 관리</span>
 		<button
-			class="flex items-center gap-1 rounded bg-zinc-700 px-2 py-0.5 text-xs hover:bg-zinc-600"
+			class="flex items-center gap-1 rounded-md border border-border bg-background px-2 py-0.5 text-xs transition-colors hover:bg-muted"
 			onclick={() => (showForm = !showForm)}
 		>
 			<Plus size={12} /> 컬럼 추가
@@ -65,20 +65,20 @@
 	</div>
 
 	{#if showForm}
-		<div class="flex flex-col gap-1.5 rounded border border-zinc-700 p-2">
-			<div class="flex gap-2">
+		<div class="flex flex-col gap-1.5 rounded-md border border-border bg-muted/20 p-2">
+			<div class="flex flex-col gap-2 md:flex-row">
 				<input
-					class="flex-1 rounded border border-zinc-600 bg-zinc-800 px-2 py-0.5 text-xs placeholder-zinc-500"
+					class="flex-1 rounded-md border border-border bg-background px-2 py-1 text-xs placeholder:text-muted-foreground focus:border-ring focus:outline-none focus:ring-1 focus:ring-ring"
 					placeholder="key (영문 소문자_숫자)"
 					bind:value={newKey}
 				/>
 				<input
-					class="flex-1 rounded border border-zinc-600 bg-zinc-800 px-2 py-0.5 text-xs placeholder-zinc-500"
+					class="flex-1 rounded-md border border-border bg-background px-2 py-1 text-xs placeholder:text-muted-foreground focus:border-ring focus:outline-none focus:ring-1 focus:ring-ring"
 					placeholder="표시 이름"
 					bind:value={newName}
 				/>
 				<select
-					class="rounded border border-zinc-600 bg-zinc-800 px-2 py-0.5 text-xs"
+					class="rounded-md border border-border bg-background px-2 py-1 text-xs focus:border-ring focus:outline-none focus:ring-1 focus:ring-ring"
 					bind:value={newType}
 				>
 					<option value="text">text</option>
@@ -89,22 +89,22 @@
 			</div>
 			{#if newType === 'select'}
 				<input
-					class="rounded border border-zinc-600 bg-zinc-800 px-2 py-0.5 text-xs placeholder-zinc-500"
+					class="rounded-md border border-border bg-background px-2 py-1 text-xs placeholder:text-muted-foreground focus:border-ring focus:outline-none focus:ring-1 focus:ring-ring"
 					placeholder="선택지 (쉼표 구분, 예: 진행중, 완료, 보류)"
 					bind:value={newOptions}
 				/>
 			{/if}
 			{#if error}
-				<span class="text-xs text-red-400">{error}</span>
+				<span class="text-xs text-destructive">{error}</span>
 			{/if}
 			<div class="flex gap-2">
 				<button
-					class="rounded bg-blue-600 px-3 py-0.5 text-xs disabled:opacity-50"
+					class="rounded-md bg-primary px-3 py-1 text-xs text-primary-foreground transition-opacity hover:opacity-90 disabled:opacity-50"
 					disabled={saving || !newKey.trim() || !newName.trim()}
 					onclick={handleCreate}
 				>{saving ? '추가 중...' : '추가'}</button>
 				<button
-					class="rounded bg-zinc-700 px-3 py-0.5 text-xs"
+					class="rounded-md border border-border bg-background px-3 py-1 text-xs transition-colors hover:bg-muted"
 					onclick={() => (showForm = false)}
 				>취소</button>
 			</div>
@@ -114,11 +114,11 @@
 	{#if columns.length > 0}
 		<div class="flex flex-wrap gap-1">
 			{#each columns as col (col.id)}
-				<span class="flex items-center gap-1 rounded border border-zinc-700 px-2 py-0.5 text-xs text-zinc-300">
+				<span class="flex items-center gap-1 rounded-md border border-border bg-background px-2 py-0.5 text-xs text-foreground">
 					{col.display_name}
-					<span class="text-zinc-500">{col.column_type}</span>
+					<span class="text-muted-foreground">{col.column_type}</span>
 					<button
-						class="text-zinc-600 hover:text-red-400"
+						class="text-muted-foreground transition-colors hover:text-destructive"
 						onclick={() => handleDelete(col)}
 						title="삭제"
 					>
