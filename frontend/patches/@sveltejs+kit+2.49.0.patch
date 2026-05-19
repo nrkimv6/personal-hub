@@ -1,0 +1,25 @@
+diff --git a/node_modules/@sveltejs/kit/src/core/sync/write_types/index.js b/node_modules/@sveltejs/kit/src/core/sync/write_types/index.js
+index 0000000..0000000 100644
+--- a/node_modules/@sveltejs/kit/src/core/sync/write_types/index.js
++++ b/node_modules/@sveltejs/kit/src/core/sync/write_types/index.js
+@@ -535,7 +535,19 @@ function ensureProxies(node, proxies) {
+  * @returns {Proxy}
+  */
+ function createProxy(file_path, is_server) {
+-	const proxy = tweak_types(fs.readFileSync(file_path, 'utf8'), is_server);
++	let content;
++	try {
++		content = fs.readFileSync(file_path, 'utf8');
++	} catch (err) {
++		if (err && typeof err === 'object' && 'code' in err && err.code === 'ENOENT') {
++			console.warn('[svelte-kit-patch] createProxy ENOENT swallowed:', file_path);
++			return null;
++		}
++
++		throw err;
++	}
++
++	const proxy = tweak_types(content, is_server);
+ 	if (proxy) {
+ 		return {
+ 			...proxy,
