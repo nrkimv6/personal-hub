@@ -9,7 +9,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 const kitWriteTypesPath = new URL(
@@ -27,14 +27,16 @@ function assertPatchContract() {
   assert.match(patch, /throw err;/);
 }
 
-async function withWriteTypesProject(routeFile, fn) {
+async function withWriteTypesProject(setupRouteFile, fn) {
   const previousCwd = process.cwd();
   const root = mkdtempSync(join(tmpdir(), "monitor-sveltekit-write-types-"));
   const routes = join(root, "src", "routes");
+  const routeFile = join(routes, "+page.ts");
   const outDir = join(root, ".svelte-kit");
   const typesDir = join(outDir, "types", "src", "routes");
   mkdirSync(routes, { recursive: true });
   mkdirSync(typesDir, { recursive: true });
+  setupRouteFile?.(routeFile);
 
   const config = {
     kit: {
@@ -81,18 +83,14 @@ test("test_writeTypes_R_generates_types_when_page_ts_exists", async () => {
     return;
   }
 
-  const root = mkdtempSync(join(tmpdir(), "monitor-sveltekit-route-"));
-  const routeFile = join(root, "+page.ts");
-  writeFileSync(routeFile, "export const load = () => ({ answer: 42 });\n", "utf8");
-
-  await withWriteTypesProject(routeFile, ({ write_types, config, manifest, typesDir }) => {
+  await withWriteTypesProject((routeFile) => {
+    writeFileSync(routeFile, "export const load = () => ({ answer: 42 });\n", "utf8");
+  }, ({ write_types, config, manifest, routeFile, typesDir }) => {
     write_types(config, manifest, routeFile);
     const types = readFileSync(join(typesDir, "$types.d.ts"), "utf8");
     assert.match(types, /export type PageLoad/);
     assert.match(types, /export type PageData/);
   });
-
-  rmSync(root, { recursive: true, force: true });
 });
 
 test("test_writeTypes_E_swallow_enoent_and_generates_unknown_data", async () => {
@@ -101,9 +99,7 @@ test("test_writeTypes_E_swallow_enoent_and_generates_unknown_data", async () => 
     return;
   }
 
-  const routeFile = join(tmpdir(), "monitor-missing-+page.ts");
-
-  await withWriteTypesProject(routeFile, ({ write_types, config, manifest, typesDir }) => {
+  await withWriteTypesProject(null, ({ write_types, config, manifest, routeFile, typesDir }) => {
     assert.doesNotThrow(() => write_types(config, manifest, routeFile));
     const types = readFileSync(join(typesDir, "$types.d.ts"), "utf8");
     assert.match(types, /export type PageData/);
@@ -117,15 +113,11 @@ test("test_writeTypes_E_rethrows_non_enoent_read_error", async () => {
     return;
   }
 
-  const root = mkdtempSync(join(tmpdir(), "monitor-sveltekit-dir-route-"));
-  const routeFile = join(root, "+page.ts");
-  mkdirSync(routeFile, { recursive: true });
-
-  await withWriteTypesProject(routeFile, ({ write_types, config, manifest }) => {
+  await withWriteTypesProject((routeFile) => {
+    mkdirSync(routeFile, { recursive: true });
+  }, ({ write_types, config, manifest, routeFile }) => {
     assert.throws(() => write_types(config, manifest, routeFile));
   });
-
-  rmSync(root, { recursive: true, force: true });
 });
 
 test("test_writeTypes_T3_recovers_after_stale_manifest_file_returns", async () => {
@@ -134,20 +126,14 @@ test("test_writeTypes_T3_recovers_after_stale_manifest_file_returns", async () =
     return;
   }
 
-  const root = mkdtempSync(join(tmpdir(), "monitor-sveltekit-stale-"));
-  const routeFile = join(root, "+page.ts");
-
-  await withWriteTypesProject(routeFile, ({ write_types, config, manifest, typesDir }) => {
+  await withWriteTypesProject(null, ({ write_types, config, manifest, routeFile, typesDir }) => {
     assert.doesNotThrow(() => write_types(config, manifest, routeFile));
     let types = readFileSync(join(typesDir, "$types.d.ts"), "utf8");
     assert.match(types, /unknown/);
 
-    mkdirSync(dirname(routeFile), { recursive: true });
     writeFileSync(routeFile, "export const load = () => ({ recovered: true });\n", "utf8");
     assert.doesNotThrow(() => write_types(config, manifest, routeFile));
     types = readFileSync(join(typesDir, "$types.d.ts"), "utf8");
     assert.match(types, /export type PageLoad/);
   });
-
-  rmSync(root, { recursive: true, force: true });
 });
