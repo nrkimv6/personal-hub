@@ -19,6 +19,7 @@ if (-not (Test-Path $PythonExe)) {
 }
 
 . (Join-Path $ProjectRoot "scripts\setup\Send-TelegramAlert.ps1")
+. (Join-Path $ScriptDir "frontend-watchdog-lib.ps1")
 
 $thresholdOverride = $env:FRONTEND_WATCHDOG_THRESHOLD_MB
 if ($thresholdOverride) {
@@ -141,6 +142,9 @@ function Send-FrontendAlert {
         "stopped" {
             "Frontend auto-restart stopped ($($config.Name), port $Port). Manual intervention required.`nAvailable=${AvailableMb}MB`n$ExtraMessage"
         }
+        "enoent-pause" {
+            "Frontend auto-restart paused after repeated SvelteKit write_types ENOENT crashes ($($config.Name), port $Port).`nAvailable=${AvailableMb}MB`n$ExtraMessage"
+        }
         default {
             "$Kind ($($config.Name), port $Port)`n$ExtraMessage"
         }
@@ -234,10 +238,13 @@ function Invoke-FrontendRestart {
 
     $config = $script:portConfig[$Port]
     if (Test-BackoffExceeded -Port $Port) {
-        $pausedUntil = (Get-Date).AddMinutes($pauseMinutes)
+        $isEnoentPause = Test-ShouldShortBackoff -LogDir $LogDir
+        $effectivePauseMinutes = if ($isEnoentPause) { Get-FrontendBackoffPauseMinutes -StandardPauseMinutes $pauseMinutes } else { $pauseMinutes }
+        $pausedUntil = (Get-Date).AddMinutes($effectivePauseMinutes)
         $script:pausedUntil[$Port] = $pausedUntil
-        Send-FrontendAlert -Kind "stopped" -Port $Port -ExtraMessage "Backoff exceeded: ${BackoffMaxFailures} failures within ${BackoffWindowMin} minutes. Paused until $($pausedUntil.ToString('s'))."
-        Write-WatchdogLog "Paused frontend restart for $Port until $($pausedUntil.ToString('s')) due to backoff." "ERROR"
+        $alertKind = if ($isEnoentPause) { "enoent-pause" } else { "stopped" }
+        Send-FrontendAlert -Kind $alertKind -Port $Port -ExtraMessage "Backoff exceeded: ${BackoffMaxFailures} failures within ${BackoffWindowMin} minutes. Paused ${effectivePauseMinutes} minutes until $($pausedUntil.ToString('s'))."
+        Write-WatchdogLog "Paused frontend restart for $Port until $($pausedUntil.ToString('s')) due to backoff (minutes=$effectivePauseMinutes, enoent=$isEnoentPause)." "ERROR"
         return $false
     }
 
@@ -282,9 +289,12 @@ function Invoke-FrontendRestart {
     if ($exitCode -ne 0) {
         Write-WatchdogLog "Frontend restart command failed for $Port (exit=$exitCode)." "ERROR"
         if (Test-BackoffExceeded -Port $Port) {
-            $pausedUntil = (Get-Date).AddMinutes($pauseMinutes)
+            $isEnoentPause = Test-ShouldShortBackoff -LogDir $LogDir
+            $effectivePauseMinutes = if ($isEnoentPause) { Get-FrontendBackoffPauseMinutes -StandardPauseMinutes $pauseMinutes } else { $pauseMinutes }
+            $pausedUntil = (Get-Date).AddMinutes($effectivePauseMinutes)
             $script:pausedUntil[$Port] = $pausedUntil
-            Send-FrontendAlert -Kind "stopped" -Port $Port -ExtraMessage "Restart command failed repeatedly. Paused until $($pausedUntil.ToString('s'))."
+            $alertKind = if ($isEnoentPause) { "enoent-pause" } else { "stopped" }
+            Send-FrontendAlert -Kind $alertKind -Port $Port -ExtraMessage "Restart command failed repeatedly. Paused ${effectivePauseMinutes} minutes until $($pausedUntil.ToString('s'))."
         }
         return $false
     }
