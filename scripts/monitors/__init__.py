@@ -1,0 +1,2 @@
+"""One-off monitor scripts."""
+

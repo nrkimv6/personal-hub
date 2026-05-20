@@ -1,0 +1,28 @@
+{
+  "ROOT_QUERY": {
+    "placeDetail({\"input\":{\"deviceType\":\"pc\",\"id\":\"2021908137\",\"isNx\":false}})": {
+      "__typename": "PlaceDetail",
+      "naverBooking": {
+        "__typename": "PlaceDetailNaverBooking",
+        "bookingBusinessId": "1643675",
+        "naverBookingUrl": "https://booking.naver.com/booking/6/bizes/1643675/search",
+        "bookingDisplayName": "방문",
+        "bookingButtonName": "예약",
+        "naverBookingHubUrl": null
+      },
+      "tickets": {
+        "__typename": "TicketItemsResult",
+        "total": 1,
+        "moreBookingUrl": "https://m.booking.naver.com/booking/5/bizes/1643675",
+        "items": [
+          {
+            "__typename": "TicketItem",
+            "title": "메르세데스-벤츠 스튜디오 : 전시 관람",
+            "bookingUrl": "https://m.booking.naver.com/booking/6/bizes/1643675/items/7627870",
+            "itemId": "7627870"
+          }
+        ]
+      }
+    }
+  }
+}
