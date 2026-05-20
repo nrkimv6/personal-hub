@@ -62,28 +62,28 @@
 	<div class="card p-5">
 		<div class="grid gap-4 md:grid-cols-5">
 			<div>
-				<label class="block text-sm font-medium text-foreground mb-1">target_type</label>
-				<input type="text" bind:value={policyForm.target_type} class="w-full px-3 py-2 border border-border rounded-lg" />
+				<label for="llm-policy-target-type" class="block text-sm font-medium text-foreground mb-1">target_type</label>
+				<input id="llm-policy-target-type" type="text" bind:value={policyForm.target_type} class="w-full px-3 py-2 border border-border rounded-lg" />
 			</div>
 			<div>
-				<label class="block text-sm font-medium text-foreground mb-1">Engine</label>
-				<select bind:value={policyForm.engine} onchange={() => { policyForm.profile_name = ''; ensurePolicyFormProfile(); }} class="w-full px-3 py-2 border border-border rounded-lg">
+				<label for="llm-policy-engine" class="block text-sm font-medium text-foreground mb-1">Engine</label>
+				<select id="llm-policy-engine" bind:value={policyForm.engine} onchange={() => { policyForm.profile_name = ''; ensurePolicyFormProfile(); }} class="w-full px-3 py-2 border border-border rounded-lg">
 					{#each policyEngines(policyProfiles, policyForm.engine) as engine}
 						<option value={engine}>{engine}</option>
 					{/each}
 				</select>
 			</div>
 			<div>
-				<label class="block text-sm font-medium text-foreground mb-1">Profile</label>
-				<select bind:value={policyForm.profile_name} class="w-full px-3 py-2 border border-border rounded-lg">
+				<label for="llm-policy-profile" class="block text-sm font-medium text-foreground mb-1">Profile</label>
+				<select id="llm-policy-profile" bind:value={policyForm.profile_name} class="w-full px-3 py-2 border border-border rounded-lg">
 					{#each profileOptionsForEngine(policyProfiles, policyForm.engine) as profile}
 						<option value={profile.name}>{profile.name}</option>
 					{/each}
 				</select>
 			</div>
 			<div>
-				<label class="block text-sm font-medium text-foreground mb-1">Priority</label>
-				<input type="number" bind:value={policyForm.priority} class="w-full px-3 py-2 border border-border rounded-lg" />
+				<label for="llm-policy-priority" class="block text-sm font-medium text-foreground mb-1">Priority</label>
+				<input id="llm-policy-priority" type="number" bind:value={policyForm.priority} class="w-full px-3 py-2 border border-border rounded-lg" />
 			</div>
 			<div class="flex items-end">
 				<label class="flex items-center gap-2 text-sm text-foreground">
@@ -95,12 +95,12 @@
 
 		<div class="mt-4 grid gap-4 md:grid-cols-2">
 			<div>
-				<label class="block text-sm font-medium text-foreground mb-1">허용 window</label>
-				<textarea bind:value={policyForm.allowed_windows_text} rows="3" placeholder="09:00-18:00 1,2,3,4,5" class="w-full px-3 py-2 border border-border rounded-lg resize-none"></textarea>
+				<label for="llm-policy-allowed-windows" class="block text-sm font-medium text-foreground mb-1">허용 window</label>
+				<textarea id="llm-policy-allowed-windows" bind:value={policyForm.allowed_windows_text} rows="3" placeholder="09:00-18:00 1,2,3,4,5" class="w-full px-3 py-2 border border-border rounded-lg resize-none"></textarea>
 			</div>
 			<div>
-				<label class="block text-sm font-medium text-foreground mb-1">차단 window</label>
-				<textarea bind:value={policyForm.quiet_windows_text} rows="3" placeholder="00:00-06:00" class="w-full px-3 py-2 border border-border rounded-lg resize-none"></textarea>
+				<label for="llm-policy-quiet-windows" class="block text-sm font-medium text-foreground mb-1">차단 window</label>
+				<textarea id="llm-policy-quiet-windows" bind:value={policyForm.quiet_windows_text} rows="3" placeholder="00:00-06:00" class="w-full px-3 py-2 border border-border rounded-lg resize-none"></textarea>
 			</div>
 		</div>
 
