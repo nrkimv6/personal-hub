@@ -1094,3 +1094,72 @@ def test_cleanup_decision_blocks_terminal_approval_with_post_merge_leftover_R():
     assert decision.action == MergeCleanupAction.BLOCKED_TERMINAL
     assert decision.reason == "approval_required"
 
+
+# ── T3: rebase skipped_only → service_lock precheck exclude_already_merged ───
+
+
+@pytest.mark.asyncio
+async def test_rebase_skipped_only_routes_service_lock_with_exclude_merged_R(tmp_path):
+    """R: rebase kind=skipped_only → _detect_service_lock_precheck(exclude_already_merged=True).
+    stale plan branch 시 cherry-safe diff 경로가 활성화되는지 검증한다.
+    """
+    import sys
+    _wtools_tools = Path(__file__).parents[6] / "service" / "wtools" / "common" / "tools"
+    _wtools_plan_runner = _wtools_tools / "plan-runner"
+    for _p in (str(_wtools_plan_runner), str(_wtools_tools)):
+        if _p not in sys.path:
+            sys.path.insert(0, _p)
+
+    try:
+        from core.merge_stage import execute_merge
+        import core.merge_stage as _cms
+        import core.merge as _cm
+        sys.modules.setdefault("plan_runner.core.merge_stage", _cms)
+        sys.modules.setdefault("plan_runner.core.merge", _cm)
+    except ImportError:
+        pytest.skip("wtools merge_stage 임포트 불가")
+
+    # project_dir에 .git 디렉토리 생성 (precheck 진입 조건)
+    project_dir = tmp_path / "proj"
+    project_dir.mkdir()
+    (project_dir / ".git").mkdir()
+    worktree_path = tmp_path / "wt"
+    worktree_path.mkdir()  # Path(worktree_path).exists() → True
+
+    exclude_merged_captured = []
+
+    def _mock_svc_precheck(pd, br, **kwargs):
+        exclude_merged_captured.append(kwargs.get("exclude_already_merged", "NOT_PASSED"))
+        # service_lock hit 반환 → execute_merge early return 유도
+        from core.merge import MERGE_REASON_SERVICE_LOCK
+        return (["scripts/services/service_run.py"], ["MonitorPage-Admin"], MERGE_REASON_SERVICE_LOCK, "service lock")
+
+    from core.merge import BranchPreflight
+
+    with (
+        patch("core.merge_stage._resolve_merge_project_dir", return_value=project_dir),
+        patch("core.merge_stage.pre_merge_gate", return_value=(True, "ok")),
+        patch("core.merge_stage.resolve_branch_preflight", return_value=BranchPreflight(
+            exists=True, branch="plan/test", resolved_ref="plan/test",
+        )),
+        patch("core.merge_stage._ensure_branch_ref", return_value=True),
+        patch("core.merge_stage._current_git_branch", return_value="plan/test"),
+        patch("core.merge_stage._rebase_branch_onto_main", return_value={
+            "success": False, "kind": "skipped_only",
+            "message": "rebase skipped previously applied commits",
+        }),
+        patch("core.merge_stage._detect_untracked_overwrite_candidates", return_value=([], None, "")),
+        patch("core.merge_stage._detect_service_lock_precheck", side_effect=_mock_svc_precheck),
+    ):
+        result = await execute_merge(
+            project_dir=project_dir,
+            branch="plan/test",
+            worktree_path=worktree_path,
+            plan_file=str(tmp_path / "plan.md"),
+        )
+
+    assert len(exclude_merged_captured) >= 1, "_detect_service_lock_precheck 미호출"
+    assert exclude_merged_captured[0] is True, (
+        f"skipped_only rebase 시 exclude_already_merged=True 필요, 실제={exclude_merged_captured[0]}"
+    )
+

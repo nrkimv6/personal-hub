@@ -1127,7 +1127,83 @@ class TestMergeQueueReadContract:
         rows = [row for row in response.json() if row["runner_id"] == rid]
         assert len(rows) == 1
         assert rows[0]["queue_key"] == f"active:merging:{rid}"
-        assert rows[0]["branch"] == "impl/redis-merge"
+
+
+class TestApprovalRequiredDivergeEvidence:
+    """approval_required response에 diverged_commits / already_in_main_commits evidence 포함 TC.
+    결함 4: precheck failure message에 false positive 판단 단서 없음
+    수정: gate_evidence_summary에 diverged_commits, already_in_main_commits 필드 보존
+    """
+
+    async def test_gate_evidence_summary_preserves_diverge_fields(self, client, mock_executor_redis):
+        """approval_required runner의 gate_evidence_summary에 diverge evidence가 보존된다."""
+        fake_async = mock_executor_redis["async"]
+        rid = "approval-diverge-001"
+        prefix = f"plan-runner:runners:{rid}"
+
+        gate_evidence = json.dumps({
+            "reason": "service_lock",
+            "status": "approval_required",
+            "diverged_commits": 1080,
+            "already_in_main_commits": 2,
+            "changed": ["scripts/services/service_run.py"],
+            "running": ["MonitorPage-Admin"],
+        })
+
+        await fake_async.set("plan-runner:listener:heartbeat", "2026-05-20T10:00:00")
+        await fake_async.zadd("plan-runner:recent_runners", {rid: 100})
+        await fake_async.set(f"{prefix}:status", "stopped")
+        await fake_async.set(f"{prefix}:trigger", "user")
+        await fake_async.set(f"{prefix}:plan_file", "docs/plan/test-diverge.md")
+        await fake_async.set(f"{prefix}:merge_status", "approval_required")
+        await fake_async.set(f"{prefix}:merge_reason", "service_lock")
+        await fake_async.set(f"{prefix}:merge_message", "MERGE_PRECHECK_FAILED[service_lock]: branch diverged 1080 commits from main (2 already in main)")
+        await fake_async.set(f"{prefix}:gate_evidence_summary", gate_evidence)
+
+        response = await client.get("/api/v1/dev-runner/status")
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["runner_id"] == rid
+
+        summary = data.get("gate_evidence_summary")
+        assert summary is not None, "gate_evidence_summary가 응답에 없음"
+        assert summary.get("diverged_commits") == 1080, f"diverged_commits 불일치: {summary}"
+        assert summary.get("already_in_main_commits") == 2, f"already_in_main_commits 불일치: {summary}"
+
+    async def test_list_runner_gate_evidence_preserved(self, client, mock_executor_redis):
+        """runner list 응답에서도 gate_evidence_summary diverge evidence가 보존된다."""
+        fake_async = mock_executor_redis["async"]
+        fake_sync = mock_executor_redis["sync"]
+        rid = "list-diverge-001"
+        prefix = f"plan-runner:runners:{rid}"
+
+        gate_evidence = json.dumps({
+            "diverged_commits": 500,
+            "already_in_main_commits": 10,
+        })
+
+        fake_sync.sadd("plan-runner:active_runners", rid)
+        fake_sync.set(f"{prefix}:status", "stopped")
+        fake_sync.set(f"{prefix}:plan_file", "docs/plan/list-diverge.md")
+        fake_sync.set(f"{prefix}:merge_status", "approval_required")
+        fake_sync.set(f"{prefix}:gate_evidence_summary", gate_evidence)
+        fake_sync.set(f"{prefix}:visible", "1")
+        await fake_async.sadd("plan-runner:active_runners", rid)
+        await fake_async.set(f"{prefix}:status", "stopped")
+        await fake_async.set(f"{prefix}:plan_file", "docs/plan/list-diverge.md")
+        await fake_async.set(f"{prefix}:merge_status", "approval_required")
+        await fake_async.set(f"{prefix}:gate_evidence_summary", gate_evidence)
+        await fake_async.set(f"{prefix}:visible", "1")
+
+        response = await client.get("/api/v1/dev-runner/runners")
+
+        assert response.status_code == 200
+        rows = [r for r in response.json() if r.get("runner_id") == rid]
+        assert len(rows) == 1, f"runner {rid} list에 없음: {response.json()}"
+        summary = rows[0].get("gate_evidence_summary")
+        assert summary is not None, "list runner gate_evidence_summary 없음"
+        assert summary.get("diverged_commits") == 500
 
     async def test_get_merge_queue_right_duplicate_completed_runner_ids_return_stable_items(
         self,

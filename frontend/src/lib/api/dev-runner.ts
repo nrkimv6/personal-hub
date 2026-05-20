@@ -23,6 +23,16 @@ export class ApiError extends Error {
 // Types
 // ============================================================
 
+export interface GateEvidenceSummary {
+	reason?: string | null;
+	status?: string | null;
+	diverged_commits?: number | null;
+	already_in_main_commits?: number | null;
+	changed?: string[] | null;
+	running?: string[] | null;
+	[key: string]: unknown;
+}
+
 export interface RunRequest {
 	plan_file?: string | null;
 	engine?: string;
@@ -69,7 +79,7 @@ export interface RunStatusResponse {
 	claim_state?: string | null;
 	claim_owner_runner_id?: string | null;
 	claim_message?: string | null;
-	gate_evidence_summary?: Record<string, unknown> | null;
+	gate_evidence_summary?: GateEvidenceSummary | null;
 }
 
 export interface RunnerListItem {
@@ -105,7 +115,7 @@ export interface RunnerListItem {
 	display_severity?: 'info' | 'warn' | 'error' | 'approval' | 'success' | 'muted';
 	display_secondary?: string | null;
 	hide_stale_branch_badge?: boolean;
-	gate_evidence_summary?: Record<string, unknown> | null;
+	gate_evidence_summary?: GateEvidenceSummary | null;
 }
 
 export interface OrphanRunnerCandidate {
