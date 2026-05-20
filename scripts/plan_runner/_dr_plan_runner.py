@@ -635,6 +635,43 @@ def _do_start_plan_runner(command: Dict, redis_client: redis.Redis):
         _set_error_status(f"worktree 생성 실패: {e}")
         return
 
+    # stale branch diverge check — evidence 보강 전용 (자동 차단 없음)
+    if branch and plan_project_root and plan_file:
+        try:
+            import subprocess as _sp
+            _diverge_result = _sp.run(
+                ["git", "rev-list", "--count", f"main..{branch}"],
+                capture_output=True, text=True, cwd=str(plan_project_root), timeout=15,
+            )
+            _diverged_count = int(_diverge_result.stdout.strip()) if _diverge_result.returncode == 0 else 0
+            _cherry_result = _sp.run(
+                ["git", "cherry", "main", branch],
+                capture_output=True, text=True, cwd=str(plan_project_root), timeout=30,
+            )
+            _already_in_main = (
+                sum(1 for _l in (_cherry_result.stdout or "").splitlines() if _l.startswith("- "))
+                if _cherry_result.returncode == 0
+                else 0
+            )
+            logger.info(
+                f"plan branch diverge: {branch} is {_diverged_count} commits ahead of main, "
+                f"{_already_in_main} already in main"
+            )
+            # 100커밋 임계값: 이 경계를 제거하거나 비활성화하면 stale plan branch에서
+            # main...branch diff가 service_lock target을 포함해 false positive가 재발한다.
+            # 방어선: merge.py _detect_service_lock_precheck(exclude_already_merged=True)가
+            # cherry-safe diff로 실제 false positive를 차단하지만, 이 경고는 branch 정리를
+            # 사용자에게 조기에 알리는 독립 레이어다. 제거 시 재발 위험 참조:
+            # docs/archive/*fix-dev-runner-service-lock-false-positive*.md
+            if _diverged_count > 100:
+                logger.warning(
+                    f"STALE_PLAN_BRANCH_WARN: {branch} diverged {_diverged_count} commits from main "
+                    f"({_already_in_main} already in main). "
+                    f"plan branch 정리 권고: 오래된 plan branch가 service_lock false positive를 유발할 수 있습니다."
+                )
+        except Exception as _e:
+            logger.debug(f"stale branch diverge check 실패 (무시): {_e}")
+
     # Workflow 레코드 생성
     if _wf_manager and runner_id:
         try:

@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { onMount, onDestroy } from 'svelte';
 	import { devRunnerRunnerApi, devRunnerWorkflowApi } from '$lib/api';
-	import type { DevRunnerRunStatusResponse } from '$lib/api';
+	import type { DevRunnerRunStatusResponse, GateEvidenceSummary } from '$lib/api';
 	import LogViewer from './LogViewer.svelte';
 	import { getExitReasonDisplay } from '$lib/utils/dev-runner-exit-reason';
 	import { confirm } from '$lib/stores/confirm';
@@ -42,7 +42,7 @@
 		displayLabel?: string | null;
 		displaySecondary?: string | null;
 		hideStaleBranchBadge?: boolean;
-		gateEvidenceSummary?: Record<string, unknown> | null;
+		gateEvidenceSummary?: GateEvidenceSummary | null;
 		reattachMode?: 'full' | 'log_only_child' | 'log_only';
 		canReattach?: boolean;
 		canForceKill?: boolean;
@@ -269,6 +269,17 @@
 			.join('\n');
 	}
 
+	let divergeEvidenceText = $derived.by(() => {
+		if (!gateEvidenceSummary) return null;
+		const d = gateEvidenceSummary.diverged_commits;
+		const a = gateEvidenceSummary.already_in_main_commits;
+		if (d == null && a == null) return null;
+		const parts: string[] = [];
+		if (typeof d === 'number' && d > 0) parts.push(`branch diverged ${d} commits`);
+		if (typeof a === 'number' && a > 0) parts.push(`${a} commits already merged to main`);
+		return parts.length > 0 ? parts.join(', ') : null;
+	});
+
 	let needsPostMergeFollowup = $derived(
 		!running && (remainingPostMergeTasks ?? 0) > 0 && (exitReason === 'completed' || mergeEvidenceMissing === true)
 	);
@@ -457,6 +468,11 @@
 			{#if mergeReason || mergeMessage}
 				<div class="text-[11px] text-yellow-900/80 truncate" title={mergeMessage ?? mergeReason ?? ''}>
 					{mergeMessage ?? mergeReason}
+				</div>
+			{/if}
+			{#if divergeEvidenceText}
+				<div class="text-[11px] text-yellow-700/80 font-mono" title="plan branch diverge evidence">
+					{divergeEvidenceText}
 				</div>
 			{/if}
 		</div>
