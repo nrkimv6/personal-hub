@@ -450,6 +450,7 @@
 		<div class="flex flex-col gap-1.5 px-3 py-2 bg-yellow-50 border-b border-yellow-200 text-xs">
 			<div class="flex items-center gap-2">
 				<span class="text-yellow-800 font-medium">service_lock 경고 확인이 필요합니다.</span>
+				<span class="text-yellow-700/70 text-[10px]">자동 수정 대상 아님 — 사람 판단 필요</span>
 				<button
 					class="px-2 py-0.5 rounded border border-yellow-300 text-yellow-900 hover:bg-yellow-100 disabled:opacity-50 transition-colors"
 					onclick={handleApproveServiceLockAndRetryMerge}
@@ -468,6 +469,11 @@
 			{#if mergeReason || mergeMessage}
 				<div class="text-[11px] text-yellow-900/80 truncate" title={mergeMessage ?? mergeReason ?? ''}>
 					{mergeMessage ?? mergeReason}
+				</div>
+			{/if}
+			{#if mergeMessage && mergeMessage.includes('[rebase_failed')}
+				<div class="text-[11px] text-orange-700/80" title="rebase 충돌도 함께 발생 (근본 원인은 별도 plan에서 추적)">
+					rebase 충돌도 함께 발생 (별도 plan으로 추적)
 				</div>
 			{/if}
 			{#if divergeEvidenceText}

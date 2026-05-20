@@ -640,6 +640,77 @@ def test_has_worktree_commits_git_error_E_command_fail(stream_cleanup_mod, fr):
     runner_id = "t-hwc-004"
     fr.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:branch", "plan/some-branch")
 
+
+# ─── service_lock: stream cleanup이 approval_required를 덮지 않는 TC ─────────
+
+
+def test_stream_cleanup_does_not_overwrite_approval_required_with_error_R(stream_cleanup_mod, fr):
+    """R(Right): stream cleanup finally가 approval_required 상태를 error/completed로 덮지 않는다.
+
+    MERGE_PRECHECK_FAILED[service_lock] fixture로 approval_required 보존 검증.
+    """
+    runner_id = "t-svc-approval-preserve-001"
+    fr.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_status", "approval_required")
+    fr.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_reason", "service_lock")
+    fr.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_message", "MERGE_PRECHECK_FAILED[service_lock]: blocked")
+    fr.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_requested", "1")
+    fr.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:exit_reason", "completed")
+
+    ctx = stream_cleanup_mod._StreamCleanupCtx(
+        runner_id=runner_id,
+        redis_client=fr,
+        log_channel=f"plan-runner:logs:{runner_id}",
+        exit_code=0,
+        exit_reason="completed",
+        completed_for_flow=True,
+        wf_manager=None,
+    )
+
+    merge_requested = stream_cleanup_mod._determine_merge_requested(ctx)
+
+    with patch.object(
+        stream_cleanup_mod,
+        "_do_inline_merge",
+        side_effect=AssertionError("approval_required should block inline merge"),
+    ), patch.object(
+        stream_cleanup_mod,
+        "detect_merged_but_not_done",
+        return_value=None,
+    ), patch.object(
+        stream_cleanup_mod,
+        "_cleanup_process_state",
+        MagicMock(),
+    ):
+        stream_cleanup_mod._update_workflow_and_execute_cleanup(ctx, merge_requested)
+
+    # approval_required 상태가 유지되어야 함
+    assert fr.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_status") == "approval_required"
+    assert fr.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_reason") == "service_lock"
+    # merge_requested는 클리어되어야 함 (무한 루프 방지)
+    assert merge_requested is False
+
+
+def test_stream_cleanup_approval_required_merge_requested_cleared_R(stream_cleanup_mod, fr):
+    """R(Right): approval_required 상태에서 merge_requested 플래그가 클리어된다."""
+    runner_id = "t-svc-approval-clear-001"
+    fr.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_status", "approval_required")
+    fr.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_reason", "service_lock")
+    fr.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_requested", "1")
+
+    ctx = stream_cleanup_mod._StreamCleanupCtx(
+        runner_id=runner_id,
+        redis_client=fr,
+        log_channel=f"plan-runner:logs:{runner_id}",
+        exit_code=0,
+        exit_reason="completed",
+        completed_for_flow=True,
+        wf_manager=None,
+    )
+
+    # _determine_merge_requested는 approval_required 상태에서 False를 반환해야 함
+    merge_requested = stream_cleanup_mod._determine_merge_requested(ctx)
+    assert merge_requested is False
+
     with patch("subprocess.run", side_effect=Exception("git not found")):
         result = stream_cleanup_mod._has_worktree_commits(runner_id, fr)
 

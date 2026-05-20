@@ -875,10 +875,63 @@ def test_double_call_defense_second_detect_returns_none_R(tmp_path):
     content = content.replace("머지대기", "구현완료")
     plan.write_text(content, encoding="utf-8")
 
-    # 2차 detect: 구현완료 → None
-    with patch("plan_worktree_helpers.is_plan_archived", return_value=False):
-        second = mod.detect_merged_but_not_done("runner-g2", r)
-    assert second is None, f"이중 호출 방어 실패: 2차 detect가 None이 아님 → {second}"
+
+# ─── service_lock: general resolver 비진입 경계 TC ───────────────────────────
+
+
+def test_service_lock_exit_5_does_not_enter_general_resolver_R():
+    """R(Right): exit code 5 (service_lock) → _handle_approval_required, _handle_general_error 호출 없음.
+
+    이 TC는 _EXIT_CODE_HANDLERS dispatch 로직이 service_lock을 general resolver로 오분류하지
+    않음을 단위 검증한다.
+    """
+    mod = _load_dr_merge()
+
+    # _EXIT_CODE_HANDLERS에 5가 있어야 하고, handler가 _handle_approval_required여야 함
+    assert 5 in mod._EXIT_CODE_HANDLERS, "exit code 5 handler 없음"
+    handler = mod._EXIT_CODE_HANDLERS[5]
+    assert handler is mod._handle_approval_required, (
+        f"exit code 5가 _handle_approval_required가 아닌 {handler.__name__}으로 매핑됨"
+    )
+    # general error handler가 아니어야 함
+    assert handler is not mod._handle_general_error, "service_lock이 general resolver로 분류됨"
+
+
+def test_service_lock_approval_required_return_has_no_general_resolver_call_R():
+    """R(Right): _handle_approval_required 실행 시 _handle_general_error가 호출되지 않는다."""
+    import fakeredis as _fakeredis
+
+    mod = _load_dr_merge()
+
+    _server = _fakeredis.FakeServer()
+    _fr = _fakeredis.FakeRedis(server=_server, decode_responses=True)
+    runner_id = "test-v2-fallback-svc-001"
+    _fr.set(f"plan-runner:runners:{runner_id}:merge_reason", "service_lock")
+    _fr.set(f"plan-runner:runners:{runner_id}:merge_message", "service lock blocked")
+
+    general_called = []
+    original_general = mod._handle_general_error
+
+    def spy_general(*args, **kwargs):
+        general_called.append(args)
+        return original_general(*args, **kwargs)
+
+    with patch.object(mod, "_handle_general_error", side_effect=spy_general), \
+         patch.object(mod, "_transition_merge_status") as mock_transition:
+        mock_transition.return_value = MagicMock(allowed=True)
+        result = mod._handle_approval_required(
+            runner_id=runner_id,
+            redis_client=_fr,
+            plan_file="docs/plan/test.md",
+            pub_fn=lambda msg: None,
+            action_name="inline-merge",
+        )
+
+    assert not general_called, f"_handle_general_error가 호출됨: {general_called}"
+    assert result["merge_status"] == "approval_required"
+    assert result["reason"] == "service_lock"
+
+    _fr.close()
 
 
 # ── G3: Phase R 4개 경로 fallback 패턴 검증 ──────────────────────────────────

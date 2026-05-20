@@ -60,3 +60,21 @@ test("plan claim release uses the same DELETE endpoint through frontend api", ()
     assert.match(api, /`\/plans\/\$\{encodedPath\}\/claim`/);
     assert.match(api, /method:\s*'DELETE'/);
 });
+
+test("approval_required banner shows '자동 수정 대상 아님' label (not a code defect)", () => {
+    const instance = readSource("src/lib/components/dev-runner/RunnerInstanceTab.svelte");
+
+    // service_lock은 자동 수정 대상 아님을 사용자에게 명시해야 함
+    assert.match(instance, /자동 수정 대상 아님/,
+        "approval_required 배너에 '자동 수정 대상 아님' 문구가 없음");
+});
+
+test("approval_required banner shows rebase_failed notice when merge_message includes [rebase_failed", () => {
+    const instance = readSource("src/lib/components/dev-runner/RunnerInstanceTab.svelte");
+
+    // rebase 실패 결합 케이스 표시 로직이 있어야 함
+    assert.match(instance, /rebase_failed/,
+        "approval_required 배너에 rebase_failed 결합 케이스 처리 로직 없음");
+    assert.match(instance, /rebase 충돌도 함께 발생/,
+        "approval_required 배너에 rebase 충돌 안내 문구 없음");
+});

@@ -866,6 +866,11 @@ def _handle_approval_required(
 
     plan-runner(post-merge)가 이미 Redis에 merge_status/merge_reason/merge_message를 기록하므로,
     dev-runner는 일반 resolver로 넘기지 않고 해당 값을 그대로 반환한다.
+
+    중요: 이것은 코드 결함이 아니라 런타임 안전성 게이트다.
+    service_lock은 NSSM 서비스로 실행 중인 파일을 덮어쓰는 위험을 차단하기 위한 precheck로,
+    자동 수정(auto-fix/conflict-resolver)으로 해결할 수 있는 문제가 아니다.
+    사람이 "지금 서비스가 영향받아도 됨"을 명시적으로 판단하고 승인해야 한다.
     """
     pub_fn("merge 승인 필요 감지 (approval_required) — 자동 resolver 스킵, worktree 보존")
     try:
@@ -874,6 +879,13 @@ def _handle_approval_required(
     except Exception:
         message = "approval_required"
         reason = "approval_required"
+
+    # service_lock인 경우 auto-fix 미실행 사유를 명시적으로 로깅한다.
+    if reason == "service_lock":
+        pub_fn(
+            "auto-fix skipped: service_lock is a runtime-safety gate, not a code defect — "
+            "코드 결함 아님, 사람 판단 필요 (NSSM 서비스 실행 중인 파일 덮어쓰기 위험)"
+        )
 
     try:
         _transition_merge_status(
@@ -900,9 +912,9 @@ def _handle_approval_required(
 # handler signature: (runner_id, redis_client, plan_file, pub_fn, action_name, **kwargs) -> dict
 _EXIT_CODE_HANDLERS = {
     0: _handle_merge_success,
-    2: _handle_test_failed,
-    3: _handle_conflict,
-    5: _handle_approval_required,  # service_lock precheck 승인 대기
+    2: _handle_test_failed,  # 테스트 실패 → auto-fix 대상 (코드 결함)
+    3: _handle_conflict,     # merge 충돌 → conflict resolver 대상 (코드 결함)
+    5: _handle_approval_required,  # service_lock precheck 승인 대기 — 런타임 안전성 게이트, auto-fix 대상 아님
 }
 
 
