@@ -27,6 +27,13 @@ def test_dev_runner_live_log_falls_back_from_start_only_recent_to_full(
     def fulfill_json(route, payload):
         route.fulfill(status=200, content_type="application/json", body=json.dumps(payload))
 
+    gate_snapshot = {
+        "state": "open",
+        "reason": "test gate open",
+        "since": None,
+        "apiPort": 8001,
+    }
+
     def handle_status(route):
         fulfill_json(
             route,
@@ -90,8 +97,18 @@ def test_dev_runner_live_log_falls_back_from_start_only_recent_to_full(
             },
         )
 
+    page.route("**/__local/api-gate/status", lambda route: fulfill_json(route, gate_snapshot))
+    page.route(
+        "**/__local/api-gate/stream",
+        lambda route: route.fulfill(
+            status=200,
+            content_type="text/event-stream",
+            body=f"event: gate_state\ndata: {json.dumps(gate_snapshot)}\n\n",
+        ),
+    )
     page.route("**/api/v1/dev-runner/status", handle_status)
     page.route("**/api/v1/dev-runner/runners", handle_runners)
+    page.route("**/api/v1/dev-runner/runners/orphans", lambda route: fulfill_json(route, []))
     page.route("**/api/v1/dev-runner/tasks/current-tracking", lambda route: fulfill_json(route, None))
     page.route("**/api/v1/dev-runner/plans", lambda route: fulfill_json(route, []))
     page.route("**/api/v1/dev-runner/logs/diagnostics", lambda route: fulfill_json(route, {"steps": []}))
