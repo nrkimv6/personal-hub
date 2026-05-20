@@ -43,6 +43,8 @@
 		currentPlanName?: string;
 		running?: boolean;
 		mergeStatus?: string | null;
+		mergeReason?: string | null;
+		mergeMessage?: string | null;
 		trigger?: string | null;
 		mode?: 'standalone' | 'managed';
 		engine?: string | null;
@@ -53,7 +55,7 @@
 		onMergeCompleted?: (reason?: string, status?: string) => void;
 	}
 
-	let { runnerId, planFile, currentPlanName, running = false, mergeStatus = null, trigger = null, mode = 'standalone', engine = null, worktreePath = null, branch = null, executionCount = null, onBatchPlansChange, onMergeCompleted }: Props = $props();
+	let { runnerId, planFile, currentPlanName, running = false, mergeStatus = null, mergeReason = null, mergeMessage = null, trigger = null, mode = 'standalone', engine = null, worktreePath = null, branch = null, executionCount = null, onBatchPlansChange, onMergeCompleted }: Props = $props();
 	let isCodexEngine = $derived((engine ?? '').toLowerCase() === 'codex');
 
 	// 머지 진행 중 상태 판별
@@ -88,7 +90,7 @@
 	let recentRetryTimer: ReturnType<typeof setTimeout> | null = null;
 	const recentRetryBackoff = createBackoff({ baseMs: 600, maxMs: 60000, maxAttempts: 4 });
 
-	let copied = $state(false);
+	let copyState = $state<'idle' | 'loading' | 'copied' | 'error'>('idle');
 	let expandedLongLines = $state<Set<string>>(new Set());
 	let runMetaExpanded = $state(false);
 
@@ -191,6 +193,9 @@
 	}
 
 	async function copyLog() {
+		if (copyState === 'loading') return;
+		copyState = 'loading';
+
 		const headerLines: string[] = [];
 		headerLines.push(`[Runner] ${runnerId}`);
 		if (planFile) {
@@ -202,22 +207,40 @@
 		if (worktreePath) headerLines.push(`[Worktree] ${worktreePath}`);
 		if (executionCount != null) headerLines.push(`[Execution] ${executionCount}`);
 		if (trigger) headerLines.push(`[Trigger] ${trigger}`);
+		if (mergeStatus) headerLines.push(`[MergeStatus] ${mergeStatus}`);
+		if (mergeReason) headerLines.push(`[MergeReason] ${mergeReason}`);
+		if (mergeMessage) headerLines.push(`[MergeMessage] ${mergeMessage}`);
 		headerLines.push('---');
 
-		const logLines = lines
-			.filter(l => !l.isStale && l.tag !== 'NOISE')
-			.map(l => {
-				const raw = l.raw;
-				return raw.length > 200 ? raw.slice(0, 200) + '…' : raw;
+		let logLines: string[];
+		let usedFallback = false;
+		try {
+			// full log API로 원천 취득 (isStale/truncation 없이 raw 그대로)
+			const res = await devRunnerLogApi.full(runnerId, 0, 5000);
+			logLines = res.lines.filter((raw: string) => {
+				const parsed = parseRawLine(raw, true);
+				return parsed.tag !== 'NOISE';
 			});
+		} catch {
+			// full fetch 실패 시 현재 lines fallback (부분 복사 가능성 명시)
+			usedFallback = true;
+			logLines = lines
+				.filter(l => l.tag !== 'NOISE')
+				.map(l => l.raw);
+		}
+
+		if (usedFallback) {
+			headerLines.push('[Fallback] full log fetch failed — partial copy');
+		}
 
 		const text = [...headerLines, ...logLines].join('\n');
 		try {
 			await navigator.clipboard.writeText(text);
-			copied = true;
-			setTimeout(() => { copied = false; }, 1500);
+			copyState = 'copied';
+			setTimeout(() => { copyState = 'idle'; }, 1500);
 		} catch {
-			// 클립보드 접근 실패
+			copyState = 'error';
+			setTimeout(() => { copyState = 'idle'; }, 1500);
 		}
 	}
 
@@ -671,13 +694,20 @@
 			{/if}
 			<!-- 로그 복사 버튼 -->
 			<button
-				class="h-6 w-6 rounded transition-colors inline-flex items-center justify-center {copied ? 'text-green-400' : 'text-gray-400'} hover:bg-gray-700"
-				title="로그 복사 (러너 정보 + 현재 세션 로그)"
+				class="h-6 w-6 rounded transition-colors inline-flex items-center justify-center {copyState === 'copied' ? 'text-green-400' : copyState === 'error' ? 'text-red-400' : copyState === 'loading' ? 'text-yellow-400' : 'text-gray-400'} hover:bg-gray-700 disabled:cursor-not-allowed"
+				title={copyState === 'copied' ? '복사됨' : copyState === 'error' ? '복사 실패' : copyState === 'loading' ? '복사 중...' : '로그 복사 (full log + 머지 상태)'}
 				onclick={copyLog}
+				disabled={copyState === 'loading'}
 			>
-				{#if copied}
+				{#if copyState === 'copied'}
 					<!-- Check icon -->
 					<svg class="h-3 w-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+				{:else if copyState === 'error'}
+					<!-- X icon -->
+					<svg class="h-3 w-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+				{:else if copyState === 'loading'}
+					<!-- Spinner icon -->
+					<svg class="h-3 w-3 animate-spin" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-6.219-8.56"/></svg>
 				{:else}
 					<!-- Clipboard icon -->
 					<svg class="h-3 w-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="8" height="4" x="8" y="2" rx="1" ry="1"/><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/></svg>
