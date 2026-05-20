@@ -23,6 +23,8 @@ from _dr_constants import (
     LOG_CHANNEL_PREFIX, MERGE_ACTIVE_STATUSES, WORKTREE_BASE_DIR,
     RECENT_RUNNERS_TTL, RUNNER_KEY_SUFFIXES, PROJECT_ROOT, RECENT_META_TTL,
     OWNERSHIP_SNAPSHOT_DIR, SUBPROCESS_HEARTBEAT_TTL,
+    REROUTE_REQUIRED_PATH_KEY, ROOT_DIRTY_CLOSEOUT_STATUS_KEY, ROOT_DIRTY_PATHS_KEY,
+    ROOT_DIRTY_STATUS_BLOCKED,
 )
 from _dr_plan_paths import classify_plan_stage, read_plan_status
 from _dr_merge_persistence import MergePersistence
@@ -76,6 +78,9 @@ def _build_recent_runner_meta(
         ("merge_status", redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_status")),
         ("merge_reason", redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_reason")),
         ("merge_message", redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_message")),
+        (ROOT_DIRTY_CLOSEOUT_STATUS_KEY, redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:{ROOT_DIRTY_CLOSEOUT_STATUS_KEY}")),
+        (ROOT_DIRTY_PATHS_KEY, redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:{ROOT_DIRTY_PATHS_KEY}")),
+        (REROUTE_REQUIRED_PATH_KEY, redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:{REROUTE_REQUIRED_PATH_KEY}")),
     ):
         if value is not None:
             meta[field] = _decode_recent_meta_value(value)
@@ -167,6 +172,23 @@ def _record_worktree_cleanup_monitor_event(
         )
     except Exception as exc:
         logger.debug("[cleanup] worktree residue monitor record skipped: %s", exc)
+
+
+def _mark_root_impl_scope_blocked(redis_client: redis.Redis, runner_id: str, message: str) -> None:
+    if "root_worktree_impl_scope_blocked" not in (message or ""):
+        return
+    try:
+        MergePersistence(redis_client, runner_id).transition(
+            RESIDUE_BLOCKED,
+            reason="root_worktree_impl_scope_blocked",
+            message=message[:500],
+            action=RetryAction.APPROVED_RETRY.value,
+        )
+        redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:{ROOT_DIRTY_CLOSEOUT_STATUS_KEY}", ROOT_DIRTY_STATUS_BLOCKED)
+        redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:done_post_merge_status", "failed")
+        redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:done_post_merge_error", "root_worktree_impl_scope_blocked")
+    except Exception:
+        logger.debug("[cleanup] root impl scope blocked metadata persist failed", exc_info=True)
 
 
 def _force_cleanup_test_runner_worktree(runner_id: str, redis_client: redis.Redis) -> bool:
@@ -503,6 +525,14 @@ def _cleanup_process_state(runner_id: str, redis_client: redis.Redis, reason: st
         branch_val = _decode_recent_meta_value(branch_val)
         worktree_path_val = redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:worktree_path")
         worktree_path_val = _decode_recent_meta_value(worktree_path_val)
+        root_dirty_status = redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:{ROOT_DIRTY_CLOSEOUT_STATUS_KEY}")
+        root_dirty_status = _decode_recent_meta_value(root_dirty_status)
+        error_val = redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:error")
+        error_val = _decode_recent_meta_value(error_val)
+        if isinstance(error_val, str) and "root_worktree_impl_scope_blocked" in error_val:
+            _mark_root_impl_scope_blocked(redis_client, runner_id, error_val)
+            merge_status = RESIDUE_BLOCKED
+            root_dirty_status = ROOT_DIRTY_STATUS_BLOCKED
         force_test_cleanup = bool(test_source_val) and (
             (isinstance(branch_val, str) and branch_val.startswith("runner/t-"))
             or (
@@ -518,6 +548,7 @@ def _cleanup_process_state(runner_id: str, redis_client: redis.Redis, reason: st
         plan_file_val = None
         _trigger_val = None
         merge_requested = None
+        root_dirty_status = None
         force_test_cleanup = False
 
     # 1) register stopped runner in RECENT_RUNNERS
@@ -590,6 +621,13 @@ def _cleanup_process_state(runner_id: str, redis_client: redis.Redis, reason: st
                 )
                 redis_client.persist(f"{RUNNER_KEY_PREFIX}:{runner_id}:worktree_path")
 
+            if root_dirty_status in {"reroute_required", "blocked"}:
+                _preserve_worktree = True
+                logger.warning(
+                    f"[_cleanup_process_state] root dirty closeout={root_dirty_status} -> preserving worktree (runner={runner_id})"
+                )
+                redis_client.persist(f"{RUNNER_KEY_PREFIX}:{runner_id}:worktree_path")
+
             if not _preserve_worktree and merge_status not in ("pending_merge", "conflict", "queued", "approval_required"):
                 try:
                     WorktreeManager.remove(
@@ -624,6 +662,13 @@ def _cleanup_process_state(runner_id: str, redis_client: redis.Redis, reason: st
                 _ar_preserve_suffixes = frozenset({
                     "merge_status", "merge_reason", "merge_message",
                     "worktree_path", "branch", "plan_file", "exit_reason",
+                })
+            if root_dirty_status in {"reroute_required", "blocked"}:
+                _ar_preserve_suffixes = _ar_preserve_suffixes | frozenset({
+                    "merge_status", "merge_reason", "merge_message",
+                    "worktree_path", "branch", "plan_file", "exit_reason",
+                    ROOT_DIRTY_CLOSEOUT_STATUS_KEY, ROOT_DIRTY_PATHS_KEY, REROUTE_REQUIRED_PATH_KEY,
+                    "done_post_merge_status", "done_post_merge_error", "quarantine_diff_path",
                 })
             for _suffix in RUNNER_KEY_SUFFIXES:
                 if _suffix in _ar_preserve_suffixes:

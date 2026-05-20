@@ -8,7 +8,13 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
 
-from _dr_constants import LOG_CHANNEL_PREFIX, RUNNER_KEY_PREFIX
+from _dr_constants import (
+    LOG_CHANNEL_PREFIX,
+    REROUTE_REQUIRED_PATH_KEY,
+    ROOT_DIRTY_CLOSEOUT_STATUS_KEY,
+    ROOT_DIRTY_PATHS_KEY,
+    RUNNER_KEY_PREFIX,
+)
 from _dr_merge_state import TERMINAL_STATUSES, is_transition_allowed, normalize_status
 from _dr_runtime_utils import _publish_with_retry
 
@@ -101,6 +107,14 @@ class MergePersistence:
         quarantine_diff_path = result.get("quarantine_diff_path")
         if not quarantine_diff_path and isinstance(result.get("post_merge_done"), dict):
             quarantine_diff_path = result["post_merge_done"].get("quarantine_diff_path")
+        root_dirty_status = result.get(ROOT_DIRTY_CLOSEOUT_STATUS_KEY)
+        root_dirty_paths = result.get(ROOT_DIRTY_PATHS_KEY)
+        reroute_required_path = result.get(REROUTE_REQUIRED_PATH_KEY)
+        if isinstance(result.get("post_merge_done"), dict):
+            post_merge_done = result["post_merge_done"]
+            root_dirty_status = root_dirty_status or post_merge_done.get(ROOT_DIRTY_CLOSEOUT_STATUS_KEY)
+            root_dirty_paths = root_dirty_paths or post_merge_done.get(ROOT_DIRTY_PATHS_KEY)
+            reroute_required_path = reroute_required_path or post_merge_done.get(REROUTE_REQUIRED_PATH_KEY)
 
         try:
             current = self.read()
@@ -122,6 +136,25 @@ class MergePersistence:
                 self.redis_client.set(self._key("quarantine_diff_path"), str(quarantine_diff_path))
             else:
                 self.redis_client.delete(self._key("quarantine_diff_path"))
+            existing_root_dirty_status = _decode(
+                self.redis_client.get(self._key(ROOT_DIRTY_CLOSEOUT_STATUS_KEY))
+            ).strip().lower()
+            if root_dirty_status:
+                self.redis_client.set(self._key(ROOT_DIRTY_CLOSEOUT_STATUS_KEY), str(root_dirty_status))
+            elif existing_root_dirty_status not in {"reroute_required", "blocked"} and normalize_status(reason) not in {"root_dirty_reroute_required", "root_worktree_impl_scope_blocked"}:
+                self.redis_client.delete(self._key(ROOT_DIRTY_CLOSEOUT_STATUS_KEY))
+            if root_dirty_paths:
+                if isinstance(root_dirty_paths, (list, tuple, set)):
+                    payload = json.dumps(list(root_dirty_paths), ensure_ascii=False)
+                else:
+                    payload = str(root_dirty_paths)
+                self.redis_client.set(self._key(ROOT_DIRTY_PATHS_KEY), payload)
+            elif not root_dirty_status and existing_root_dirty_status not in {"reroute_required", "blocked"}:
+                self.redis_client.delete(self._key(ROOT_DIRTY_PATHS_KEY))
+            if reroute_required_path:
+                self.redis_client.set(self._key(REROUTE_REQUIRED_PATH_KEY), str(reroute_required_path))
+            elif normalize_status(root_dirty_status) not in {"reroute_required", "blocked"} and existing_root_dirty_status not in {"reroute_required", "blocked"}:
+                self.redis_client.delete(self._key(REROUTE_REQUIRED_PATH_KEY))
             if result.get("snapshot_path"):
                 self.redis_client.set(self._key("merge_snapshot_path"), str(result["snapshot_path"]))
             summary = self.build_gate_evidence_summary(result)
@@ -149,6 +182,9 @@ class MergePersistence:
                         "message": result.get("message", f"merge_status={final_status}"),
                         "reason": result.get("reason"),
                         "quarantine_diff_path": result.get("quarantine_diff_path"),
+                        ROOT_DIRTY_CLOSEOUT_STATUS_KEY: result.get(ROOT_DIRTY_CLOSEOUT_STATUS_KEY),
+                        ROOT_DIRTY_PATHS_KEY: result.get(ROOT_DIRTY_PATHS_KEY),
+                        REROUTE_REQUIRED_PATH_KEY: result.get(REROUTE_REQUIRED_PATH_KEY),
                         "gate_evidence_summary": self.build_gate_evidence_summary(result),
                     },
                     ensure_ascii=False,
@@ -211,6 +247,15 @@ class MergePersistence:
             "reason": reason,
             "success": bool(result.get("success", False)),
             "quarantine_diff_path": result.get("quarantine_diff_path") or post_merge_done.get("quarantine_diff_path"),
+            ROOT_DIRTY_CLOSEOUT_STATUS_KEY: (
+                result.get(ROOT_DIRTY_CLOSEOUT_STATUS_KEY)
+                or post_merge_done.get(ROOT_DIRTY_CLOSEOUT_STATUS_KEY)
+            ),
+            ROOT_DIRTY_PATHS_KEY: result.get(ROOT_DIRTY_PATHS_KEY) or post_merge_done.get(ROOT_DIRTY_PATHS_KEY),
+            REROUTE_REQUIRED_PATH_KEY: (
+                result.get(REROUTE_REQUIRED_PATH_KEY)
+                or post_merge_done.get(REROUTE_REQUIRED_PATH_KEY)
+            ),
             "merge_snapshot_path": result.get("snapshot_path"),
             "done_post_merge_status": post_merge_done.get("status"),
             "restart_after_merge": post_merge_done.get("status") == "restart_scheduled",

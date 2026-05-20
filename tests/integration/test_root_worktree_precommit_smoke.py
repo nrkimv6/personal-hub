@@ -74,6 +74,22 @@ def _run_hook(repo_cwd: Path, env: dict[str, str] | None = None) -> subprocess.C
     )
 
 
+def _run_root_guard(repo_cwd: Path, mode: str, env: dict[str, str] | None = None) -> subprocess.CompletedProcess[str]:
+    guard = repo_cwd / "scripts" / "git-hooks" / "root-branch-guard.ps1"
+    process_env = os.environ.copy()
+    if env:
+        process_env.update(env)
+    return subprocess.run(
+        ["powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(guard), "-Mode", mode],
+        cwd=str(repo_cwd),
+        env=process_env,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+    )
+
+
 def test_root_worktree_blocks_impl_scope_stage(tmp_path):
     repo = _init_repo(tmp_path)
     target = repo / "app" / "worker.py"
@@ -85,6 +101,31 @@ def test_root_worktree_blocks_impl_scope_stage(tmp_path):
 
     assert result.returncode != 0
     assert "root_worktree_impl_scope_blocked" in (result.stdout + result.stderr)
+
+
+def test_root_guard_RIGHT_detects_unstaged_impl_dirty(tmp_path):
+    repo = _init_repo(tmp_path)
+    target = repo / "frontend" / "src" / "route.ts"
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text("unstaged root impl change\n", encoding="utf-8")
+
+    result = _run_root_guard(repo, "Dirty")
+
+    output = result.stdout + result.stderr
+    assert result.returncode != 0
+    assert "root_worktree_impl_dirty_detected" in output
+    assert "frontend/src/route.ts" in output
+
+
+def test_root_guard_BOUNDARY_allows_operator_docs_dirty(tmp_path):
+    repo = _init_repo(tmp_path)
+    for name in ("AGENTS.md", "CLAUDE.md"):
+        (repo / name).write_text(f"# {name}\n", encoding="utf-8")
+
+    result = _run_root_guard(repo, "Dirty")
+
+    assert result.returncode == 0
+    assert "root_worktree_impl_dirty_clean" in (result.stdout + result.stderr)
 
 
 def test_root_worktree_allows_root_operator_docs(tmp_path):

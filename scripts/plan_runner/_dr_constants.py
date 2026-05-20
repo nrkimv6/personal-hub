@@ -50,6 +50,7 @@ RUNNER_KEY_SUFFIXES = (
     "engine", "fix_engine", "worktree_path", "branch",
     "merge_status", "merge_requested", "merge_reason", "merge_message",
     "done_post_merge_status", "done_post_merge_error", "quarantine_diff_path",
+    "root_dirty_closeout_status", "root_dirty_paths", "reroute_required_path",
     "service_lock_approved",
     "current_cycle", "execution_count", "quota_stopped", "error", "restart_after_merge", "exit_reason", "test_source", "trigger",
     "subprocess_heartbeat", "pid_create_time", "process_cmdline_hash", "reflect_final_path",
@@ -58,6 +59,14 @@ RUNNER_KEY_SUFFIXES = (
     "profile", "profile_env_key", "profile_config_dir", "profile_extra_env",
     "worktree_exists", "branch_exists", "branch_merged_to_main", "metadata_checked_at",
 )
+
+ROOT_DIRTY_CLOSEOUT_STATUS_KEY = "root_dirty_closeout_status"
+ROOT_DIRTY_PATHS_KEY = "root_dirty_paths"
+REROUTE_REQUIRED_PATH_KEY = "reroute_required_path"
+ROOT_DIRTY_STATUS_CLEAN = "clean"
+ROOT_DIRTY_STATUS_REROUTE_REQUIRED = "reroute_required"
+ROOT_DIRTY_STATUS_QUARANTINED = "quarantined"
+ROOT_DIRTY_STATUS_BLOCKED = "blocked"
 def _read_zombie_grace_seconds(default: int = 240) -> int:
     """좀비 감지 유예 시간(env override) 파싱."""
     raw = os.environ.get("DEV_RUNNER_ZOMBIE_GRACE_SECONDS")

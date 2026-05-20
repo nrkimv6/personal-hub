@@ -1,5 +1,5 @@
 param(
-    [ValidateSet("Commit", "Status", "PostCheckout")]
+    [ValidateSet("Commit", "Status", "PostCheckout", "Dirty")]
     [string]$Mode = "Status"
 )
 
@@ -60,8 +60,22 @@ function Get-StagedPaths {
 }
 
 function Get-StatusPorcelain {
-    $raw = Get-GuardValue -Name "ROOT_GUARD_STATUS" -Fallback { git status --porcelain=v1 2>$null }
+    $raw = Get-GuardValue -Name "ROOT_GUARD_STATUS" -Fallback { git status --porcelain=v1 --untracked-files=all 2>$null }
     return @($raw -split "`r?`n" | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+}
+
+function Get-DirtyPaths {
+    $lines = Get-StatusPorcelain
+    $paths = foreach ($line in $lines) {
+        $raw = if ($line.Length -ge 3) { $line.Substring(3).Trim() } else { $line.Trim() }
+        if ($raw -match " -> ") {
+            $raw = ($raw -split " -> ", 2)[1].Trim()
+        }
+        if (-not [string]::IsNullOrWhiteSpace($raw)) {
+            ConvertTo-RelativeGitPath $raw
+        }
+    }
+    return @($paths)
 }
 
 function Test-MirrorSurfacePath {
@@ -87,6 +101,15 @@ function Test-AllowedRootCommitPath {
         return $true
     }
     return $false
+}
+
+function Test-ImplementationScopePath {
+    param([string]$PathValue)
+
+    if (Test-MirrorSurfacePath $PathValue) {
+        return $false
+    }
+    return -not (Test-AllowedRootCommitPath $PathValue)
 }
 
 function Get-RepoContext {
@@ -125,6 +148,11 @@ function Write-Context {
     Write-Output "branch=$($Context.Branch)"
     Write-Output "is_root_checkout=$($Context.IsRootCheckout)"
     Write-Output "sentinel=$($Context.Sentinel)"
+    if ($Context.IsRootCheckout) {
+        $dirtyImpl = @(Get-DirtyPaths | Where-Object { Test-ImplementationScopePath $_ })
+        Write-Output "root_impl_dirty_count=$($dirtyImpl.Count)"
+        $dirtyImpl | ForEach-Object { Write-Output "root_impl_dirty_path=$_" }
+    }
 }
 
 $context = Get-RepoContext
@@ -132,6 +160,26 @@ $context = Get-RepoContext
 if ($Mode -eq "Status") {
     Write-Context $context
     exit 0
+}
+
+if ($Mode -eq "Dirty") {
+    Write-Context $context
+    if (-not $context.IsRootCheckout) {
+        Write-Output "root_worktree_impl_dirty_clean: not root checkout"
+        exit 0
+    }
+
+    $dirtyImpl = @(Get-DirtyPaths | Where-Object { Test-ImplementationScopePath $_ })
+    if ($dirtyImpl.Count -eq 0) {
+        Write-Output "root_worktree_impl_dirty_clean"
+        exit 0
+    }
+
+    [Console]::Error.WriteLine("root_worktree_impl_dirty_detected: root checkout has implementation-scope dirty paths. Closeout must reroute before success.")
+    [Console]::Error.WriteLine("affected paths:")
+    $dirtyImpl | ForEach-Object { [Console]::Error.WriteLine("  - $_") }
+    [Console]::Error.WriteLine("recommended recovery: run scripts\diagnostics\rescue-root-impl-dirty.ps1 first without -Apply, inspect the classification, then rerun with -Apply only when the rescue worktree target is correct.")
+    exit 1
 }
 
 if ($Mode -eq "Commit") {
@@ -181,7 +229,7 @@ if ($Mode -eq "Commit") {
         exit 1
     }
 
-    $blocked = @($staged | Where-Object { -not (Test-AllowedRootCommitPath $_) })
+    $blocked = @($staged | Where-Object { Test-ImplementationScopePath $_ })
     if ($blocked.Count -gt 0) {
         Write-Error "root_worktree_impl_scope_blocked: root main worktree cannot commit implementation-scope files directly. Use an impl worktree."
         Write-Error "blocked staged files:"

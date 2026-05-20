@@ -23,6 +23,12 @@ import redis
 from _dr_constants import (
     RUNNER_KEY_PREFIX, PLAN_FILE_ALL, _LEGACY_ALL, LOG_CHANNEL_PREFIX,
     PLAN_RUNNER_PYTHON, PLAN_RUNNER_MODULE_PATH, OWNERSHIP_SNAPSHOT_DIR, get_redis_db, get_admin_api_base,
+    REROUTE_REQUIRED_PATH_KEY,
+    ROOT_DIRTY_CLOSEOUT_STATUS_KEY,
+    ROOT_DIRTY_PATHS_KEY,
+    ROOT_DIRTY_STATUS_BLOCKED,
+    ROOT_DIRTY_STATUS_CLEAN,
+    ROOT_DIRTY_STATUS_REROUTE_REQUIRED,
 )
 from _dr_merge_persistence import MergePersistence
 from _dr_merge_state import (
@@ -146,6 +152,43 @@ def _status_line_relpath(line: str) -> str:
     if " -> " in raw:
         raw = raw.split(" -> ", 1)[1].strip()
     return raw.replace("\\", "/")
+
+
+def _is_root_checkout(project_root: Path) -> bool:
+    try:
+        common = subprocess.run(
+            ["git", "rev-parse", "--git-common-dir"],
+            cwd=str(project_root),
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=5,
+        )
+        if common.returncode != 0 or not common.stdout.strip():
+            return False
+        common_git_dir = Path(common.stdout.strip())
+        if not common_git_dir.is_absolute():
+            common_git_dir = project_root / common_git_dir
+        return common_git_dir.resolve(strict=False).parent == project_root.resolve(strict=False)
+    except Exception:
+        return False
+
+
+def _is_mirror_surface_path(relpath: str) -> bool:
+    normalized = relpath.replace("\\", "/")
+    return normalized.startswith((".agents/", ".agent/", ".claude/", ".gemini/"))
+
+
+def _is_allowed_root_operator_path(relpath: str) -> bool:
+    normalized = relpath.replace("\\", "/")
+    if normalized in {"AGENTS.md", "CLAUDE.md", "MANUAL_TASKS.md", "CHANGELOG.md", ".gitignore"}:
+        return True
+    return normalized.startswith(("docs/archive/", "docs/plan/"))
+
+
+def _is_implementation_scope_path(relpath: str) -> bool:
+    return not _is_mirror_surface_path(relpath) and not _is_allowed_root_operator_path(relpath)
 
 
 def _load_runner_ownership_payload(runner_id: str) -> Optional[tuple[Path, dict]]:
@@ -315,6 +358,47 @@ def _write_post_merge_residue_diff(
     return str(diff_path)
 
 
+def _write_reroute_required_evidence(
+    runner_id: str,
+    affected_entries: list[dict],
+    project_root: Path,
+    *,
+    quarantine_diff_path: str | None = None,
+) -> str:
+    evidence_dir = project_root / "logs" / "dev_runner" / "reroute_required"
+    evidence_dir.mkdir(parents=True, exist_ok=True)
+    timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+    safe_runner = re.sub(r"[^A-Za-z0-9_.-]+", "_", runner_id)[:80] or "runner"
+    evidence_path = evidence_dir / f"{safe_runner}-{timestamp}.md"
+    rescue_name = f"codex/root-dirty-rescue-{datetime.now().strftime('%Y%m%d')}"
+    affected_paths = [str(entry["relpath"]) for entry in affected_entries]
+
+    lines = [
+        "# root dirty reroute required",
+        "",
+        f"- runner_id: `{runner_id}`",
+        f"- captured_at: `{datetime.now().isoformat()}`",
+        f"- root: `{project_root}`",
+        f"- root_dirty_closeout_status: `{ROOT_DIRTY_STATUS_REROUTE_REQUIRED}`",
+        f"- recommended_rescue_branch: `{rescue_name}`",
+        f"- recommended_rescue_worktree: `.worktrees/{rescue_name.replace('/', '-')}`",
+    ]
+    if quarantine_diff_path:
+        lines.append(f"- quarantine_diff_path: `{quarantine_diff_path}`")
+    lines.extend(["", "## affected paths", ""])
+    lines.extend(f"- `{path}`" for path in affected_paths)
+    lines.extend(
+        [
+            "",
+            "## operator note",
+            "",
+            "`root_worktree_impl_scope_blocked` is not a successful closeout. Move these changes into the owning impl worktree or a named rescue worktree, then verify the root checkout is clean.",
+        ]
+    )
+    evidence_path.write_text("\n".join(lines).rstrip() + "\n", encoding="utf-8")
+    return str(evidence_path)
+
+
 def _remove_untracked_residue_path(project_root: Path, relpath: str) -> None:
     target = (project_root / relpath).resolve(strict=False)
     root = project_root.resolve(strict=False)
@@ -377,9 +461,39 @@ def _check_post_merge_residue(runner_id: str, pub_fn) -> dict:
     allowed_files = dirty_files | owned_files
 
     entries = _collect_git_status_entries(project_root)
+    if _is_root_checkout(project_root):
+        root_impl_entries = [
+            entry for entry in entries
+            if _is_implementation_scope_path(str(entry["relpath"]))
+        ]
+        if root_impl_entries:
+            quarantine_diff_path = _write_post_merge_residue_diff(runner_id, root_impl_entries, project_root)
+            reroute_required_path = _write_reroute_required_evidence(
+                runner_id,
+                root_impl_entries,
+                project_root,
+                quarantine_diff_path=quarantine_diff_path,
+            )
+            affected_paths = [str(entry["relpath"]) for entry in root_impl_entries]
+            pub_fn(
+                "root implementation dirty 감지: "
+                f"{len(affected_paths)}건 reroute_required, evidence={reroute_required_path}"
+            )
+            return {
+                "success": False,
+                "status": "reroute_required",
+                "reason": "root_dirty_reroute_required",
+                "message": "root implementation dirty requires reroute before closeout",
+                "quarantine_diff_path": quarantine_diff_path,
+                REROUTE_REQUIRED_PATH_KEY: reroute_required_path,
+                ROOT_DIRTY_CLOSEOUT_STATUS_KEY: ROOT_DIRTY_STATUS_REROUTE_REQUIRED,
+                ROOT_DIRTY_PATHS_KEY: affected_paths,
+                "stray_files": affected_paths,
+            }
+
     stray_entries = [entry for entry in entries if entry["key"] not in allowed_files]
     if not stray_entries:
-        return {"success": True, "status": "clean"}
+        return {"success": True, "status": "clean", ROOT_DIRTY_CLOSEOUT_STATUS_KEY: ROOT_DIRTY_STATUS_CLEAN}
 
     quarantine_diff_path = _write_post_merge_residue_diff(runner_id, stray_entries, project_root)
     _restore_post_merge_residue(stray_entries, project_root)
@@ -623,7 +737,7 @@ def _compose_merge_result_with_done(
     """merge 성공 결과에 post-merge done 결과를 반영한다."""
     failed, reason = _extract_post_merge_done_failure(done_result)
     if failed:
-        merge_status = RESIDUE_BLOCKED if reason == "residue_guard" else ERROR
+        merge_status = RESIDUE_BLOCKED if reason in {"residue_guard", "root_dirty_reroute_required"} else ERROR
         pub_fn(f"post-merge done 실패 전파: {reason}")
         _transition_merge_status(
             runner_id,
@@ -652,20 +766,30 @@ def _compose_merge_result_with_done(
         result["post_merge_done"] = done_result
         if done_result.get("quarantine_diff_path"):
             result["quarantine_diff_path"] = done_result["quarantine_diff_path"]
+        for key in (ROOT_DIRTY_CLOSEOUT_STATUS_KEY, ROOT_DIRTY_PATHS_KEY, REROUTE_REQUIRED_PATH_KEY):
+            if done_result.get(key):
+                result[key] = done_result[key]
     return result
 
 
 def _handle_merge_success(runner_id: str, redis_client: redis.Redis, plan_file, pub_fn, action_name: str = "inline-merge") -> dict:
     residue_result = _check_post_merge_residue(runner_id, pub_fn)
     if not residue_result.get("success", True):
+        failure_reason = str(residue_result.get("reason") or "residue_guard")
         try:
             redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:done_post_merge_status", "skipped_residue")
-            redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:done_post_merge_error", "residue_guard")
+            redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:done_post_merge_error", failure_reason)
             if residue_result.get("quarantine_diff_path"):
                 redis_client.set(
                     f"{RUNNER_KEY_PREFIX}:{runner_id}:quarantine_diff_path",
                     residue_result["quarantine_diff_path"],
                 )
+            for key in (ROOT_DIRTY_CLOSEOUT_STATUS_KEY, ROOT_DIRTY_PATHS_KEY, REROUTE_REQUIRED_PATH_KEY):
+                if residue_result.get(key):
+                    value = residue_result[key]
+                    if isinstance(value, (list, tuple, set)):
+                        value = json.dumps(list(value), ensure_ascii=False)
+                    redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:{key}", str(value))
         except Exception:
             pass
         return _compose_merge_result_with_done(
@@ -676,9 +800,12 @@ def _handle_merge_success(runner_id: str, redis_client: redis.Redis, plan_file, 
             done_result={
                 "success": False,
                 "status": "skipped_residue",
-                "reason": "residue_guard",
+                "reason": failure_reason,
                 "message": str(residue_result.get("message") or "post-merge residue detected"),
                 "quarantine_diff_path": residue_result.get("quarantine_diff_path"),
+                ROOT_DIRTY_CLOSEOUT_STATUS_KEY: residue_result.get(ROOT_DIRTY_CLOSEOUT_STATUS_KEY),
+                ROOT_DIRTY_PATHS_KEY: residue_result.get(ROOT_DIRTY_PATHS_KEY),
+                REROUTE_REQUIRED_PATH_KEY: residue_result.get(REROUTE_REQUIRED_PATH_KEY),
             },
             pub_fn=pub_fn,
         )
@@ -688,6 +815,28 @@ def _handle_merge_success(runner_id: str, redis_client: redis.Redis, plan_file, 
         pass
     pub_fn("merge 성공 (exit_code=0)")
     done_result = _handle_post_merge_done(plan_file, runner_id, pub_fn, redis_client)
+    closeout_result = _check_post_merge_residue(runner_id, pub_fn)
+    if not closeout_result.get("success", True):
+        failure_reason = str(closeout_result.get("reason") or "residue_guard")
+        done_payload = {
+            "success": False,
+            "status": "skipped_residue",
+            "reason": failure_reason,
+            "message": str(closeout_result.get("message") or "post-merge closeout residue detected"),
+            "quarantine_diff_path": closeout_result.get("quarantine_diff_path"),
+            ROOT_DIRTY_CLOSEOUT_STATUS_KEY: closeout_result.get(ROOT_DIRTY_CLOSEOUT_STATUS_KEY),
+            ROOT_DIRTY_PATHS_KEY: closeout_result.get(ROOT_DIRTY_PATHS_KEY),
+            REROUTE_REQUIRED_PATH_KEY: closeout_result.get(REROUTE_REQUIRED_PATH_KEY),
+            "previous_post_merge_done": done_result,
+        }
+        return _compose_merge_result_with_done(
+            runner_id=runner_id,
+            redis_client=redis_client,
+            action_name=action_name,
+            base_message="merged but closeout blocked",
+            done_result=done_payload,
+            pub_fn=pub_fn,
+        )
     result = _compose_merge_result_with_done(
         runner_id=runner_id,
         redis_client=redis_client,
@@ -728,6 +877,7 @@ def _handle_test_failed(runner_id: str, redis_client: redis.Redis, plan_file, pu
         pub_fn("auto-impl-post-merge 성공 — merge 완료")
         residue_result = _check_post_merge_residue(runner_id, pub_fn)
         if not residue_result.get("success", True):
+            failure_reason = str(residue_result.get("reason") or "residue_guard")
             return _compose_merge_result_with_done(
                 runner_id=runner_id,
                 redis_client=redis_client,
@@ -736,9 +886,12 @@ def _handle_test_failed(runner_id: str, redis_client: redis.Redis, plan_file, pu
                 done_result={
                     "success": False,
                     "status": "skipped_residue",
-                    "reason": "residue_guard",
+                    "reason": failure_reason,
                     "message": str(residue_result.get("message") or "post-merge residue detected"),
                     "quarantine_diff_path": residue_result.get("quarantine_diff_path"),
+                    ROOT_DIRTY_CLOSEOUT_STATUS_KEY: residue_result.get(ROOT_DIRTY_CLOSEOUT_STATUS_KEY),
+                    ROOT_DIRTY_PATHS_KEY: residue_result.get(ROOT_DIRTY_PATHS_KEY),
+                    REROUTE_REQUIRED_PATH_KEY: residue_result.get(REROUTE_REQUIRED_PATH_KEY),
                 },
                 pub_fn=pub_fn,
             )

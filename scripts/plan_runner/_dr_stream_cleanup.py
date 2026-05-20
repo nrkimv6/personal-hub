@@ -22,11 +22,16 @@ from _dr_constants import (
     DEV_RUNNER_PG_MIRROR_ENABLED_ENV,
     LOG_CHANNEL_PREFIX,
     PLAN_FILE_ALL,
+    REROUTE_REQUIRED_PATH_KEY,
+    ROOT_DIRTY_CLOSEOUT_STATUS_KEY,
+    ROOT_DIRTY_PATHS_KEY,
+    ROOT_DIRTY_STATUS_BLOCKED,
+    ROOT_DIRTY_STATUS_REROUTE_REQUIRED,
     RUNNER_KEY_PREFIX,
     _LEGACY_ALL,
 )
 from _dr_merge_persistence import MergePersistence
-from _dr_merge_state import MERGED, MergeCleanupAction, TERMINAL_STATUSES, should_enter_inline_merge
+from _dr_merge_state import MERGED, RESIDUE_BLOCKED, MergeCleanupAction, TERMINAL_STATUSES, should_enter_inline_merge
 from _dr_merge import _execute_merge_with_lock, _handle_post_merge_done, detect_merged_but_not_done, _pub_and_log
 from _dr_plan_paths import classify_plan_stage, read_plan_status
 from _dr_process_utils import _cleanup_process_state, _cleanup_runner_ownership_snapshot
@@ -254,7 +259,11 @@ def _do_inline_merge(runner_id: str, redis_client: redis.Redis) -> None:
             isinstance(merge_result, dict)
             and merge_result.get("merge_status") == "residue_blocked"
         )
-        if residue_blocked:
+        reroute_required = (
+            isinstance(merge_result, dict)
+            and merge_result.get(ROOT_DIRTY_CLOSEOUT_STATUS_KEY) == ROOT_DIRTY_STATUS_REROUTE_REQUIRED
+        )
+        if residue_blocked or reroute_required:
             redis_client.delete(f"{RUNNER_KEY_PREFIX}:{runner_id}:restart_after_merge")
         else:
             _flag = redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:restart_after_merge")
@@ -441,6 +450,17 @@ def _process_error_details(
             ctx.redis_client.set(
                 f"{RUNNER_KEY_PREFIX}:{ctx.runner_id}:error", error_message
             )
+            if "root_worktree_impl_scope_blocked" in error_message:
+                MergePersistence(ctx.redis_client, ctx.runner_id).transition(
+                    RESIDUE_BLOCKED,
+                    reason="root_worktree_impl_scope_blocked",
+                    message=error_message[:500],
+                    action="approved-retry",
+                )
+                ctx.redis_client.set(
+                    f"{RUNNER_KEY_PREFIX}:{ctx.runner_id}:{ROOT_DIRTY_CLOSEOUT_STATUS_KEY}",
+                    ROOT_DIRTY_STATUS_BLOCKED,
+                )
             if error_detail:
                 _publish_with_retry(
                     ctx.redis_client, ctx.log_channel, f"[ERROR] {error_detail}"
@@ -779,6 +799,9 @@ def _persist_fallback_gate_evidence_summary(
                 "message": done_result.get("message") or f"fallback done status={done_result.get('status', 'unknown')}",
                 "reason": done_result.get("reason") or done_result.get("status"),
                 "quarantine_diff_path": detect_result.get("quarantine_diff_path"),
+                ROOT_DIRTY_CLOSEOUT_STATUS_KEY: done_result.get(ROOT_DIRTY_CLOSEOUT_STATUS_KEY),
+                ROOT_DIRTY_PATHS_KEY: done_result.get(ROOT_DIRTY_PATHS_KEY),
+                REROUTE_REQUIRED_PATH_KEY: done_result.get(REROUTE_REQUIRED_PATH_KEY),
                 "snapshot_path": detect_result.get("snapshot_path"),
                 "post_merge_done": done_result,
             }
