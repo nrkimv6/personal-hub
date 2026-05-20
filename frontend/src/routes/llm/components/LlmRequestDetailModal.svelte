@@ -32,17 +32,15 @@
 
 <div
 	class="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4"
-	onclick={onClose}
+	onclick={(e) => {
+		if (e.currentTarget === e.target) onClose();
+	}}
 	onkeydown={(e) => e.key === 'Escape' && onClose()}
 	role="dialog"
 	tabindex="-1"
 >
 	<div
 		class="bg-white rounded-xl max-w-2xl w-full max-h-[90vh] overflow-auto"
-		onclick={(e) => e.stopPropagation()}
-		onkeydown={(e) => e.stopPropagation()}
-		role="document"
-		tabindex="-1"
 	>
 		<div class="p-6">
 			<div class="flex justify-between items-start mb-4">
