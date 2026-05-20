@@ -1211,6 +1211,7 @@ class ExecutorService:
                 reattach_mode=mode,  # type: ignore[arg-type]
                 can_reattach=confidence in {"high", "medium"},
                 can_force_kill=pid is not None,
+                visible=confidence in {"high", "medium"},
                 warnings=warnings,
             ))
 

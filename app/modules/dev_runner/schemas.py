@@ -150,6 +150,7 @@ class OrphanRunnerCandidate(BaseModel):
     reattach_mode: Literal["full", "log_only_child", "log_only"] = "log_only"
     can_reattach: bool = False
     can_force_kill: bool = False
+    visible: bool = False
     warnings: List[str] = Field(default_factory=list)
 
 
