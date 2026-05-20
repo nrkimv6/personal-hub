@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session
 from app.database import get_db
 from app.models.task_schedule import TaskSchedule, TaskScheduleRun
 from app.models.google_search import GoogleSavedSearch, GoogleSearchQueue, GoogleSearchHistory, GoogleSearchResult
+from app.services.schedule_contracts import validate_no_exact_time_windows
 from app.services.task_schedule_service import TaskScheduleService
 from app.modules.google_search.models.schedule_schemas import (
     GoogleSearchScheduleCreate,
@@ -108,6 +109,10 @@ async def create_google_search_schedule(
         raise HTTPException(status_code=400, detail="이미 해당 저장된 검색에 대한 스케줄이 존재합니다")
 
     schedule_service = TaskScheduleService(db)
+    try:
+        validate_no_exact_time_windows(data.schedule_value.model_dump())
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
 
     # 스케줄 생성
     schedule = schedule_service.create_schedule(
@@ -290,6 +295,10 @@ async def update_google_search_schedule(
     if data.enabled is not None:
         updates["enabled"] = data.enabled
     if data.schedule_value is not None:
+        try:
+            validate_no_exact_time_windows(data.schedule_value.model_dump())
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
         updates["schedule_value"] = data.schedule_value.model_dump_json()
     if "expires_at" in data.model_fields_set:
         updates["target_config"] = {

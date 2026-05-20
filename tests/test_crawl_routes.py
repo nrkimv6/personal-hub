@@ -4,14 +4,38 @@
 RIGHT-BICEP, CORRECT 원칙 적용
 """
 
+import json
+
 import pytest
 from unittest.mock import AsyncMock, patch, MagicMock
 from fastapi.testclient import TestClient
 from datetime import datetime
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
+from sqlalchemy.pool import StaticPool
 
 from app.main import app
 from app.database import get_db
-from app.models import CrawlRequest, TaskSchedule
+from app.models import CrawlRequest, TaskSchedule, TaskScheduleRun
+
+
+@pytest.fixture
+def test_db_session():
+    engine = create_engine(
+        "sqlite:///:memory:",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    CrawlRequest.__table__.create(bind=engine, checkfirst=True)
+    TaskSchedule.__table__.create(bind=engine, checkfirst=True)
+    TaskScheduleRun.__table__.create(bind=engine, checkfirst=True)
+    Session = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+    session = Session()
+    try:
+        yield session
+    finally:
+        session.close()
+        engine.dispose()
 
 
 @pytest.fixture
@@ -168,6 +192,31 @@ class TestTaskScheduleRoutes:
         assert response.status_code == 200
         data = response.json()
         assert data["id"] == schedule_id
+
+    def test_get_schedule_by_id_reports_exact_window_health(self, client, test_db_session):
+        schedule = TaskSchedule(
+            name="legacy_exact_task_schedule",
+            target_type=TaskSchedule.TARGET_TYPE_INSTAGRAM_FEED,
+            schedule_type=TaskSchedule.SCHEDULE_TYPE_TIME_WINDOW,
+            enabled=True,
+            schedule_value=json.dumps({
+                "daily_runs": 1,
+                "time_windows": [{"start": "09:00", "end": "09:00"}],
+            }),
+        )
+        schedule.set_target_config({"service_account_id": 1})
+        test_db_session.add(schedule)
+        test_db_session.commit()
+        test_db_session.refresh(schedule)
+
+        response = client.get(f"/api/tasks/schedules/{schedule.id}")
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["requires_time_window_repair"] is True
+        assert data["candidate_count_next_24h"] == 0
+        assert data["schedule_health"] == "error"
+        assert data["schedule_health_reason"] == "exact_time_window_zero_candidates"
 
     def test_update_schedule_right(self, client):
         """[Right] 스케줄 업데이트 API가 올바르게 동작해야 함."""

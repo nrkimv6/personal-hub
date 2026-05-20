@@ -191,7 +191,7 @@
 | ✅ | `analyze-bsod.ps1` | BSOD 이벤트 로그 상관분석 |
 | ✅ | `check_profile_config.py` | 브라우저 프로필 설정 검증 |
 | ✅ | `check_requests.py` | 요청 로그 검사 |
-| ✅ | `check_schedules.py` | 스케줄 상태 점검 |
+| ✅ | `check_schedules.py` | 스케줄 상태 점검, active zero-candidate schedule 감지 |
 | ✅ | `check_slots.py` | 슬롯 상태 점검 |
 | ✅ | `debug_sse_log.py` | SSE 로그 디버그 |
 | ✅ | `debug_sse_log2.py` | SSE 로그 디버그 v2 |
@@ -339,6 +339,7 @@
 | ✅ | `extract_keywords.py` | 키워드 추출 일회성 유틸 |
 | ✅ | `frontend_placeholder.py` | 프론트엔드 placeholder 서버 — service_run.py 참조, _todo-6에서 fixes/로 이관 완료 |
 | ✅ | `disable_duplicate_events.py` | 중복 이벤트 비활성화 일회성 수정 |
+| ✅ | `repair_exact_window_schedules.py` | legacy exact-window 스케줄 dry-run/명시 repair |
 
 ---
 

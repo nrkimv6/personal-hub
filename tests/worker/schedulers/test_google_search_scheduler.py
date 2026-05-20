@@ -309,3 +309,37 @@ def test_claim_run_uses_schedule_value_time_windows(session_factory):
         assert scheduler_cls.call_args.kwargs["daily_runs"] == 2
         windows = scheduler_cls.call_args.kwargs["time_windows"]
         assert [window.start for window in windows] == ["09:00", "21:00"]
+
+
+def test_exact_only_google_time_window_health_reports_error(session_factory):
+    with session_factory() as db:
+        saved_search = GoogleSavedSearch(name="Exact", query="exact query")
+        db.add(saved_search)
+        db.commit()
+        db.refresh(saved_search)
+
+        schedule = TaskSchedule(
+            name="exact-google",
+            target_type=TaskSchedule.TARGET_TYPE_GOOGLE_SEARCH,
+            schedule_type=TaskSchedule.SCHEDULE_TYPE_TIME_WINDOW,
+            schedule_value=json.dumps({
+                "time_windows": [
+                    {"start": "09:00", "end": "09:00"},
+                    {"start": "21:00", "end": "21:00"},
+                ],
+                "daily_runs": 2,
+                "min_interval_hours": 8,
+            }),
+            enabled=True,
+        )
+        schedule.set_target_config({"saved_search_id": saved_search.id})
+        db.add(schedule)
+        db.commit()
+        db.refresh(schedule)
+
+        health = TaskScheduleService(db).get_schedule_health(schedule)
+
+    assert health["health"] == "error"
+    assert health["reason"] == "exact_time_window_zero_candidates"
+    assert health["candidate_count"] == 0
+    assert health["requires_time_window_repair"] is True

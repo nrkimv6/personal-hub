@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 from app.models import TaskSchedule, TaskScheduleRun
 from app.modules.claude_worker.models.llm_request import LLMRequest
 from app.modules.claude_worker.services.llm_service import LLMService
+from app.services.schedule_contracts import build_time_window_candidate_summary
 
 
 def _merge_target_config(existing: Optional[dict], patch: dict) -> dict:
@@ -44,6 +45,11 @@ class TaskScheduleService:
         TaskSchedule.TARGET_TYPE_REPORT: "report",
         TaskSchedule.TARGET_TYPE_PYTEST_RUN: "pytest_fix",
         TaskSchedule.TARGET_TYPE_PLAN_ARCHIVE_ANALYZE: "plan_archive_analyze",
+    }
+
+    HEALTH_TARGET_TYPES = {
+        TaskSchedule.TARGET_TYPE_INSTAGRAM_FEED,
+        TaskSchedule.TARGET_TYPE_GOOGLE_SEARCH,
     }
 
     def __init__(self, db: Session):
@@ -211,6 +217,40 @@ class TaskScheduleService:
                 "active_pin_count": active_pin_count,
                 "legacy_candidate_count": legacy_candidate_count,
             },
+        }
+
+    def get_schedule_health(self, schedule: TaskSchedule, *, days: int = 1) -> dict[str, Any]:
+        """Return operational time-window health for crawl schedules."""
+        if not schedule.enabled:
+            return {
+                "health": "ok",
+                "reason": "disabled",
+                "candidate_count": None,
+                "requires_time_window_repair": False,
+            }
+        if schedule.schedule_type != TaskSchedule.SCHEDULE_TYPE_TIME_WINDOW:
+            return {
+                "health": "ok",
+                "reason": "not_time_window",
+                "candidate_count": None,
+                "requires_time_window_repair": False,
+            }
+        if schedule.target_type not in self.HEALTH_TARGET_TYPES:
+            return {
+                "health": "ok",
+                "reason": "target_type_not_checked",
+                "candidate_count": None,
+                "requires_time_window_repair": False,
+            }
+
+        summary = build_time_window_candidate_summary(schedule.schedule_value, days=days)
+        return {
+            "health": summary["health"],
+            "reason": summary["reason"],
+            "candidate_count": summary["candidate_count"],
+            "requires_time_window_repair": summary["has_exact_time_window"],
+            "daily_runs": summary["daily_runs"],
+            "time_window_count": summary["time_window_count"],
         }
 
     def get_scheduler_runtime_summary(self, recent_limit: int = 50) -> dict[str, Any]:
