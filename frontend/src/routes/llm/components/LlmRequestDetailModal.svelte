@@ -40,6 +40,9 @@
 	<div
 		class="bg-white rounded-xl max-w-2xl w-full max-h-[90vh] overflow-auto"
 		onclick={(e) => e.stopPropagation()}
+		onkeydown={(e) => e.stopPropagation()}
+		role="document"
+		tabindex="-1"
 	>
 		<div class="p-6">
 			<div class="flex justify-between items-start mb-4">

@@ -60,8 +60,9 @@
 
 		<div class="space-y-4">
 			<div>
-				<label class="block text-sm font-medium text-foreground mb-1">프리셋</label>
+				<label for="llm-create-preset" class="block text-sm font-medium text-foreground mb-1">프리셋</label>
 				<select
+					id="llm-create-preset"
 					value={selectedPreset.label}
 					onchange={(e) => {
 						const found = presets.find(preset => preset.label === (e.target as HTMLSelectElement).value);
@@ -76,24 +77,25 @@
 			</div>
 
 			<div>
-				<label class="block text-sm font-medium text-foreground mb-1">큐</label>
-				<select bind:value={createForm.queue_name} class="w-full px-3 py-2 border border-border rounded-lg">
+				<label for="llm-create-queue" class="block text-sm font-medium text-foreground mb-1">큐</label>
+				<select id="llm-create-queue" bind:value={createForm.queue_name} class="w-full px-3 py-2 border border-border rounded-lg">
 					<option value="utility">utility (일반 자동화)</option>
 					<option value="system">system (시스템/개발, 우선순위 높음)</option>
 				</select>
 			</div>
 
 			<div>
-				<label class="block text-sm font-medium text-foreground mb-1">호출자 타입</label>
-				<select bind:value={createForm.caller_type} class="w-full px-3 py-2 border border-border rounded-lg">
+				<label for="llm-create-caller-type" class="block text-sm font-medium text-foreground mb-1">호출자 타입</label>
+				<select id="llm-create-caller-type" bind:value={createForm.caller_type} class="w-full px-3 py-2 border border-border rounded-lg">
 					<option value="test">test</option>
 					<option value="instagram">instagram</option>
 				</select>
 			</div>
 
 			<div>
-				<label class="block text-sm font-medium text-foreground mb-1">호출자 ID *</label>
+				<label for="llm-create-caller-id" class="block text-sm font-medium text-foreground mb-1">호출자 ID *</label>
 				<input
+					id="llm-create-caller-id"
 					type="text"
 					bind:value={createForm.caller_id}
 					placeholder="예: 123"
@@ -111,8 +113,9 @@
 
 			{#if selectedPreset.label === '(직접 입력)'}
 				<div>
-					<label class="block text-sm font-medium text-foreground mb-1">프롬프트 *</label>
+					<label for="llm-create-prompt" class="block text-sm font-medium text-foreground mb-1">프롬프트 *</label>
 					<textarea
+						id="llm-create-prompt"
 						bind:value={createForm.prompt}
 						rows="6"
 						placeholder="LLM에 전달할 프롬프트를 입력하세요..."
@@ -121,7 +124,9 @@
 				</div>
 			{:else}
 				<div>
+					<label for="llm-create-user-input" class="sr-only">프롬프트 입력</label>
 					<textarea
+						id="llm-create-user-input"
 						bind:value={createForm.userInput}
 						rows="6"
 						placeholder={selectedPreset.userPromptPlaceholder ?? '내용을 입력하세요...'}
@@ -132,16 +137,18 @@
 
 			<div class="grid grid-cols-2 gap-4">
 				<div>
-					<label class="block text-sm font-medium text-foreground mb-1">요청자</label>
+					<label for="llm-create-requested-by" class="block text-sm font-medium text-foreground mb-1">요청자</label>
 					<input
+						id="llm-create-requested-by"
 						type="text"
 						bind:value={createForm.requested_by}
 						class="w-full px-3 py-2 border border-border rounded-lg"
 					/>
 				</div>
 				<div>
-					<label class="block text-sm font-medium text-foreground mb-1">출처</label>
+					<label for="llm-create-request-source" class="block text-sm font-medium text-foreground mb-1">출처</label>
 					<input
+						id="llm-create-request-source"
 						type="text"
 						bind:value={createForm.request_source}
 						class="w-full px-3 py-2 border border-border rounded-lg"
