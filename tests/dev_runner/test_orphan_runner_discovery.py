@@ -6,10 +6,18 @@ import fakeredis
 import pytest
 
 from app.modules.dev_runner.services import executor_service as executor_module
+from app.modules.dev_runner.services import visibility
 from app.modules.dev_runner.services.executor_service import ExecutorService
 
 
-def _write_log(log_dir: Path, runner_id: str, plan_file: str = "docs/plan/orphan.md", *, body: str | None = None) -> Path:
+def _write_plan_evidence(log_dir: Path, plan_file: str) -> None:
+    plan_path = log_dir.parent / ".worktrees" / "plans" / Path(plan_file.replace("\\", "/"))
+    plan_path.parent.mkdir(parents=True, exist_ok=True)
+    plan_path.write_text("# orphan evidence\n", encoding="utf-8")
+
+
+def _write_log(log_dir: Path, runner_id: str, plan_file: str = "docs/plan/2026-05-20_orphan-real.md", *, body: str | None = None) -> Path:
+    _write_plan_evidence(log_dir, plan_file)
     log_path = log_dir / f"plan-runner-stream-{runner_id}-20260505_230000.log"
     log_path.write_text(
         body
@@ -42,6 +50,7 @@ def orphan_service(tmp_path, monkeypatch):
     log_dir.mkdir()
     monkeypatch.setattr(executor_module.config, "LOG_DIR", log_dir)
     monkeypatch.setattr(executor_module.config, "WTOOLS_BASE_DIR", tmp_path)
+    monkeypatch.setattr(visibility, "_project_root", lambda: tmp_path)
     return service, log_dir
 
 
@@ -49,7 +58,7 @@ def orphan_service(tmp_path, monkeypatch):
 async def test_discover_orphan_runners_right_log_and_process_evidence(orphan_service, monkeypatch):
     service, log_dir = orphan_service
     runner_id = "abc12345"
-    plan_file = "docs/plan/orphan.md"
+    plan_file = "docs/plan/2026-05-20_orphan-parent.md"
     _write_log(log_dir, runner_id, plan_file)
     monkeypatch.setattr(service, "_list_live_runner_processes", lambda: [{
         "pid": 4321,
@@ -88,7 +97,7 @@ async def test_discover_orphan_runners_boundary_log_only_no_process(orphan_servi
 async def test_discover_orphan_runners_boundary_child_only_claude(orphan_service, monkeypatch):
     service, log_dir = orphan_service
     runner_id = "abc12345"
-    plan_file = "docs/plan/orphan.md"
+    plan_file = "docs/plan/2026-05-20_orphan-child.md"
     _write_log(log_dir, runner_id, plan_file)
     monkeypatch.setattr(service, "_list_live_runner_processes", lambda: [{
         "pid": 6543,

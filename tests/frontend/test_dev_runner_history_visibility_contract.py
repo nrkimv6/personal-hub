@@ -5,6 +5,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 API_FILE = ROOT / "frontend" / "src" / "lib" / "api" / "dev-runner.ts"
+DEV_RUNNER_TAB = ROOT / "frontend" / "src" / "routes" / "automation" / "DevRunnerTab.svelte"
 COMPONENTS = [
     ROOT / "frontend" / "src" / "lib" / "components" / "dev-runner" / "LogHistoryPanel.svelte",
     ROOT / "frontend" / "src" / "lib" / "components" / "dev-runner" / "RunHistoryPanel.svelte",
@@ -59,3 +60,13 @@ def test_no_dummy_plan_names_in_fixture_visible_history_R() -> None:
 
     assert "visible-user-plan.md" in rendered_names
     assert rendered_names.isdisjoint(dummy_plan_names)
+
+
+def test_dev_runner_tab_does_not_restore_trigger_only_visibility() -> None:
+    """R: live tab mapping trusts backend visible=false instead of trigger fallback."""
+    source = _read(DEV_RUNNER_TAB)
+
+    assert "return runner.trigger === 'user' || runner.trigger === 'user:all';" not in source
+    assert "return false;" in source
+    assert "if (tab.visible === false) return false;" in source
+    assert "visible: runner.visible === true" in source
