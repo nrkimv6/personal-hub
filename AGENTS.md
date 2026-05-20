@@ -98,6 +98,13 @@ git worktree list | grep -q ".worktrees/plans" || git worktree add .worktrees/pl
 - `D:\work\project\tools\common\commit.ps1`, `commit.sh`, `version-bump.ps1`, `version-bump.sh` 같은 legacy common script는 `common\tools` helper surface가 아니다. helper missing과 섞어 판단하지 않는다.
 - mirror 문서를 직접 고쳐 child 경로 문제를 해결하지 않는다. 진단은 project-owned `scripts\diagnostics\check-helper-contract.ps1`를 사용한다.
 
+## Codex Browser Artifacts
+
+- Codex Browser 조사에서 `browser_snapshot`, `browser_take_screenshot`, `browser_evaluate` 등의 `filename`을 repo root 상대경로로 지정하지 않는다.
+- 스냅샷, 스크린샷, 평가 JSON 같은 증거 파일을 남겨야 하면 `.tmp/codex-browser-artifacts/` 또는 `logs/` 하위만 사용한다.
+- root 직하위 untracked 증거 파일은 보존하지 않는다. 필요한 내용은 요약 문서에 옮기거나 ignored evidence 경로에 둔다.
+- 브라우저 조사 후 closeout 전에 `git status --short --untracked-files=all`와 `& ".\scripts\diagnostics\check-root-artifacts.ps1"`로 자기 산출물 잔여를 확인한다.
+
 ## Proxy Operations
 
 - 공유 프록시는 `proxy_list_get.txt` / `proxy_list_post.txt`를 우선 읽고, 파일이 없으면 `proxy_list.txt`로 fallback한다.
