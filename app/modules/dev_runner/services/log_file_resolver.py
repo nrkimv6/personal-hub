@@ -3,6 +3,7 @@
 import hashlib
 import os
 import re
+import time
 from pathlib import Path
 from typing import Optional
 
@@ -96,7 +97,14 @@ class LogFileResolver:
         runner_id = match.group("runner_id").strip()
         return runner_id or None
 
-    def discover_runner_log_evidence(self, log_dir: Optional[Path] = None) -> dict[str, dict]:
+    def discover_runner_log_evidence(
+        self,
+        log_dir: Optional[Path] = None,
+        *,
+        max_age_seconds: int | None = None,
+        require_header: bool = False,
+        allowed_triggers: set[str] | None = None,
+    ) -> dict[str, dict]:
         """runner_id별 최신 표시 로그와 header 메타를 반환한다."""
         log_dir = log_dir or self.get_log_dir()
         if not log_dir.exists():
@@ -133,6 +141,15 @@ class LogFileResolver:
                 log_mtime = stat.st_mtime
             except OSError:
                 log_mtime = None
+            if max_age_seconds is not None and log_mtime is not None:
+                if time.time() - float(log_mtime) > max_age_seconds:
+                    continue
+            if require_header and "log_header_missing" in warnings:
+                continue
+            if "runner_id_mismatch" in warnings:
+                continue
+            if allowed_triggers is not None and meta.get("trigger") not in allowed_triggers:
+                continue
             result[runner_id] = {
                 "runner_id": runner_id,
                 "log_file": str(selected),

@@ -1,4 +1,6 @@
 from pathlib import Path
+import os
+import time
 
 import fakeredis
 import pytest
@@ -20,6 +22,11 @@ def _write_log(log_dir: Path, runner_id: str, plan_file: str = "docs/plan/orphan
         encoding="utf-8",
     )
     return log_path
+
+
+def _make_old(path: Path, seconds: int = 172800) -> None:
+    ts = time.time() - seconds
+    os.utime(path, (ts, ts))
 
 
 @pytest.fixture
@@ -106,6 +113,86 @@ async def test_discover_orphan_runners_boundary_empty_redis_no_live(orphan_servi
     monkeypatch.setattr(service, "_list_live_runner_processes", lambda: [])
 
     assert await service.discover_orphan_runners() == []
+
+
+def test_match_process_requires_runner_or_plan_evidence(orphan_service):
+    service, _log_dir = orphan_service
+
+    match = service._match_process_for_log_candidate(
+        "old-runner",
+        {"engine": "codex", "plan": "docs/plan/old.md"},
+        [{
+            "pid": 9999,
+            "pid_kind": "child_engine",
+            "engine": "codex",
+            "runner_id": None,
+            "plan_file": None,
+            "cmdline": "codex --some-current-session",
+        }],
+    )
+
+    assert match is None
+
+
+@pytest.mark.asyncio
+async def test_discover_orphans_filters_old_log_only_user_runners(orphan_service, monkeypatch):
+    service, log_dir = orphan_service
+    log_path = _write_log(log_dir, "old-user-runner")
+    _make_old(log_path)
+    monkeypatch.setattr(service, "_list_live_runner_processes", lambda: [])
+
+    candidates = await service.discover_orphan_runners()
+
+    assert candidates == []
+
+
+@pytest.mark.asyncio
+async def test_discover_orphans_keeps_recent_high_confidence_parent_runner(orphan_service, monkeypatch):
+    service, log_dir = orphan_service
+    runner_id = "recent-parent"
+    plan_file = "docs/plan/recent-parent.md"
+    _write_log(log_dir, runner_id, plan_file)
+    monkeypatch.setattr(service, "_list_live_runner_processes", lambda: [{
+        "pid": 2026,
+        "pid_kind": "parent",
+        "plan_file": plan_file,
+        "engine": "claude",
+        "runner_id": runner_id,
+        "cmdline": f"python -m plan_runner run --runner-id {runner_id} --plan-file {plan_file} --engine claude",
+    }])
+
+    candidates = await service.discover_orphan_runners()
+
+    assert [c.runner_id for c in candidates] == [runner_id]
+    assert candidates[0].confidence == "high"
+    assert candidates[0].can_reattach is True
+
+
+@pytest.mark.asyncio
+async def test_discover_orphans_filters_test_trigger_candidates(orphan_service, monkeypatch):
+    service, log_dir = orphan_service
+    runner_id = "tc-pytest-orphan"
+    _write_log(
+        log_dir,
+        runner_id,
+        body=(
+            f"[TRIGGER] tc:orphan | plan=docs/plan/test.md | engine=claude | runner_id={runner_id}\n"
+            "[RUN_META] started_at=2026-05-20T10:00:00 | execution_count=1 | plan_key=docs/plan/test.md\n"
+            "test output\n"
+        ),
+    )
+    monkeypatch.setattr(service, "_list_live_runner_processes", lambda: [{
+        "pid": 3030,
+        "pid_kind": "parent",
+        "plan_file": "docs/plan/test.md",
+        "engine": "claude",
+        "runner_id": runner_id,
+        "cmdline": f"python -m plan_runner run --runner-id {runner_id} --plan-file docs/plan/test.md",
+    }])
+
+    candidates = await service.discover_orphan_runners()
+
+    assert candidates == []
 
 
 @pytest.mark.asyncio

@@ -139,6 +139,7 @@ export interface OrphanRunnerCandidate {
 	reattach_mode: 'full' | 'log_only_child' | 'log_only';
 	can_reattach: boolean;
 	can_force_kill: boolean;
+	visible?: boolean;
 	warnings: string[];
 }
 
