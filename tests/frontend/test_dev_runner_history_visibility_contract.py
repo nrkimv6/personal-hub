@@ -69,4 +69,5 @@ def test_dev_runner_tab_does_not_restore_trigger_only_visibility() -> None:
     assert "return runner.trigger === 'user' || runner.trigger === 'user:all';" not in source
     assert "return false;" in source
     assert "if (tab.visible === false) return false;" in source
-    assert "visible: runner.visible === true" in source
+    assert "visible: runner.visible," in source
+    assert "if (tab.visible === true) return true;" in source
