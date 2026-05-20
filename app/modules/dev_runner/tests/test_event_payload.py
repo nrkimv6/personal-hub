@@ -8,6 +8,7 @@ fakeredis 주입 단위 테스트 — conftest의 sync_redis, event_service fixt
 import time
 import pytest
 
+from app.modules.dev_runner.services import visibility
 from app.modules.dev_runner.services.event_payload import (
     build_status_payload,
     build_all_runners_status,
@@ -143,11 +144,18 @@ class TestBuildStatusPayload:
         assert payload["branch_merged_to_main"] == "unknown"
         assert payload["metadata_checked_at"] == "unknown"
 
-    def test_build_status_payload_includes_visible_field(self, event_service, sync_redis):
-        """R: trigger=user면 visible=True, trigger=api면 visible=False."""
+    def test_build_status_payload_includes_visible_field(self, event_service, sync_redis, tmp_path, monkeypatch):
+        """R: trigger=user + 실제 plan evidence면 visible=True, trigger=api면 visible=False."""
+        plans_dir = tmp_path / ".worktrees" / "plans" / "docs" / "plan"
+        plans_dir.mkdir(parents=True)
+        plan_name = "2026-05-20_real-user-plan.md"
+        (plans_dir / plan_name).write_text("# real\n", encoding="utf-8")
+        monkeypatch.setattr(visibility, "_project_root", lambda: tmp_path)
+
         rid_user = "visible-user-01"
         sync_redis.set(f"{RUNNER_KEY_PREFIX}:{rid_user}:status", "running")
         sync_redis.set(f"{RUNNER_KEY_PREFIX}:{rid_user}:trigger", "user")
+        sync_redis.set(f"{RUNNER_KEY_PREFIX}:{rid_user}:plan_file", f"docs/plan/{plan_name}")
         payload_user = build_status_payload(event_service._sync, rid_user)
         assert payload_user is not None
         assert payload_user["visible"] is True
@@ -245,6 +253,13 @@ class TestBuildStatusPayload:
 # ─── TestBuildAllRunnersStatus ────────────────────────────────────────────────
 
 class TestBuildAllRunnersStatus:
+    def _real_plan_file(self, tmp_path, monkeypatch, name: str = "2026-05-20_real-user-plan.md") -> str:
+        plans_dir = tmp_path / ".worktrees" / "plans" / "docs" / "plan"
+        plans_dir.mkdir(parents=True, exist_ok=True)
+        (plans_dir / name).write_text("# real\n", encoding="utf-8")
+        monkeypatch.setattr(visibility, "_project_root", lambda: tmp_path)
+        return f"docs/plan/{name}"
+
     def _register_runner(
         self,
         redis,
@@ -288,16 +303,26 @@ class TestBuildAllRunnersStatus:
         ids = [r["runner_id"] for r in result]
         assert "emptytrigger_runner01" not in ids
 
-    def test_build_all_runners_includes_user_trigger(self, event_service, sync_redis):
-        """R: trigger="user" runner → 결과에 포함"""
-        self._register_runner(sync_redis, "user_runner01", trigger="user")
+    def test_build_all_runners_includes_user_trigger(self, event_service, sync_redis, tmp_path, monkeypatch):
+        """R: trigger="user" + 실제 plan evidence runner → 결과에 포함"""
+        self._register_runner(
+            sync_redis,
+            "user_runner01",
+            trigger="user",
+            plan_file=self._real_plan_file(tmp_path, monkeypatch),
+        )
         result = build_all_runners_status(event_service._sync)
         ids = [r["runner_id"] for r in result]
         assert "user_runner01" in ids
 
-    def test_build_all_runners_includes_user_all_trigger(self, event_service, sync_redis):
-        """R: trigger="user:all" runner → 결과에 포함"""
-        self._register_runner(sync_redis, "userall_runner01", trigger="user:all")
+    def test_build_all_runners_includes_user_all_trigger(self, event_service, sync_redis, tmp_path, monkeypatch):
+        """R: trigger="user:all" + 실제 plan evidence runner → 결과에 포함"""
+        self._register_runner(
+            sync_redis,
+            "userall_runner01",
+            trigger="user:all",
+            plan_file=self._real_plan_file(tmp_path, monkeypatch),
+        )
         result = build_all_runners_status(event_service._sync)
         ids = [r["runner_id"] for r in result]
         assert "userall_runner01" in ids
@@ -316,28 +341,38 @@ class TestBuildAllRunnersStatus:
         ids = [r["runner_id"] for r in result]
         assert "tconly_runner01" not in ids
 
-    def test_build_all_runners_mixed(self, event_service, sync_redis):
+    def test_build_all_runners_mixed(self, event_service, sync_redis, tmp_path, monkeypatch):
         """R: tc: runner + 일반 runner 혼재 → 일반 runner만 반환"""
-        self._register_runner(sync_redis, "vis_runner01", trigger="user")
+        self._register_runner(
+            sync_redis,
+            "vis_runner01",
+            trigger="user",
+            plan_file=self._real_plan_file(tmp_path, monkeypatch),
+        )
         self._register_runner(sync_redis, "invis_runner01", trigger="tc:pytest")
         result = build_all_runners_status(event_service._sync)
         ids = [r["runner_id"] for r in result]
         assert "vis_runner01" in ids
         assert "invis_runner01" not in ids
 
-    def test_build_all_runners_includes_stopped_user_trigger(self, event_service, sync_redis):
-        """R: trigger="user" + status="stopped" runner → build_all_runners_status() 결과에 포함"""
-        self._register_runner(sync_redis, "stopped_user01", trigger="user", status="stopped")
+    def test_build_all_runners_includes_stopped_user_trigger(self, event_service, sync_redis, tmp_path, monkeypatch):
+        """R: trigger="user" + status="stopped" + 실제 plan evidence runner → 결과에 포함"""
+        self._register_runner(
+            sync_redis,
+            "stopped_user01",
+            trigger="user",
+            status="stopped",
+            plan_file=self._real_plan_file(tmp_path, monkeypatch),
+        )
         result = build_all_runners_status(event_service._sync)
         assert "stopped_user01" in [r["runner_id"] for r in result]
 
-    def test_build_all_runners_plan_file_null_for_visible_runner(self, event_service, sync_redis):
-        """R: trigger="user" + plan_file 미설정 → 결과에서 plan_file=None"""
+    def test_build_all_runners_plan_file_null_is_not_visible(self, event_service, sync_redis):
+        """R: trigger="user"라도 plan_file evidence가 없으면 결과에서 제외"""
         self._register_runner(sync_redis, "nopf_user01", trigger="user")
         result = build_all_runners_status(event_service._sync)
         matching = [r for r in result if r["runner_id"] == "nopf_user01"]
-        assert len(matching) >= 1, "nopf_user01이 결과에 없음"
-        assert matching[0]["plan_file"] is None
+        assert matching == []
 
 
 # ─── TestBuildTrackingPayload ────────────────────────────────────────────────
@@ -365,18 +400,26 @@ class TestBuildTrackingPayload:
 class TestBuildAllRunnersStatusRecentInclusion:
     """SSE build_all_runners_status()의 RECENT visible 러너 포함 검증"""
 
-    def _register_recent(self, r, runner_id: str, trigger: str | None = None):
+    def _real_plan_file(self, tmp_path, monkeypatch) -> str:
+        plans_dir = tmp_path / ".worktrees" / "plans" / "docs" / "plan"
+        plans_dir.mkdir(parents=True, exist_ok=True)
+        plan_name = "2026-05-20_real-user-plan.md"
+        (plans_dir / plan_name).write_text("# real\n", encoding="utf-8")
+        monkeypatch.setattr(visibility, "_project_root", lambda: tmp_path)
+        return f"docs/plan/{plan_name}"
+
+    def _register_recent(self, r, runner_id: str, trigger: str | None = None, plan_file: str = "docs/plan/test.md"):
         """RECENT_RUNNERS_KEY에 등록 (ACTIVE에는 미등록)"""
         r.zadd(RECENT_RUNNERS_KEY, {runner_id: time.time()})
         r.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:status", "stopped")
-        r.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:plan_file", "docs/plan/test.md")
+        r.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:plan_file", plan_file)
         if trigger is not None:
             r.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:trigger", trigger)
 
-    def test_build_all_runners_status_includes_recent_visible(self, event_service, sync_redis):
+    def test_build_all_runners_status_includes_recent_visible(self, event_service, sync_redis, tmp_path, monkeypatch):
         """R: ACTIVE 빈 + RECENT에 trigger='user' runner → 결과에 포함"""
         runner_id = "recent-vis-001"
-        self._register_recent(sync_redis, runner_id, trigger="user")
+        self._register_recent(sync_redis, runner_id, trigger="user", plan_file=self._real_plan_file(tmp_path, monkeypatch))
 
         result = build_all_runners_status(event_service._sync)
         ids = [r["runner_id"] for r in result]
@@ -399,12 +442,13 @@ class TestBuildAllRunnersStatusRecentInclusion:
             f"결과: {ids}"
         )
 
-    def test_build_all_runners_status_deduplicates_active_recent(self, event_service, sync_redis):
+    def test_build_all_runners_status_deduplicates_active_recent(self, event_service, sync_redis, tmp_path, monkeypatch):
         """B: 동일 runner_id가 ACTIVE+RECENT 모두에 존재 → 결과에 1개만 포함"""
         runner_id = "dedup-001"
+        plan_file = self._real_plan_file(tmp_path, monkeypatch)
         sync_redis.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:status", "running")
         sync_redis.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:trigger", "user")
-        sync_redis.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:plan_file", "docs/plan/test.md")
+        sync_redis.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:plan_file", plan_file)
         sync_redis.sadd(ACTIVE_RUNNERS_KEY, runner_id)
         sync_redis.zadd(RECENT_RUNNERS_KEY, {runner_id: time.time()})
 

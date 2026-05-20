@@ -18,6 +18,7 @@ from sqlalchemy.pool import StaticPool
 
 from app.modules.claude_worker.services.profile_store import LLMProfile
 from app.modules.dev_runner.schemas import RunRequest
+from app.modules.dev_runner.services import visibility
 from app.modules.dev_runner.services.executor_service import executor_service
 from app.modules.dev_runner.services.event_payload import build_status_payload
 from app.modules.dev_runner.services.state import get_state
@@ -1370,7 +1371,15 @@ class TestApprovalRequiredDivergeEvidence:
 
 # ── T5: HTTP — approval_required stopped recent runner 표시 일관성 ─────────────
 
-async def test_recent_stopped_approval_runner_visible_in_runners_R(client, mock_executor_redis):
+def _real_plan_evidence(tmp_path: Path, monkeypatch, name: str) -> str:
+    plans_dir = tmp_path / ".worktrees" / "plans" / "docs" / "plan"
+    plans_dir.mkdir(parents=True, exist_ok=True)
+    (plans_dir / name).write_text("# real approval\n", encoding="utf-8")
+    monkeypatch.setattr(visibility, "_project_root", lambda: tmp_path)
+    return f"docs/plan/{name}"
+
+
+async def test_recent_stopped_approval_runner_visible_in_runners_R(client, mock_executor_redis, tmp_path, monkeypatch):
     """T5-R: active_runners가 아닌 recent_runners의 stopped approval_required runner가 GET /runners에서 반환됨.
 
     item 14: stopped recent runner가 /runners 엔드포인트에서 display_state=approval_required로 나타난다.
@@ -1382,7 +1391,7 @@ async def test_recent_stopped_approval_runner_visible_in_runners_R(client, mock_
     await fake_async.zadd("plan-runner:recent_runners", {rid: 1})
     await fake_async.set(f"{prefix}:status", "stopped")
     await fake_async.set(f"{prefix}:trigger", "user")
-    await fake_async.set(f"{prefix}:plan_file", "docs/plan/approval-t5.md")
+    await fake_async.set(f"{prefix}:plan_file", _real_plan_evidence(tmp_path, monkeypatch, "2026-05-20_approval-t5-real.md"))
     await fake_async.set(f"{prefix}:merge_status", "approval_required")
     await fake_async.set(f"{prefix}:merge_reason", "service_lock")
 
@@ -1400,7 +1409,7 @@ async def test_recent_stopped_approval_runner_visible_in_runners_R(client, mock_
     assert r["display_label"] == "승인 필요"
 
 
-async def test_approval_required_display_consistent_between_status_and_runners_R(client, mock_executor_redis):
+async def test_approval_required_display_consistent_between_status_and_runners_R(client, mock_executor_redis, tmp_path, monkeypatch):
     """T5-R: /status와 /runners가 동일 runner에 대해 display_state·display_label을 동일하게 반환함.
 
     item 15: /status가 대표 runner로 approval_required를 선택하고 display_label=승인 필요를 반환한다.
@@ -1414,7 +1423,7 @@ async def test_approval_required_display_consistent_between_status_and_runners_R
     await fake_async.zadd("plan-runner:recent_runners", {rid: 1})
     await fake_async.set(f"{prefix}:status", "stopped")
     await fake_async.set(f"{prefix}:trigger", "user")
-    await fake_async.set(f"{prefix}:plan_file", "docs/plan/approval-t5b.md")
+    await fake_async.set(f"{prefix}:plan_file", _real_plan_evidence(tmp_path, monkeypatch, "2026-05-20_approval-t5b-real.md"))
     await fake_async.set(f"{prefix}:merge_status", "approval_required")
     await fake_async.set(f"{prefix}:merge_reason", "service_lock")
     await fake_async.set(f"{prefix}:merge_message", "MERGE_PRECHECK_FAILED[service_lock]")

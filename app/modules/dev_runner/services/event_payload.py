@@ -14,7 +14,7 @@ from app.modules.dev_runner.services.event_routing import (
     REDIS_STATE_KEY,
     MAX_RECENT_IN_SSE,
 )
-from app.modules.dev_runner.services.visibility import is_visible_runner
+from app.modules.dev_runner.services.visibility import is_visible_runner_evidence
 from app.modules.dev_runner.services.runner_display_state import build_display_state
 from app.modules.dev_runner.services.runner_read_model import build_runner_read_model
 
@@ -26,9 +26,12 @@ STATUS_FIELDS: tuple[str, ...] = (
     "start_time",
     "plan_file",
     "engine",
+    "log_file_path",
+    "stream_log_path",
     "worktree_path",
     "branch",
     "trigger",
+    "test_source",
     "merge_status",
     "merge_reason",
     "merge_message",
@@ -94,7 +97,16 @@ def build_status_payload(sync_redis, runner_id: str) -> Optional[dict]:
         values = sync_redis.mget([f"{RUNNER_KEY_PREFIX}:{runner_id}:{f}" for f in STATUS_FIELDS])
         data = dict(zip(STATUS_FIELDS, values))
         data["runner_id"] = runner_id
-        data["visible"] = is_visible_runner(data.get("trigger"), runner_id)
+        data["visible"] = is_visible_runner_evidence(
+            runner_id=runner_id,
+            trigger=data.get("trigger"),
+            plan_file=data.get("plan_file"),
+            worktree_path=data.get("worktree_path"),
+            branch=data.get("branch"),
+            status=data.get("status"),
+            test_source=data.get("test_source"),
+            log_file=data.get("stream_log_path") or data.get("log_file_path"),
+        )
         data["worktree_exists"] = _coerce_metadata_state(data.get("worktree_exists"))
         data["branch_exists"] = _coerce_metadata_state(data.get("branch_exists"))
         data["branch_merged_to_main"] = _coerce_metadata_state(data.get("branch_merged_to_main"))
