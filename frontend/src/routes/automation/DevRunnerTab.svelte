@@ -517,6 +517,7 @@
 
 	function shouldPreserveMissingRunnerTab(tab: RunnerTab): boolean {
 		if (tab.visible === false) return false;
+		if (tab.visible === true) return true;
 		if (tab.running) return true;
 		if (tab.orphan_alive || tab.can_reattach) return true;
 		return tab.confidence === 'high' || tab.confidence === 'medium';
