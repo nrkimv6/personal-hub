@@ -28,6 +28,9 @@ RESERVATION_LABELS = {
     "방문 예약",
     "사전 예약",
 }
+PLACE_ID_RE = re.compile(
+    r"(?:/place/|/popupstore/|/entry/place/)(?P<place_id>\d+)(?:[/?#]|$)"
+)
 
 
 @dataclass
@@ -115,6 +118,22 @@ def _walk_dicts(node: Any, path: str = "state") -> list[tuple[str, dict[str, Any
 
 def _normalize_url(url: str) -> str:
     return url.strip().rstrip("/")
+
+
+def extract_place_id(value: str | None) -> str | None:
+    if not value:
+        return None
+    raw = value.strip()
+    if raw.isdigit():
+        return raw
+    match = PLACE_ID_RE.search(raw)
+    if match:
+        return match.group("place_id")
+    return None
+
+
+def build_place_reservation_url(place_id: str) -> str:
+    return f"https://m.place.naver.com/popupstore/{place_id}/home"
 
 
 def _host_matches(host: str, domains: set[str]) -> bool:

@@ -13,6 +13,9 @@ from app.models.popup_url_monitor import PopupUrlMonitor
 from app.models.popup_url_monitor_run import PopupUrlMonitorRun
 from app.modules.naver_popup_monitor.services.diff_service import calculate_popup_diff
 from app.modules.naver_popup_monitor.services.fetcher import PopupFetcher
+from app.modules.naver_popup_monitor.services.place_reservation_monitor import (
+    collect_place_reservation_sample,
+)
 from app.modules.naver_popup_monitor.services.popup_parser import parse_popup_items_from_html
 from app.shared.notification import NotificationService
 
@@ -60,10 +63,52 @@ def _load_snapshot_items(snapshot_json: str | None) -> list[dict[str, Any]]:
     return []
 
 
+def _load_snapshot_available(snapshot_json: str | None) -> bool:
+    if not snapshot_json:
+        return False
+    try:
+        payload = json.loads(snapshot_json)
+    except Exception:
+        return False
+    if not isinstance(payload, dict):
+        return False
+    reservation_state = payload.get("reservation_state")
+    if not isinstance(reservation_state, dict):
+        return False
+    return bool(reservation_state.get("available"))
+
+
 def _build_notification_message(
     monitor: PopupUrlMonitor,
     outcome: PopupMonitorRunOutcome,
 ) -> str:
+    if getattr(monitor, "monitor_kind", "popup_list") == "place_reservation":
+        snapshot = None
+        if monitor.latest_snapshot_json:
+            try:
+                snapshot = json.loads(monitor.latest_snapshot_json)
+            except Exception:
+                snapshot = None
+        reservation_state = snapshot.get("reservation_state", {}) if isinstance(snapshot, dict) else {}
+        signals = snapshot.get("signals", []) if isinstance(snapshot, dict) else []
+        signal_lines = []
+        for signal in signals:
+            if not isinstance(signal, dict):
+                continue
+            detail = signal.get("url") or signal.get("value") or "-"
+            signal_lines.append(f"- {signal.get('kind') or 'signal'}: {detail}")
+        signal_text = "\n".join(signal_lines) if signal_lines else "- signal: available"
+        return (
+            "[네이버 Place 예약 신호 감지]\n"
+            f"- monitor_id: {monitor.id}\n"
+            f"- name: {monitor.name or '(unnamed)'}\n"
+            f"- url: {monitor.url}\n"
+            f"- bookingBusinessId: {reservation_state.get('booking_business_id') or '-'}\n"
+            f"- bookingUrl: {reservation_state.get('booking_url') or '-'}\n"
+            f"- ticket_count: {reservation_state.get('ticket_count') or 0}\n"
+            f"{signal_text}"
+        )
+
     return (
         "[네이버 팝업 URL 모니터] 신규 항목 감지\n"
         f"- monitor_id: {monitor.id}\n"
@@ -92,6 +137,17 @@ class PopupMonitorService:
         monitor: PopupUrlMonitor,
         *,
         trigger: str = "manual",
+    ) -> PopupMonitorRunOutcome:
+        if getattr(monitor, "monitor_kind", "popup_list") == "place_reservation":
+            return await self._run_place_reservation_once(db, monitor, trigger=trigger)
+        return await self._run_popup_list_once(db, monitor, trigger=trigger)
+
+    async def _run_popup_list_once(
+        self,
+        db: Session,
+        monitor: PopupUrlMonitor,
+        *,
+        trigger: str,
     ) -> PopupMonitorRunOutcome:
         started_at = datetime.now()
         fetch_result = await self._fetcher.fetch_popup_html(
@@ -182,6 +238,140 @@ class PopupMonitorService:
             monitor.latest_snapshot_json = snapshot_json
             monitor.latest_snapshot_hash = snapshot_hash
             monitor.latest_checked_at = finished_at
+            monitor.updated_at = finished_at
+
+        db.commit()
+        db.refresh(run)
+        db.refresh(monitor)
+
+        outcome = PopupMonitorRunOutcome(
+            monitor_id=monitor.id,
+            run_id=run.id,
+            status=run.status,
+            new_count=run.new_count,
+            has_new=bool(run.has_new),
+            request_profile=run.request_profile,
+            proxy_url=run.proxy_url,
+            fallback_applied=bool(run.fallback_applied),
+            error_message=run.error_message,
+        )
+        await self._notify_if_needed(monitor, outcome)
+        return outcome
+
+    async def _run_place_reservation_once(
+        self,
+        db: Session,
+        monitor: PopupUrlMonitor,
+        *,
+        trigger: str,
+    ) -> PopupMonitorRunOutcome:
+        started_at = datetime.now()
+        sample = await collect_place_reservation_sample(
+            self._fetcher,
+            monitor.url,
+            browser_fallback_enabled=bool(monitor.browser_fallback_enabled),
+            request_profile=monitor.request_profile,
+            fallback_strategy=monitor.fallback_strategy,
+            monitor_proxy_enabled=bool(monitor.proxy_enabled),
+        )
+        finished_at = datetime.now()
+        fetch_result = sample.get("http_result")
+
+        if not sample.get("ok"):
+            db.refresh(monitor)
+            error_message = "; ".join(sample.get("errors") or []) or "place_reservation_fetch_failed"
+            run = PopupUrlMonitorRun(
+                monitor_id=monitor.id,
+                status="error",
+                new_count=0,
+                has_new=False,
+                proxy_url=getattr(fetch_result, "proxy_url", None),
+                request_profile=getattr(fetch_result, "request_profile", None) or monitor.request_profile,
+                fallback_applied=bool(getattr(fetch_result, "fallback_applied", False)),
+                snapshot_json=None,
+                error_message=error_message,
+                started_at=started_at,
+                finished_at=finished_at,
+            )
+            db.add(run)
+            if self._should_update_latest(monitor, started_at):
+                monitor.latest_checked_at = finished_at
+                monitor.updated_at = finished_at
+            db.commit()
+            db.refresh(run)
+            db.refresh(monitor)
+            return PopupMonitorRunOutcome(
+                monitor_id=monitor.id,
+                run_id=run.id,
+                status=run.status,
+                new_count=0,
+                has_new=False,
+                request_profile=run.request_profile,
+                proxy_url=run.proxy_url,
+                fallback_applied=bool(run.fallback_applied),
+                error_message=run.error_message,
+            )
+
+        db.refresh(monitor)
+        reservation_state = sample["reservation_state"]
+        signals = sample.get("signals") or []
+        previous_available = _load_snapshot_available(monitor.latest_snapshot_json)
+        current_available = bool(reservation_state.get("available"))
+        has_new = (not previous_available) and current_available
+        new_count = max(1, len(signals)) if has_new else 0
+
+        snapshot_payload = {
+            "reservation_state": reservation_state,
+            "signals": signals,
+            "source": sample.get("source") or {},
+            "meta": {
+                "monitor_kind": "place_reservation",
+                "trigger": trigger,
+                "checked_at": finished_at.isoformat(),
+                "request_profile": getattr(fetch_result, "request_profile", None) or monitor.request_profile,
+                "proxy_url": getattr(fetch_result, "proxy_url", None),
+                "fallback_applied": bool(getattr(fetch_result, "fallback_applied", False)),
+                "fetch_status": getattr(fetch_result, "status", None),
+                "fetch_final_url": getattr(fetch_result, "final_url", None),
+                "errors": sample.get("errors") or [],
+            },
+            "diff": {
+                "previous_available": previous_available,
+                "available": current_available,
+                "new_count": new_count,
+                "has_new": has_new,
+            },
+        }
+        snapshot_json = json.dumps(snapshot_payload, ensure_ascii=False)
+        snapshot_hash = hashlib.sha256(snapshot_json.encode("utf-8")).hexdigest()
+        run_status = "partial" if sample.get("errors") else "success"
+        error_message = "; ".join(sample.get("errors") or []) or None
+
+        run = PopupUrlMonitorRun(
+            monitor_id=monitor.id,
+            status=run_status,
+            new_count=new_count,
+            has_new=has_new,
+            proxy_url=getattr(fetch_result, "proxy_url", None),
+            request_profile=getattr(fetch_result, "request_profile", None) or monitor.request_profile,
+            fallback_applied=bool(getattr(fetch_result, "fallback_applied", False)),
+            snapshot_json=snapshot_json,
+            error_message=error_message,
+            started_at=started_at,
+            finished_at=finished_at,
+        )
+        db.add(run)
+
+        should_update_latest = self._should_update_latest(monitor, started_at)
+        if should_update_latest:
+            monitor.latest_snapshot_json = snapshot_json
+            monitor.latest_snapshot_hash = snapshot_hash
+            monitor.latest_checked_at = finished_at
+            monitor.updated_at = finished_at
+
+        if has_new and bool(monitor.stop_on_detected) and should_update_latest:
+            monitor.is_enabled = False
+            monitor.detected_at = finished_at
             monitor.updated_at = finished_at
 
         db.commit()

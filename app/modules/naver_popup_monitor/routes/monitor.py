@@ -17,8 +17,13 @@ from app.modules.naver_popup_monitor.schemas import (
     RequestProfileLiteral,
 )
 from app.modules.naver_popup_monitor.services.monitor_service import PopupMonitorService
+from app.modules.naver_popup_monitor.services.place_reservation import (
+    build_place_reservation_url,
+    extract_place_id,
+)
 
 MonitoringModeLiteral = Literal["anonymous", "legacy"]
+MonitorKindLiteral = Literal["popup_list", "place_reservation"]
 
 router = APIRouter(prefix="/api/v1/naver-popup", tags=["네이버 팝업 URL 모니터"])
 monitor_service = PopupMonitorService()
@@ -27,11 +32,13 @@ monitor_service = PopupMonitorService()
 class PopupMonitorCreateRequest(BaseModel):
     name: str | None = None
     url: str
+    monitor_kind: MonitorKindLiteral = "popup_list"
     request_profile: RequestProfileLiteral = "A"
     fallback_strategy: FallbackStrategyLiteral = "reinforce"
     proxy_enabled: bool = False
     notify_on_new: bool = True
     min_new_count: int = Field(default=1, ge=1)
+    stop_on_detected: bool | None = None
     monitoring_mode: MonitoringModeLiteral = "anonymous"
     service_account_id: int | None = None
     browser_fallback_enabled: bool = False
@@ -41,11 +48,13 @@ class PopupMonitorCreateRequest(BaseModel):
 class PopupMonitorUpdateRequest(BaseModel):
     name: str | None = None
     url: str | None = None
+    monitor_kind: MonitorKindLiteral | None = None
     request_profile: RequestProfileLiteral | None = None
     fallback_strategy: FallbackStrategyLiteral | None = None
     proxy_enabled: bool | None = None
     notify_on_new: bool | None = None
     min_new_count: int | None = Field(default=None, ge=1)
+    stop_on_detected: bool | None = None
     monitoring_mode: MonitoringModeLiteral | None = None
     service_account_id: int | None = None
     browser_fallback_enabled: bool | None = None
@@ -56,11 +65,14 @@ class PopupMonitorResponse(BaseModel):
     id: int
     name: str | None
     url: str
+    monitor_kind: MonitorKindLiteral
     request_profile: RequestProfileLiteral
     fallback_strategy: FallbackStrategyLiteral
     proxy_enabled: bool
     notify_on_new: bool
     min_new_count: int
+    stop_on_detected: bool
+    detected_at: datetime | None
     monitoring_mode: MonitoringModeLiteral
     service_account_id: int | None
     browser_fallback_enabled: bool
@@ -132,18 +144,38 @@ def _validate_service_account(service_account_id: int | None, db: Session) -> No
         )
 
 
+def _canonicalize_monitor_url(monitor_kind: str, url: str) -> str:
+    if monitor_kind != "place_reservation":
+        return url
+    place_id = extract_place_id(url)
+    if not place_id:
+        raise HTTPException(
+            status_code=400,
+            detail="place_reservation monitor requires a Naver Place URL or place id",
+        )
+    return build_place_reservation_url(place_id)
+
+
 @router.post("/monitors", status_code=status.HTTP_201_CREATED, response_model=PopupMonitorResponse)
 def create_monitor(body: PopupMonitorCreateRequest, db: Session = Depends(get_db)):
     _validate_service_account(body.service_account_id, db)
+    url = _canonicalize_monitor_url(body.monitor_kind, body.url)
+    stop_on_detected = (
+        body.monitor_kind == "place_reservation"
+        if body.stop_on_detected is None
+        else body.stop_on_detected
+    )
 
     monitor = PopupUrlMonitor(
         name=body.name,
-        url=body.url,
+        url=url,
+        monitor_kind=body.monitor_kind,
         request_profile=body.request_profile,
         fallback_strategy=body.fallback_strategy,
         proxy_enabled=body.proxy_enabled,
         notify_on_new=body.notify_on_new,
         min_new_count=body.min_new_count,
+        stop_on_detected=stop_on_detected,
         monitoring_mode=body.monitoring_mode,
         service_account_id=body.service_account_id,
         browser_fallback_enabled=body.browser_fallback_enabled,
@@ -178,8 +210,20 @@ def update_monitor(
     monitor = _get_monitor_or_404(monitor_id, db)
 
     values = body.model_dump(exclude_unset=True)
+    if values.get("stop_on_detected") is None:
+        values.pop("stop_on_detected", None)
     if "service_account_id" in values:
         _validate_service_account(values["service_account_id"], db)
+    next_kind = values.get("monitor_kind", monitor.monitor_kind)
+    if "url" in values or "monitor_kind" in values:
+        values["url"] = _canonicalize_monitor_url(next_kind, values.get("url", monitor.url))
+    if (
+        "monitor_kind" in values
+        and values["monitor_kind"] == "place_reservation"
+        and monitor.monitor_kind != "place_reservation"
+        and "stop_on_detected" not in values
+    ):
+        values["stop_on_detected"] = True
 
     for field, value in values.items():
         setattr(monitor, field, value)

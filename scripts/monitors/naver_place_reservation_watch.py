@@ -15,7 +15,13 @@ from app.modules.naver_popup_monitor.services.fetcher import PopupFetcher
 from app.modules.naver_popup_monitor.services.place_reservation import (
     ReservationSignal,
     ReservationState,
+    build_place_reservation_url,
     extract_place_reservation_state,
+)
+from app.modules.naver_popup_monitor.services.place_reservation_monitor import (
+    collect_place_reservation_sample,
+    merge_reservation_states,
+    reservation_state_from_payload,
 )
 from app.shared.notification import NotificationService
 
@@ -45,7 +51,7 @@ class WatchWindow:
 
 
 def build_place_url(place_id: str) -> str:
-    return f"https://m.place.naver.com/popupstore/{place_id}/home"
+    return build_place_reservation_url(place_id)
 
 
 def parse_until(value: str, *, now: datetime | None = None) -> datetime:
@@ -142,25 +148,7 @@ def build_alert_message(source_url: str, state: ReservationState) -> str:
 
 
 def state_from_payload(payload: dict[str, Any]) -> ReservationState:
-    state = ReservationState(
-        available=bool(payload.get("available")),
-        booking_business_id=payload.get("booking_business_id"),
-        booking_url=payload.get("booking_url"),
-        ticket_count=int(payload.get("ticket_count") or 0),
-        concrete_links=list(payload.get("concrete_links") or []),
-    )
-    for signal in payload.get("signals") or []:
-        if not isinstance(signal, dict):
-            continue
-        state.signals.append(
-            ReservationSignal(
-                kind=str(signal.get("kind") or ""),
-                path=str(signal.get("path") or ""),
-                value=signal.get("value"),
-                url=signal.get("url"),
-            )
-        )
-    return state
+    return reservation_state_from_payload(payload)
 
 
 async def fetch_http_state(fetcher: PopupFetcher, url: str) -> tuple[ReservationState, dict[str, Any]]:
@@ -205,61 +193,29 @@ async def fetch_playwright_state(url: str) -> tuple[ReservationState, dict[str, 
 
 
 def merge_states(states: list[ReservationState]) -> ReservationState:
-    merged = ReservationState()
-    seen_signals: set[tuple[str, str, str | None]] = set()
-    seen_links: set[str] = set()
-    for state in states:
-        merged.available = merged.available or state.available
-        merged.booking_business_id = merged.booking_business_id or state.booking_business_id
-        merged.booking_url = merged.booking_url or state.booking_url
-        merged.ticket_count = max(merged.ticket_count, state.ticket_count)
-        for link in state.concrete_links:
-            if link not in seen_links:
-                seen_links.add(link)
-                merged.concrete_links.append(link)
-        for signal in state.signals:
-            key = (signal.kind, signal.path, signal.url)
-            if key not in seen_signals:
-                seen_signals.add(key)
-                merged.signals.append(signal)
-    return merged
+    return merge_reservation_states(states)
 
 
 async def collect_sample(fetcher: PopupFetcher, url: str) -> dict[str, Any]:
-    checked_at = datetime.now(KST)
-    states: list[ReservationState] = []
-    source_meta: dict[str, Any] = {}
-    errors: list[str] = []
-
-    try:
-        http_state, http_meta = await fetch_http_state(fetcher, url)
-        states.append(http_state)
-        source_meta["http"] = http_meta
-    except Exception as exc:
-        errors.append(f"http: {exc}")
-
-    try:
-        playwright_state, playwright_meta = await fetch_playwright_state(url)
-        states.append(playwright_state)
-        source_meta["playwright"] = playwright_meta
-    except Exception as exc:
-        errors.append(f"playwright: {exc}")
-
-    if not states:
+    sample = await collect_place_reservation_sample(
+        fetcher,
+        url,
+        browser_fallback_enabled=True,
+    )
+    if not sample.get("ok"):
         return {
-            "checked_at": checked_at.isoformat(),
+            "checked_at": sample["checked_at"],
             "ok": False,
-            "errors": errors,
+            "errors": sample.get("errors") or [],
         }
 
-    state = merge_states(states)
     return {
-        "checked_at": checked_at.isoformat(),
+        "checked_at": sample["checked_at"],
         "ok": True,
-        "errors": errors,
-        "source": source_meta,
-        "state": state.to_dict(),
-        "state_hash": state_hash(state),
+        "errors": sample.get("errors") or [],
+        "source": sample.get("source") or {},
+        "state": sample["reservation_state"],
+        "state_hash": sample["state_hash"],
     }
 
 

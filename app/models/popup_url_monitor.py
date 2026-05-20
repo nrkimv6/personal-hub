@@ -16,6 +16,7 @@ class PopupUrlMonitor(Base):
     id = Column(Integer, primary_key=True, autoincrement=True)
     name = Column(String(255))
     url = Column(Text, nullable=False)
+    monitor_kind = Column(String(32), nullable=False, default="popup_list")
 
     request_profile = Column(String(1), nullable=False, default="A")
     fallback_strategy = Column(String(32), nullable=False, default="reinforce")
@@ -23,6 +24,8 @@ class PopupUrlMonitor(Base):
 
     notify_on_new = Column(Boolean, nullable=False, default=True)
     min_new_count = Column(Integer, nullable=False, default=1)
+    stop_on_detected = Column(Boolean, nullable=False, default=False)
+    detected_at = Column(DateTime, nullable=True)
 
     monitoring_mode = Column(String(32), nullable=False, default="anonymous")
     service_account_id = Column(

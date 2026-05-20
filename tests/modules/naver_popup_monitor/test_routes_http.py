@@ -182,6 +182,9 @@ def test_popup_monitor_http_crud_enable_disable_check_now_latest_runs(popup_http
     monitor_id = created["id"]
     assert created["service_account_id"] == naver_account_id
     assert created["request_profile"] == "A"
+    assert created["monitor_kind"] == "popup_list"
+    assert created["stop_on_detected"] is False
+    assert created["detected_at"] is None
 
     list_res = client.get("/api/v1/naver-popup/monitors")
     assert list_res.status_code == 200
@@ -273,6 +276,127 @@ def test_popup_monitor_http_error_responses(popup_http_context):
     ]:
         response = getattr(client, method)(path)
         assert response.status_code == 404
+
+
+def test_place_reservation_monitor_crud_R_create_read_update_delete(popup_http_context):
+    client, _factory = popup_http_context
+
+    create_res = client.post(
+        "/api/v1/naver-popup/monitors",
+        json={
+            "name": "place reservation",
+            "url": "https://map.naver.com/p/entry/place/2015421037?c=15.00,0,0,0,dh",
+            "monitor_kind": "place_reservation",
+            "notify_on_new": True,
+        },
+    )
+    assert create_res.status_code == 201
+    created = create_res.json()
+    monitor_id = created["id"]
+    assert created["monitor_kind"] == "place_reservation"
+    assert created["url"] == "https://m.place.naver.com/popupstore/2015421037/home"
+    assert created["stop_on_detected"] is True
+    assert created["detected_at"] is None
+
+    list_res = client.get("/api/v1/naver-popup/monitors")
+    assert list_res.status_code == 200
+    assert any(item["monitor_kind"] == "place_reservation" for item in list_res.json())
+
+    get_res = client.get(f"/api/v1/naver-popup/monitors/{monitor_id}")
+    assert get_res.status_code == 200
+    assert get_res.json()["url"] == "https://m.place.naver.com/popupstore/2015421037/home"
+
+    update_res = client.put(
+        f"/api/v1/naver-popup/monitors/{monitor_id}",
+        json={
+            "name": "place reservation updated",
+            "url": "https://pcmap.place.naver.com/place/2015421037/home",
+            "stop_on_detected": False,
+        },
+    )
+    assert update_res.status_code == 200
+    updated = update_res.json()
+    assert updated["name"] == "place reservation updated"
+    assert updated["url"] == "https://m.place.naver.com/popupstore/2015421037/home"
+    assert updated["stop_on_detected"] is False
+
+    delete_res = client.delete(f"/api/v1/naver-popup/monitors/{monitor_id}")
+    assert delete_res.status_code == 200
+    assert delete_res.json()["deleted"] == monitor_id
+
+
+def test_place_reservation_monitor_errors_E_invalid_url_missing_monitor_wrong_account(
+    popup_http_context,
+):
+    client, factory = popup_http_context
+
+    invalid_url_res = client.post(
+        "/api/v1/naver-popup/monitors",
+        json={
+            "url": "https://example.com/not-a-place",
+            "monitor_kind": "place_reservation",
+        },
+    )
+    assert invalid_url_res.status_code == 400
+
+    instagram_account_id = _create_service_account(factory, "instagram")
+    wrong_account_res = client.post(
+        "/api/v1/naver-popup/monitors",
+        json={
+            "url": "https://m.place.naver.com/popupstore/2015421037/home",
+            "monitor_kind": "place_reservation",
+            "service_account_id": instagram_account_id,
+        },
+    )
+    assert wrong_account_res.status_code == 400
+
+    missing_res = client.get("/api/v1/naver-popup/monitors/99999")
+    assert missing_res.status_code == 404
+
+
+def test_place_reservation_monitor_actions_R_enable_disable_check_now_latest_runs(
+    popup_http_context,
+):
+    client, _factory = popup_http_context
+    create_res = client.post(
+        "/api/v1/naver-popup/monitors",
+        json={
+            "name": "place actions",
+            "url": "2015421037",
+            "monitor_kind": "place_reservation",
+            "stop_on_detected": True,
+            "is_enabled": True,
+        },
+    )
+    assert create_res.status_code == 201
+    monitor_id = create_res.json()["id"]
+
+    disable_res = client.post(f"/api/v1/naver-popup/monitors/{monitor_id}/disable")
+    assert disable_res.status_code == 200
+    assert disable_res.json()["is_enabled"] is False
+
+    enable_res = client.post(f"/api/v1/naver-popup/monitors/{monitor_id}/enable")
+    assert enable_res.status_code == 200
+    assert enable_res.json()["is_enabled"] is True
+
+    check_res = client.post(f"/api/v1/naver-popup/monitors/{monitor_id}/check-now")
+    assert check_res.status_code == 202
+    check_payload = check_res.json()
+    assert check_payload["monitor_id"] == monitor_id
+    assert check_payload["status"] == "success"
+
+    latest_res = client.get(f"/api/v1/naver-popup/monitors/{monitor_id}/latest")
+    assert latest_res.status_code == 200
+    latest_payload = latest_res.json()
+    assert latest_payload["last_run"]["id"] == check_payload["run_id"]
+    assert latest_payload["snapshot"]["meta"]["monitor_kind"] == "place_reservation"
+    assert latest_payload["snapshot"]["reservation_state"]["available"] is False
+
+    runs_res = client.get(f"/api/v1/naver-popup/monitors/{monitor_id}/runs?limit=10")
+    assert runs_res.status_code == 200
+    runs = runs_res.json()
+    assert runs[0]["id"] == check_payload["run_id"]
+    assert runs[0]["snapshot"]["reservation_state"]["available"] is False
 
 
 def test_disable_preserves_latest_run_payload_without_new_run(popup_http_context):
