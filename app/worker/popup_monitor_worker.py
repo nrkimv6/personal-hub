@@ -17,7 +17,7 @@ logger = logging.getLogger(__name__)
 
 
 class PopupMonitorWorker(BaseWorker):
-    """Run popup URL monitors in fixed interval."""
+    """Run popup URL list-diff monitors in fixed interval."""
 
     LOOP_INTERVAL = 60.0
 
