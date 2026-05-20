@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.services.collect_service import CollectService
-from app.services.schedule_contracts import has_exact_time_window, validate_no_exact_time_windows
+from app.services.schedule_contracts import validate_no_exact_time_windows
 from app.services.task_schedule_service import TaskScheduleService
 from app.modules.google_search.services.queue_service import enqueue_google_search
 from app.schemas.collect import CollectedPostList, CollectedPostBase, CrawlHistoryList
@@ -129,6 +129,9 @@ class ScheduleResponse(BaseModel):
     resolution_source: Optional[str] = None
     legacy_placeholder_candidate: bool = False
     requires_time_window_repair: bool = False
+    candidate_count_next_24h: Optional[int] = None
+    schedule_health: Optional[str] = None
+    schedule_health_reason: Optional[str] = None
 
     class Config:
         from_attributes = True
@@ -188,8 +191,13 @@ def _generate_schedule_name(data: CollectScheduleCreate) -> str:
         return f"{data.target_type}_{uuid.uuid4().hex[:8]}"
 
 
-def _schedule_response_kwargs(schedule: TaskSchedule, audit_item: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+def _schedule_response_kwargs(
+    schedule: TaskSchedule,
+    audit_item: Optional[Dict[str, Any]] = None,
+    health: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
     audit_item = audit_item or {}
+    health = health or {}
     return {
         "id": schedule.id,
         "name": schedule.name,
@@ -204,10 +212,10 @@ def _schedule_response_kwargs(schedule: TaskSchedule, audit_item: Optional[Dict[
         "resolved_model": audit_item.get("resolved_model"),
         "resolution_source": audit_item.get("resolution_source"),
         "legacy_placeholder_candidate": bool(audit_item.get("legacy_placeholder_candidate", False)),
-        "requires_time_window_repair": (
-            schedule.target_type == TaskSchedule.TARGET_TYPE_INSTAGRAM_FEED
-            and has_exact_time_window(schedule.schedule_value)
-        ),
+        "requires_time_window_repair": bool(health.get("requires_time_window_repair", False)),
+        "candidate_count_next_24h": health.get("candidate_count"),
+        "schedule_health": health.get("health"),
+        "schedule_health_reason": health.get("reason"),
     }
 
 
@@ -221,7 +229,11 @@ async def get_schedules(
     audit_by_id = {item["id"]: item for item in audit["items"]}
     schedules = db.query(TaskSchedule).order_by(TaskSchedule.target_type, TaskSchedule.name).all()
     return [
-        ScheduleResponse(**_schedule_response_kwargs(s, audit_by_id.get(s.id)))
+        ScheduleResponse(**_schedule_response_kwargs(
+            s,
+            audit_by_id.get(s.id),
+            schedule_service.get_schedule_health(s),
+        ))
         for s in schedules
         if s.target_type not in _INTERNAL_SCHEDULE_TYPES
     ]
@@ -403,7 +415,11 @@ async def create_schedule(
 
     audit = schedule_service.get_schedule_audit(include_disabled=True)
     audit_item = next((item for item in audit["items"] if item["id"] == schedule.id), None)
-    return ScheduleResponse(**_schedule_response_kwargs(schedule, audit_item))
+    return ScheduleResponse(**_schedule_response_kwargs(
+        schedule,
+        audit_item,
+        schedule_service.get_schedule_health(schedule),
+    ))
 
 
 @router.post("/schedules/repair-legacy-placeholder", response_model=ScheduleRepairResponse)
@@ -470,7 +486,11 @@ async def get_schedule_detail(
                 }
 
     return ScheduleDetailResponse(
-        **_schedule_response_kwargs(schedule, audit_item),
+        **_schedule_response_kwargs(
+            schedule,
+            audit_item,
+            schedule_service.get_schedule_health(schedule),
+        ),
         schedule_value=schedule_value,
         saved_search=saved_search_info,
     )
@@ -568,7 +588,11 @@ async def update_schedule(
     audit_item = next((item for item in audit["items"] if item["id"] == schedule.id), None)
 
     return ScheduleDetailResponse(
-        **_schedule_response_kwargs(schedule, audit_item),
+        **_schedule_response_kwargs(
+            schedule,
+            audit_item,
+            schedule_service.get_schedule_health(schedule),
+        ),
         schedule_value=schedule_value,
         saved_search=saved_search_info,
     )

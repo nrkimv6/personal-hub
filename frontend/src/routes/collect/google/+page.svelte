@@ -514,6 +514,15 @@
 		return schedules.find((s) => s.target_config.saved_search_id === savedId);
 	}
 
+	function buildOneHourWindow(start: string) {
+		const [hour, minute] = start.split(':').map((part) => parseInt(part, 10));
+		const total = ((Number.isFinite(hour) ? hour : 9) * 60 + (Number.isFinite(minute) ? minute : 0) + 60) % (24 * 60);
+		return {
+			start,
+			end: `${String(Math.floor(total / 60)).padStart(2, '0')}:${String(total % 60).padStart(2, '0')}`
+		};
+	}
+
 	async function openScheduleModal(saved: SavedSearch, event: Event) {
 		event.stopPropagation();
 		selectedSavedSearch = saved;
@@ -545,7 +554,7 @@
 					method: 'PUT',
 					body: JSON.stringify({
 						schedule_value: {
-							time_windows: [{ start: scheduleTime, end: scheduleTime }],
+							time_windows: [buildOneHourWindow(scheduleTime)],
 							daily_runs: 1,
 							min_interval_hours: 1
 						},
@@ -562,7 +571,7 @@
 						display_name: `${selectedSavedSearch.name} 자동 검색`,
 						schedule_type: 'time_window',
 						schedule_value: {
-							time_windows: [{ start: scheduleTime, end: scheduleTime }],
+							time_windows: [buildOneHourWindow(scheduleTime)],
 							daily_runs: 1,
 							min_interval_hours: 1
 						},

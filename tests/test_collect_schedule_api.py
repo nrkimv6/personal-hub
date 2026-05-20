@@ -973,7 +973,11 @@ class TestScheduleTimeWindowContract:
 
         detail = client.get(f"{API_PREFIX}/collect/schedules/{schedule.id}")
         assert detail.status_code == 200
-        assert detail.json()["requires_time_window_repair"] is True
+        detail_data = detail.json()
+        assert detail_data["requires_time_window_repair"] is True
+        assert detail_data["candidate_count_next_24h"] == 0
+        assert detail_data["schedule_health"] == "error"
+        assert detail_data["schedule_health_reason"] == "exact_time_window_zero_candidates"
 
         blocked = client.put(f"{API_PREFIX}/collect/schedules/{schedule.id}", json={
             "schedule_value": {
@@ -990,7 +994,37 @@ class TestScheduleTimeWindowContract:
             }
         })
         assert repaired.status_code == 200
-        assert repaired.json()["requires_time_window_repair"] is False
+        repaired_data = repaired.json()
+        assert repaired_data["requires_time_window_repair"] is False
+        assert repaired_data["schedule_health"] == "ok"
+        assert repaired_data["candidate_count_next_24h"] == 1
+
+    def test_google_exact_legacy_detail_reports_zero_candidate_health(
+        self,
+        client,
+        test_db,
+        sample_saved_search,
+    ):
+        schedule = TaskSchedule(
+            name="google_search_legacy_exact",
+            target_type=TaskSchedule.TARGET_TYPE_GOOGLE_SEARCH,
+            schedule_type=TaskSchedule.SCHEDULE_TYPE_TIME_WINDOW,
+            enabled=True,
+            schedule_value='{"daily_runs": 1, "time_windows": [{"start": "09:00", "end": "09:00"}]}',
+        )
+        schedule.set_target_config({"saved_search_id": sample_saved_search.id})
+        test_db.add(schedule)
+        test_db.commit()
+        test_db.refresh(schedule)
+
+        detail = client.get(f"{API_PREFIX}/collect/schedules/{schedule.id}")
+
+        assert detail.status_code == 200
+        detail_data = detail.json()
+        assert detail_data["requires_time_window_repair"] is True
+        assert detail_data["candidate_count_next_24h"] == 0
+        assert detail_data["schedule_health"] == "error"
+        assert detail_data["schedule_health_reason"] == "exact_time_window_zero_candidates"
 
 
 # ============================================================
