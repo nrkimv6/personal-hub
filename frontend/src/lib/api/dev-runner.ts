@@ -28,8 +28,12 @@ export interface GateEvidenceSummary {
 	status?: string | null;
 	diverged_commits?: number | null;
 	already_in_main_commits?: number | null;
+	/** service_lock gate: 변경된 파일/서비스 목록 */
 	changed?: string[] | null;
+	/** service_lock gate: 현재 실행 중인 서비스/프로세스 목록 */
 	running?: string[] | null;
+	/** service_lock과 함께 rebase 충돌이 발생했을 때 true */
+	rebase_conflict?: boolean | null;
 	[key: string]: unknown;
 }
 

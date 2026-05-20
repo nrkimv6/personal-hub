@@ -33,7 +33,79 @@ test("service lock approval button sends one-shot approve_service_lock retry pay
 
     assert.match(instance, /async function handleApproveServiceLockAndRetryMerge\(\)/);
     assert.match(instance, /approve_service_lock:\s*true/);
-    assert.match(instance, /경고 확인 후 머지/);
+    // 버튼 label: 위험 확인 후 머지 재시도 (one-shot runner/worktree retry 의미)
+    assert.match(instance, /위험 확인 후 머지 재시도/);
+});
+
+test("service lock approval banner uses 실행 중 서비스와 겹치는 변경이라 승인 필요 wording", () => {
+    const instance = readSource("src/lib/components/dev-runner/RunnerInstanceTab.svelte");
+
+    // 문구 계약: 사용자가 무엇을 승인하는지 즉시 이해할 수 있게 한다
+    assert.match(instance, /실행 중 서비스와 겹치는 변경이라 승인 필요/);
+});
+
+test("service lock approval button title and aria-label describe one-shot retry meaning", () => {
+    const instance = readSource("src/lib/components/dev-runner/RunnerInstanceTab.svelte");
+
+    // title: approve_service_lock one-shot override 의미가 담겨야 한다
+    assert.match(instance, /approve_service_lock one-shot override/);
+    // aria-label: 접근성 — 재시도 의미 명시
+    assert.match(instance, /aria-label/);
+    assert.match(instance, /머지 재시도/);
+});
+
+test("service lock approval button is disabled while retryingMerge to prevent double-click", () => {
+    const instance = readSource("src/lib/components/dev-runner/RunnerInstanceTab.svelte");
+
+    // approval 버튼은 retryingMerge 중 disabled 처리
+    const approvalSection = instance.slice(
+        instance.indexOf("approval_required"),
+        instance.indexOf("conflict', 'test_failed', 'error'")
+    );
+    assert.match(approvalSection, /disabled=\{retryingMerge\}/);
+    // 진행 중 상태 문구 구체화
+    assert.match(approvalSection, /승인 후 재시도 중/);
+});
+
+test("service lock approval section shows changed and running evidence from gateEvidenceSummary", () => {
+    const instance = readSource("src/lib/components/dev-runner/RunnerInstanceTab.svelte");
+
+    // gateEvidenceSummary.changed 와 gateEvidenceSummary.running을 evidence로 표시
+    assert.match(instance, /gateEvidenceSummary\?\.changed/);
+    assert.match(instance, /gateEvidenceSummary\?\.running/);
+    // 변경/실행 중 레이블 표시
+    assert.match(instance, /변경:/);
+    assert.match(instance, /실행 중:/);
+});
+
+test("worktree cleanup button title clarifies it is not a merge retry in approval_required", () => {
+    const instance = readSource("src/lib/components/dev-runner/RunnerInstanceTab.svelte");
+
+    // approval_required 섹션 내 Worktree 정리 버튼 title
+    const approvalSection = instance.slice(
+        instance.indexOf("approval_required"),
+        instance.indexOf("conflict', 'test_failed', 'error'")
+    );
+    // title에 '머지 재시도가 아닌' 또는 '취소' 또는 '정리'가 포함되어야 한다
+    assert.match(approvalSection, /머지 재시도가 아닌|취소|Worktree 정리 \(취소\)/);
+    assert.match(approvalSection, /Worktree 정리/);
+});
+
+test("status bar shows 승인 필요 · service_lock badge for approval_required runners", () => {
+    const statusBar = readSource("src/lib/components/dev-runner/RunStatusBar.svelte");
+
+    // approval_required 상태에서 '승인 필요'와 'service_lock' 문자열이 함께 표시
+    assert.match(statusBar, /승인 필요.*service_lock|service_lock.*승인 필요/);
+    // 조건 분기: approval_required에서 해당 badge를 표시
+    assert.match(statusBar, /runner\.merge_status === 'approval_required'/);
+});
+
+test("GateEvidenceSummary type declares changed and running fields for service_lock evidence", () => {
+    const api = readSource("src/lib/api/dev-runner.ts");
+
+    // changed/running 필드가 타입에 명시적으로 선언되어 있어야 한다
+    assert.match(api, /changed\?:\s*string\[\]\s*\|\s*null/);
+    assert.match(api, /running\?:\s*string\[\]\s*\|\s*null/);
 });
 
 test("merge_status error takes precedence over completed lifecycle labels", () => {

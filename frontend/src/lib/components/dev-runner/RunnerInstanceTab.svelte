@@ -448,26 +448,46 @@
 		</div>
 	{:else if mergeStatus === 'approval_required'}
 		<div class="flex flex-col gap-1.5 px-3 py-2 bg-yellow-50 border-b border-yellow-200 text-xs">
-			<div class="flex items-center gap-2">
-				<span class="text-yellow-800 font-medium">service_lock 경고 확인이 필요합니다.</span>
+			<div class="flex items-center gap-2 flex-wrap">
+				<span class="text-yellow-800 font-medium">실행 중 서비스와 겹치는 변경이라 승인 필요</span>
 				<span class="text-yellow-700/70 text-[10px]">자동 수정 대상 아님 — 사람 판단 필요</span>
 				<button
-					class="px-2 py-0.5 rounded border border-yellow-300 text-yellow-900 hover:bg-yellow-100 disabled:opacity-50 transition-colors"
+					class="px-2 py-0.5 rounded border border-yellow-400 text-yellow-900 bg-yellow-100 hover:bg-yellow-200 disabled:opacity-50 transition-colors font-medium"
 					onclick={handleApproveServiceLockAndRetryMerge}
 					disabled={retryingMerge}
-					title="경고 확인 후 같은 runner/worktree로 머지를 다시 진행합니다 (1회 override)"
+					title="실행 중 서비스와 겹치는 파일 변경을 확인하고, 같은 runner/worktree로 머지를 1회 재시도합니다 (approve_service_lock one-shot override)"
+					aria-label={retryingMerge ? '승인 후 머지 재시도 진행 중' : '위험 확인 후 같은 runner/worktree로 머지 재시도 (1회)'}
 				>
-					{retryingMerge ? '승인 중...' : '경고 확인 후 머지'}
+					{retryingMerge ? '승인 후 재시도 중...' : '위험 확인 후 머지 재시도'}
 				</button>
 				<button
 					class="px-2 py-0.5 rounded border border-border text-muted-foreground hover:bg-muted transition-colors"
 					onclick={handleCleanupWorktree}
+					title="머지 재시도가 아닌 worktree 정리(삭제)입니다. 승인 없이 작업을 취소할 때 사용하세요."
 				>
-					Worktree 정리
+					Worktree 정리 (취소)
 				</button>
 			</div>
-			{#if mergeReason || mergeMessage}
-				<div class="text-[11px] text-yellow-900/80 truncate" title={mergeMessage ?? mergeReason ?? ''}>
+			{#if gateEvidenceSummary?.changed?.length || gateEvidenceSummary?.running?.length}
+				<div class="flex flex-col gap-0.5 text-[11px] text-yellow-900/80 font-mono bg-yellow-100/60 rounded px-2 py-1">
+					{#if gateEvidenceSummary?.changed?.length}
+						<div class="flex gap-1 flex-wrap items-start">
+							<span class="text-yellow-700 shrink-0">변경:</span>
+							<span class="break-all">{gateEvidenceSummary.changed.join(', ')}</span>
+						</div>
+					{/if}
+					{#if gateEvidenceSummary?.running?.length}
+						<div class="flex gap-1 flex-wrap items-start">
+							<span class="text-yellow-700 shrink-0">실행 중:</span>
+							<span class="break-all">{gateEvidenceSummary.running.join(', ')}</span>
+						</div>
+					{/if}
+					{#if mergeReason === 'service_lock' && (!gateEvidenceSummary?.changed?.length && !gateEvidenceSummary?.running?.length)}
+						<div class="text-yellow-700/70">service_lock — changed/running evidence 미포함</div>
+					{/if}
+				</div>
+			{:else if mergeReason || mergeMessage}
+				<div class="text-[11px] text-yellow-900/80 break-all" title={mergeMessage ?? mergeReason ?? ''}>
 					{mergeMessage ?? mergeReason}
 				</div>
 			{/if}
@@ -479,6 +499,11 @@
 			{#if divergeEvidenceText}
 				<div class="text-[11px] text-yellow-700/80 font-mono" title="plan branch diverge evidence">
 					{divergeEvidenceText}
+				</div>
+			{/if}
+			{#if gateEvidenceSummary?.rebase_conflict}
+				<div class="text-[11px] text-yellow-700/80">
+					rebase 충돌도 함께 발생 (별도 plan으로 추적)
 				</div>
 			{/if}
 		</div>

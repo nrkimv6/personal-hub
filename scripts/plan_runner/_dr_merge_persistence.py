@@ -172,6 +172,9 @@ class MergePersistence:
 
         메시지 형식:
             MERGE_PRECHECK_FAILED[service_lock]: ...\n- changed: f1, f2\n- running: s1, s2
+
+        반환 키: ``changed`` (변경 파일/서비스), ``running`` (실행 중 서비스)
+        — GateEvidenceSummary 인터페이스와 동일한 키 이름을 사용한다.
         """
         details: dict = {}
         if not message:
@@ -181,11 +184,11 @@ class MergePersistence:
             if stripped.startswith("- changed:"):
                 text = stripped[len("- changed:"):].strip()
                 if text:
-                    details["service_lock_changed"] = [f.strip() for f in text.split(",") if f.strip()]
+                    details["changed"] = [f.strip() for f in text.split(",") if f.strip()]
             elif stripped.startswith("- running:"):
                 text = stripped[len("- running:"):].strip()
                 if text:
-                    details["service_lock_running"] = [s.strip() for s in text.split(",") if s.strip()]
+                    details["running"] = [s.strip() for s in text.split(",") if s.strip()]
         return details
 
     @staticmethod
