@@ -31,9 +31,12 @@
 		metadata_checked_at?: string | null;
 		display_label?: string | null;
 		display_secondary?: string | null;
+		display_state?: string | null;
 		hide_stale_branch_badge?: boolean;
 		orphan_alive?: boolean;
 		redis_missing?: boolean;
+		confidence?: 'high' | 'medium' | 'low';
+		can_reattach?: boolean;
 	}
 
 	function resolveFullLabel(runner: RunnerTab): string {
@@ -58,6 +61,12 @@
 		if (runner.merge_status === 'test_failed') return '테스트 실패';
 		const exitDisplay = getExitReasonDisplay(runner.exit_reason);
 		return runner.exit_reason ? `${exitDisplay.statusIcon} (${runner.exit_reason})` : exitDisplay.statusIcon;
+	}
+
+	function isDisplayableOrphan(runner: RunnerTab): boolean {
+		if (!runner.redis_missing && !runner.orphan_alive) return false;
+		if (runner.orphan_alive || runner.can_reattach) return true;
+		return runner.display_state === 'orphan' && (runner.confidence === 'high' || runner.confidence === 'medium');
 	}
 
 	function resolveStaleLabel(runner: RunnerTab): string | null {
@@ -127,7 +136,7 @@
 	}: Props = $props();
 
 	let runningCount = $derived(runners.filter(r => r.running).length);
-	let orphanCount = $derived(runners.filter(r => r.orphan_alive || r.redis_missing).length);
+	let orphanCount = $derived(runners.filter(isDisplayableOrphan).length);
 	let anyRunning = $derived(runningCount > 0);
 	let anyCrashed = $derived(!anyRunning && !!runStatus?.crashed);
 	let stoppedCount = $derived(runners.length - runningCount);

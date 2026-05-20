@@ -47,3 +47,12 @@ test("RunStatusBar preserves hidden diagnostics through tooltip and selected Run
   assert.match(logViewer, /\{ label: 'Branch', value: branch \}/);
   assert.match(logViewer, /\[Branch\]/);
 });
+
+test("RunStatusBar counts only displayable orphan states", () => {
+  assert.match(runStatusBar, /function isDisplayableOrphan\(runner: RunnerTab\): boolean/);
+  assert.match(runStatusBar, /if \(!runner\.redis_missing && !runner\.orphan_alive\) return false/);
+  assert.match(runStatusBar, /runner\.orphan_alive \|\| runner\.can_reattach/);
+  assert.match(runStatusBar, /runner\.display_state === 'orphan' && \(runner\.confidence === 'high' \|\| runner\.confidence === 'medium'\)/);
+  assert.match(runStatusBar, /runners\.filter\(isDisplayableOrphan\)\.length/);
+  assert.doesNotMatch(runStatusBar, /runners\.filter\(r => r\.orphan_alive \|\| r\.redis_missing\)\.length/);
+});

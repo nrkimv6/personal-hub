@@ -6,6 +6,7 @@ import redis
 
 from app.modules.dev_runner.config import config
 from app.modules.dev_runner.services.log_file_resolver import LogFileResolver
+from app.modules.dev_runner.services.redis_connection import RECENT_RUNNERS_TTL
 from app.shared.redis.client import RedisClient
 
 REDIS_HOST = "localhost"
@@ -163,10 +164,40 @@ class DiagnosticsService:
                 item.decode("utf-8", errors="replace") if isinstance(item, bytes) else str(item)
                 for item in (self.redis_client.zrange(RECENT_RUNNERS_KEY, 0, -1) or [])
             }
+            heartbeat_ids = set()
+            for raw_key in self.redis_client.scan_iter(f"{RUNNER_KEY_PREFIX}:*:subprocess_heartbeat"):
+                key = raw_key.decode("utf-8", errors="replace") if isinstance(raw_key, bytes) else str(raw_key)
+                prefix = f"{RUNNER_KEY_PREFIX}:"
+                suffix = ":subprocess_heartbeat"
+                if key.startswith(prefix) and key.endswith(suffix):
+                    heartbeat_ids.add(key[len(prefix):-len(suffix)])
+            db_mirror_count = 0
+            try:
+                from app.database import SessionLocal
+                from app.modules.dev_runner.services.dev_runner_state_repository import list_runner_states
+
+                db = SessionLocal()
+                try:
+                    db_mirror_count = len(list_runner_states(db, limit=1000))
+                finally:
+                    db.close()
+            except Exception:
+                db_mirror_count = 0
+            raw_log_evidence = self.resolver.discover_runner_log_evidence(require_header=True)
+            filtered_log_evidence = self.resolver.discover_runner_log_evidence(
+                max_age_seconds=RECENT_RUNNERS_TTL,
+                require_header=True,
+                allowed_triggers={"user", "user:all"},
+            )
             log_candidates = [
-                evidence for rid, evidence in self.resolver.discover_runner_log_evidence().items()
+                evidence for rid, evidence in filtered_log_evidence.items()
                 if rid not in active_ids and rid not in recent_ids and not evidence.get("warnings")
             ]
+            source_summary = (
+                f"redis_active={len(active_ids)}, redis_recent={len(recent_ids)}, "
+                f"heartbeat={len(heartbeat_ids)}, db_mirror={db_mirror_count}, "
+                f"log_evidence={len(raw_log_evidence)}, filtered_orphan_logs={len(log_candidates)}"
+            )
             if log_candidates:
                 newest = max(log_candidates, key=lambda item: item.get("log_mtime") or 0)
                 meta = newest.get("meta") or {}
@@ -174,14 +205,14 @@ class DiagnosticsService:
                     "step": 8,
                     "name": "orphan reattach candidates",
                     "ok": False,
-                    "detail": f"{len(log_candidates)} candidate(s), newest={meta.get('plan') or meta.get('plan_key') or newest.get('runner_id')}",
+                    "detail": f"{source_summary}, newest={meta.get('plan') or meta.get('plan_key') or newest.get('runner_id')}",
                 })
             else:
                 steps.append({
                     "step": 8,
                     "name": "orphan reattach candidates",
                     "ok": True,
-                    "detail": "candidate 없음",
+                    "detail": source_summary,
                 })
         except Exception as e:
             steps.append({"step": 8, "name": "orphan reattach candidates", "ok": False, "detail": f"조회 실패: {e}"})

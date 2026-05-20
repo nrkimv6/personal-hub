@@ -37,7 +37,11 @@ async def list_runners():
 
 @router.get("/runners/orphans", response_model=list[OrphanRunnerCandidate])
 async def list_orphan_runners():
-    """Redis 상태가 소실된 live/log runner 후보 조회"""
+    """Redis 상태가 소실된 visible reattach 후보만 조회한다.
+
+    오래된 log-only/test-trigger 후보는 diagnostics count 대상일 수 있지만
+    이 사용자-facing endpoint의 runner 후보로 반환하지 않는다.
+    """
     try:
         return await executor_service.discover_orphan_runners()
     except (redis.ConnectionError, aioredis.ConnectionError):

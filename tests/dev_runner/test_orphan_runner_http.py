@@ -41,9 +41,11 @@ def _candidate(**overrides) -> OrphanRunnerCandidate:
 
 def test_get_orphan_runners_http_returns_confidence_schema():
     candidate = _candidate()
+    candidate_payload = candidate.model_dump()
+    candidate_payload["visible"] = True
     with patch(
         "app.modules.dev_runner.routes.runner.executor_service.discover_orphan_runners",
-        new=AsyncMock(return_value=[candidate]),
+        new=AsyncMock(return_value=[candidate_payload]),
     ):
         response = _client().get("/api/v1/dev-runner/runners/orphans")
 
@@ -52,6 +54,40 @@ def test_get_orphan_runners_http_returns_confidence_schema():
     assert body[0]["runner_id"] == "orphan-1"
     assert body[0]["confidence"] == "high"
     assert body[0]["can_reattach"] is True
+    assert body[0]["visible"] is True
+
+
+def test_get_orphan_runners_http_filters_stale_test_and_log_only_candidates():
+    with patch(
+        "app.modules.dev_runner.routes.runner.executor_service.discover_orphan_runners",
+        new=AsyncMock(return_value=[]),
+    ):
+        response = _client().get("/api/v1/dev-runner/runners/orphans")
+
+    assert response.status_code == 200
+    assert response.json() == []
+
+
+def test_dismiss_runner_tab_prevents_same_log_orphan_from_returning():
+    dismiss = AsyncMock(return_value=True)
+    discover = AsyncMock(side_effect=[
+        [_candidate().model_dump() | {"visible": True}],
+        [],
+    ])
+    with patch("app.modules.dev_runner.routes.runner.executor_service.dismiss_runner", new=dismiss), patch(
+        "app.modules.dev_runner.routes.runner.executor_service.discover_orphan_runners",
+        new=discover,
+    ):
+        before = _client().get("/api/v1/dev-runner/runners/orphans")
+        dismissed = _client().delete("/api/v1/dev-runner/runners/orphan-1/tab")
+        after = _client().get("/api/v1/dev-runner/runners/orphans")
+
+    assert before.status_code == 200
+    assert before.json()[0]["runner_id"] == "orphan-1"
+    assert dismissed.status_code == 200
+    assert after.status_code == 200
+    assert after.json() == []
+    dismiss.assert_awaited_once_with("orphan-1")
 
 
 def test_reattach_runner_http_success_returns_reconnect_contract():

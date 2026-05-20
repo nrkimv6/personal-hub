@@ -60,6 +60,8 @@ __all__ = [
 ]
 
 DISMISSED_RUNNERS_KEY = "plan-runner:dismissed_runners"
+ORPHAN_LOG_MAX_AGE_SECONDS = RECENT_RUNNERS_TTL
+ORPHAN_VISIBLE_TRIGGERS = {"user", "user:all"}
 
 
 def _decode_runner_value(value: Any) -> Any:
@@ -1067,17 +1069,27 @@ class ExecutorService:
         candidates: list[tuple[int, dict[str, Any]]] = []
         for proc in processes:
             score = 0
+            has_runner_evidence = False
+            has_plan_evidence = False
             if proc.get("runner_id") and proc.get("runner_id") == runner_id:
                 score += 100
+                has_runner_evidence = True
             cmdline_text = self._normalized_path_text(proc.get("cmdline"))
             if runner_id and runner_id.lower() in cmdline_text:
                 score += 40
+                has_runner_evidence = True
             if plan_file:
                 process_plan = proc.get("plan_file")
                 if process_plan and self._normalized_path_text(process_plan) == self._normalized_path_text(plan_file):
                     score += 35
+                    has_plan_evidence = True
                 elif self._normalized_path_text(plan_file) in cmdline_text:
                     score += 25
+                    has_plan_evidence = True
+            if not (has_runner_evidence or has_plan_evidence):
+                continue
+            if proc.get("pid_kind") == "child_engine" and engine and proc.get("engine") != engine:
+                continue
             if engine and proc.get("engine") == engine:
                 score += 10
             if proc.get("pid_kind") == "parent":
@@ -1135,7 +1147,11 @@ class ExecutorService:
         dismissed_ids = self._normalize_runner_id_set(await self.async_redis.smembers(DISMISSED_RUNNERS_KEY))
         registered_ids = active_ids | recent_ids | dismissed_ids
 
-        log_evidence = LogFileResolver(config, self.redis_client).discover_runner_log_evidence()
+        log_evidence = LogFileResolver(config, self.redis_client).discover_runner_log_evidence(
+            max_age_seconds=ORPHAN_LOG_MAX_AGE_SECONDS,
+            require_header=True,
+            allowed_triggers=ORPHAN_VISIBLE_TRIGGERS,
+        )
         processes = self._list_live_runner_processes()
         candidates: list[OrphanRunnerCandidate] = []
 
@@ -1143,6 +1159,9 @@ class ExecutorService:
             if runner_id in registered_ids:
                 continue
             meta = evidence.get("meta") or {}
+            trigger = meta.get("trigger")
+            if not is_visible_runner(trigger, runner_id):
+                continue
             warnings = list(evidence.get("warnings") or [])
             if "runner_id_mismatch" in warnings:
                 continue
@@ -1157,7 +1176,6 @@ class ExecutorService:
 
             plan_file = meta.get("plan") or meta.get("plan_key")
             engine = meta.get("engine") or (process.get("engine") if process else None)
-            trigger = meta.get("trigger")
             header = self._read_plan_header_metadata(plan_file)
             confidence = "low"
             mode = "log_only"
@@ -1193,6 +1211,7 @@ class ExecutorService:
                 reattach_mode=mode,  # type: ignore[arg-type]
                 can_reattach=confidence in {"high", "medium"},
                 can_force_kill=pid is not None,
+                visible=confidence in {"high", "medium"},
                 warnings=warnings,
             ))
 
@@ -1522,6 +1541,10 @@ class ExecutorService:
                     # PID 기반 양방향 보정: Redis status와 실제 프로세스 상태 불일치 교정
                     running = status == "running"
                     running, pid_str = await self._correct_pid_state(rid, status, pid_str, caller="get_all_runners")
+                    if redis_missing and rid not in heartbeat_ids and not pid_str:
+                        running = False
+                        if status == "running":
+                            status = "stale"
                     if exit_reason == "completed":
                         running = False
                     orphan_alive = redis_missing and rid in heartbeat_ids

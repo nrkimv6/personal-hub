@@ -472,6 +472,10 @@
 	}
 
 	function orphanCandidateToRunner(candidate: Awaited<ReturnType<typeof devRunnerRunnerApi.discoverOrphanRunners>>[number]): RunnerSource {
+		const canReattach = candidate.can_reattach && candidate.confidence !== 'low';
+		const hasLivePid = typeof candidate.pid === 'number' && candidate.pid_kind !== 'none';
+		const orphanAlive = hasLivePid || canReattach;
+		const visible = candidate.visible === true;
 		return {
 			runner_id: candidate.runner_id,
 			plan_file: candidate.plan_file,
@@ -482,11 +486,11 @@
 			start_time: candidate.start_time,
 			branch: candidate.branch,
 			worktree_path: candidate.worktree_path,
-			trigger: candidate.trigger ?? 'user',
-			orphan_alive: true,
+			trigger: candidate.trigger ?? null,
+			orphan_alive: orphanAlive,
 			redis_missing: true,
 			log_file_found: !!candidate.log_file,
-			visible: true,
+			visible,
 			display_plan_name: candidate.plan_file ? candidate.plan_file.split(/[\\/]/).pop() ?? candidate.plan_file : null,
 			execution_count: candidate.execution_count,
 			display_state: 'orphan',
@@ -496,7 +500,7 @@
 			pid_kind: candidate.pid_kind,
 			confidence: candidate.confidence,
 			reattach_mode: candidate.reattach_mode,
-			can_reattach: candidate.can_reattach,
+			can_reattach: canReattach,
 			can_force_kill: candidate.can_force_kill,
 			warnings: candidate.warnings,
 		};
@@ -509,7 +513,18 @@
 		return runner.trigger === 'user' || runner.trigger === 'user:all';
 	}
 
-	function preserveMissingRunnerTab(tab: RunnerTab): RunnerTab {
+	function shouldPreserveMissingRunnerTab(tab: RunnerTab): boolean {
+		if (tab.running) return true;
+		if (tab.orphan_alive || tab.can_reattach) return true;
+		return tab.confidence === 'high' || tab.confidence === 'medium';
+	}
+
+	function preserveMissingRunnerTab(tab: RunnerTab): RunnerTab | null {
+		if (!shouldPreserveMissingRunnerTab(tab)) {
+			logRefs.delete(tab.id);
+			clearRunnerDedup(tab.id);
+			return null;
+		}
 		const next = {
 			...tab,
 			running: false,
@@ -537,7 +552,7 @@
 		runnerTabs = runnerTabs.map(tab => {
 			const runner = runnerMap.get(tab.id);
 			return runner ? updateRunnerTab(tab, runner) : preserveMissingRunnerTab(tab);
-		});
+		}).filter((tab): tab is RunnerTab => tab !== null);
 		for (const runner of runners) {
 			if (!runnerTabs.some(t => t.id === runner.runner_id)) {
 				runnerTabs = [...runnerTabs, createRunnerTab(runner)];
@@ -827,14 +842,12 @@
 		}
 	}
 
-	function handleCloseTab(runnerId: string) {
+	async function handleCloseTab(runnerId: string) {
 		// 탭 제거는 dismiss(수동 닫기) 경로에서만 수행한다. sync 경로는 remove를 하지 않는다.
 		// running이 아닌 탭은 서버에 dismiss 요청하여 다른 기기에서도 사라지게 함
 		const tab = runnerTabs.find(t => t.id === runnerId);
 		if (tab && !tab.running) {
-			devRunnerRunnerApi.dismissTab(runnerId).catch(() => {
-				// dismiss 실패해도 로컬 탭은 닫음
-			});
+			await devRunnerRunnerApi.dismissTab(runnerId).catch(() => {});
 		}
 		logRefs.delete(runnerId);
 		clearRunnerDedup(runnerId);
@@ -1121,7 +1134,7 @@
 			onToggleCollapse={() => { runnerCardCollapsed = !runnerCardCollapsed; }}
 			activeRunnerId={activeTabId}
 			onSelectRunner={(id) => { activeTabId = id; }}
-			onCloseAllTerminated={() => { for (const t of runnerTabs.filter(r => !r.running)) { handleCloseTab(t.id); } }}
+			onCloseAllTerminated={async () => { for (const t of runnerTabs.filter(r => !r.running)) { await handleCloseTab(t.id); } }}
 			onShowLogs={() => { activeTabId = '__logs__'; }}
 			onCloseRunner={handleCloseTab}
 			/>
@@ -1165,7 +1178,7 @@
 				<!-- 종료된 탭 일괄 닫기 -->
 				{#if runnerTabs.some(t => !t.running)}
 					<button
-						onclick={() => { for (const t of runnerTabs.filter(r => !r.running)) { handleCloseTab(t.id); } }}
+						onclick={async () => { for (const t of runnerTabs.filter(r => !r.running)) { await handleCloseTab(t.id); } }}
 						class="flex items-center justify-center h-8 w-8 border border-red-200 rounded-md hover:bg-red-100 transition-colors text-red-400 hover:text-red-600 shrink-0"
 						title="종료된 runner 탭 모두 닫기"
 					>

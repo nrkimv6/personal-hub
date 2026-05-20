@@ -17,7 +17,7 @@ def _fulfill_json(route, payload, status: int = 200) -> None:
     route.fulfill(status=status, content_type="application/json", body=json.dumps(payload))
 
 
-def _stub_dev_runner_shell(page: Page, runner_id: str) -> dict[str, bool]:
+def _stub_dev_runner_shell(page: Page, runner_id: str, *, candidate_visible: bool = True, confidence: str = "high", trigger: str = "user") -> dict[str, bool]:
     state = {"reattached": False}
     plan_file = r"D:\work\project\tools\monitor-page\.worktrees\plans\docs\plan\orphan-reattach-e2e.md"
 
@@ -67,15 +67,16 @@ def _stub_dev_runner_shell(page: Page, runner_id: str) -> dict[str, bool]:
                     "runner_id": runner_id,
                     "plan_file": plan_file,
                     "engine": "claude",
-                    "trigger": "user",
+                    "trigger": trigger,
                     "pid": 4412,
                     "pid_kind": "parent",
                     "log_file": "logs/plan-runner-stream-orphan-reattach-e2e.log",
                     "log_mtime": "2026-05-05T23:00:00",
-                    "confidence": "high",
+                    "confidence": confidence,
                     "reattach_mode": "full",
                     "can_reattach": True,
                     "can_force_kill": True,
+                    "visible": candidate_visible,
                     "warnings": [],
                 }
             ],
@@ -148,6 +149,19 @@ def test_orphan_candidate_row_is_visible(page: Page, frontend_url: str, system_m
     expect(page.get_by_text("Redis 상태 소실")).to_be_visible(timeout=10000)
     expect(page.locator("button", has_text="재연결").first).to_be_visible(timeout=5000)
     expect(page.locator("button", has_text="강제 종료").first).to_be_visible(timeout=5000)
+
+
+def test_low_confidence_or_test_trigger_orphan_candidate_is_not_promoted_to_tab(page: Page, frontend_url: str, system_mode: str):
+    _skip_admin_mode_if_public(system_mode)
+
+    runner_id = "orphan-low-confidence-e2e"
+    _stub_dev_runner_shell(page, runner_id, candidate_visible=False, confidence="low", trigger="tc:orphan-e2e")
+
+    page.goto(f"{frontend_url}/automation?tab=dev-runner&runner={runner_id}")
+
+    expect(page.get_by_text("Redis 상태 소실")).to_have_count(0)
+    expect(page.locator("button", has_text="재연결")).to_have_count(0)
+    expect(page.locator("button", has_text="강제 종료")).to_have_count(0)
 
 
 def test_reattach_click_restores_runner_and_log(page: Page, frontend_url: str, system_mode: str):
