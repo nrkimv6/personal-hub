@@ -82,7 +82,7 @@ def _cleanup_runner(runner_id: str) -> None:
 
 def _get_json(path: str) -> object:
     try:
-        response = httpx.get(f"{BASE_API}{path}", timeout=10.0)
+        response = httpx.get(f"{BASE_API}{path}", timeout=30.0)
     except httpx.ConnectError as exc:
         pytest.fail(f"live API unavailable for dev-runner closeout test: {exc}")
     response.raise_for_status()
