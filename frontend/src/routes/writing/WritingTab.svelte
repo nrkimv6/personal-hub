@@ -696,7 +696,41 @@
 			</div>
 		{:else}
 			<!-- 글 목록 -->
-			<div class="bg-white rounded-lg border border-border overflow-x-auto mb-6">
+			<div class="md:hidden space-y-3 mb-6">
+				{#each writings as writing (writing.id)}
+					<article
+						class="rounded-lg border border-border bg-card p-3 shadow-sm"
+						onclick={() => openWritingModal(writing)}
+					>
+						<div class="flex items-start justify-between gap-3">
+							<div class="min-w-0 flex-1">
+								<div class="mb-2 flex flex-wrap items-center gap-2">
+									<span class="rounded-full px-2 py-1 text-xs {writing.task_type === 'mix' ? 'bg-purple-light text-purple-800' : 'bg-primary-light text-indigo-800'}">
+										{getTaskTypeLabel(writing.task_type)}
+									</span>
+									<span class="text-xs text-muted-foreground">#{writing.id}</span>
+								</div>
+								<p class="line-clamp-2 text-sm text-foreground">{writing.preview}</p>
+							</div>
+							<div class="shrink-0 text-right text-xs text-muted-foreground">
+								<div>{formatDateTime(writing.created_at)}</div>
+								<div class="mt-2 flex justify-end">
+									{#if getRatingComponent(writing.rating)}
+										<svelte:component
+											this={getRatingComponent(writing.rating)}
+											size={18}
+											class={writing.rating === 1 ? 'text-success' : 'text-error'}
+										/>
+									{:else}
+										<span>-</span>
+									{/if}
+								</div>
+							</div>
+						</div>
+					</article>
+				{/each}
+			</div>
+			<div class="hidden bg-white rounded-lg border border-border overflow-x-auto mb-6 md:block">
 				<table class="w-full min-w-[600px]">
 					<thead class="bg-background border-b border-border">
 						<tr>
@@ -740,7 +774,7 @@
 
 			<!-- 페이지네이션 -->
 			{#if writingPager.totalPages > 1}
-				<div class="flex justify-between items-center">
+				<div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
 					<span class="text-sm text-muted-foreground">
 						전체 {writingPager.total}개 중 {(writingPager.page - 1) * writingPager.pageSize + 1} - {Math.min(writingPager.page * writingPager.pageSize, writingPager.total)}
 					</span>
@@ -770,7 +804,27 @@
 				<p class="text-sm mt-2">DB에 소스를 추가해주세요.</p>
 			</div>
 		{:else}
-			<div class="bg-white rounded-lg border border-border overflow-x-auto mb-6">
+			<div class="md:hidden space-y-3 mb-6">
+				{#each sources as source (source.id)}
+					<article
+						class="rounded-lg border border-border bg-card p-3 shadow-sm"
+						onclick={() => openSourceModal(source)}
+					>
+						<div class="flex items-start justify-between gap-3">
+							<div class="min-w-0 flex-1">
+								<div class="mb-2 flex flex-wrap items-center gap-2">
+									<span class="rounded-full bg-muted px-2 py-1 text-xs text-muted-foreground">#{source.id}</span>
+									<span class="rounded-full bg-primary-light px-2 py-1 text-xs text-primary">{source.category || '미분류'}</span>
+								</div>
+								<p class="line-clamp-2 text-sm text-foreground">{source.preview}</p>
+								<p class="mt-1 truncate text-xs text-muted-foreground">{source.source_info || '-'}</p>
+							</div>
+							<div class="shrink-0 text-right text-xs text-muted-foreground">{formatDateTime(source.created_at)}</div>
+						</div>
+					</article>
+				{/each}
+			</div>
+			<div class="hidden bg-white rounded-lg border border-border overflow-x-auto mb-6 md:block">
 				<table class="w-full min-w-[500px]">
 					<thead class="bg-background border-b border-border">
 						<tr>
@@ -800,7 +854,7 @@
 
 			<!-- 소스 페이지네이션 -->
 			{#if sourcePager.totalPages > 1}
-				<div class="flex justify-between items-center">
+				<div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
 					<span class="text-sm text-muted-foreground">
 						전체 {sourcePager.total}개 중 {(sourcePager.page - 1) * sourcePager.pageSize + 1} - {Math.min(sourcePager.page * sourcePager.pageSize, sourcePager.total)}
 					</span>
@@ -904,7 +958,39 @@
 			</div>
 		{:else}
 			<!-- 키워드 목록 -->
-			<div class="bg-white rounded-lg border border-border overflow-x-auto mb-6">
+			<div class="md:hidden space-y-3 mb-6">
+				{#each keywords as kw (kw.id)}
+					<article class="rounded-lg border border-border bg-card p-3 shadow-sm">
+						<div class="flex items-start justify-between gap-3">
+							<div class="min-w-0 flex-1">
+								<h3 class="truncate text-sm font-medium text-foreground">{kw.keyword}</h3>
+								<div class="mt-2 flex flex-wrap gap-2 text-xs text-muted-foreground">
+									<span>빈도 {kw.frequency.toLocaleString()}</span>
+									<span>소스 {kw.source_count.toLocaleString()}</span>
+								</div>
+							</div>
+							<div class="shrink-0">
+								{#if kw.is_promoted}
+									<span class="rounded-full bg-success-light px-2 py-1 text-xs text-success">승격됨</span>
+								{:else if kw.is_stopword}
+									<span class="rounded-full bg-error-light px-2 py-1 text-xs text-error">불용어</span>
+								{:else}
+									<span class="rounded-full bg-muted px-2 py-1 text-xs text-muted-foreground">미검토</span>
+								{/if}
+							</div>
+						</div>
+						<div class="mt-3 flex flex-wrap justify-end gap-2">
+							{#if kw.is_promoted}
+								<button onclick={() => demoteKeyword(kw)} class="rounded border border-error/30 px-3 py-1.5 text-xs text-error hover:bg-error-light">삭제</button>
+							{:else if !kw.is_stopword}
+								<button onclick={() => promoteKeyword(kw)} class="rounded border border-success/30 px-3 py-1.5 text-xs text-success hover:bg-success-light">승격</button>
+								<button onclick={() => markAsStopword(kw)} class="rounded border border-error/30 px-3 py-1.5 text-xs text-error hover:bg-error-light">불용어</button>
+							{/if}
+						</div>
+					</article>
+				{/each}
+			</div>
+			<div class="hidden bg-white rounded-lg border border-border overflow-x-auto mb-6 md:block">
 				<table class="w-full min-w-[700px]">
 					<thead class="bg-background border-b border-border">
 						<tr>
@@ -963,7 +1049,7 @@
 
 			<!-- 페이지네이션 -->
 			{#if keywordPager.total > keywordPager.limit}
-				<div class="flex justify-between items-center">
+				<div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
 					<span class="text-sm text-muted-foreground">
 						전체 {keywordPager.total.toLocaleString()}개 중 {keywordPager.offset + 1} - {Math.min(keywordPager.offset + keywordPager.limit, keywordPager.total)}
 					</span>
@@ -1044,7 +1130,28 @@
 			</div>
 		{:else}
 			<!-- 소재 목록 -->
-			<div class="bg-white rounded-lg border border-border overflow-x-auto mb-6">
+			<div class="md:hidden space-y-3 mb-6">
+				{#each elements as elem (elem.id)}
+					<article class="rounded-lg border border-border bg-card p-3 shadow-sm">
+						<div class="flex items-start justify-between gap-3">
+							<div class="min-w-0 flex-1">
+								<h3 class="truncate text-sm font-medium text-foreground">{elem.name}</h3>
+								<div class="mt-2 flex flex-wrap gap-2">
+									<span class="rounded-full bg-muted px-2 py-1 text-xs text-muted-foreground">{elem.category}</span>
+									<span class="rounded-full px-2 py-1 text-xs {getSourceTypeClass(elem.source_type)}">{getSourceTypeLabel(elem.source_type)}</span>
+								</div>
+							</div>
+							<div class="shrink-0 text-right text-xs text-muted-foreground">
+								<div>빈도 {elem.frequency}</div>
+								<button onclick={() => deleteElement(elem.id, elem.name)} class="mt-2 rounded border border-error/30 px-3 py-1.5 text-xs text-error hover:bg-error-light">
+									삭제
+								</button>
+							</div>
+						</div>
+					</article>
+				{/each}
+			</div>
+			<div class="hidden bg-white rounded-lg border border-border overflow-x-auto mb-6 md:block">
 				<table class="w-full min-w-[600px]">
 					<thead class="bg-background border-b border-border">
 						<tr>
@@ -1082,7 +1189,7 @@
 
 			<!-- 페이지네이션 -->
 			{#if elementPager.totalPages > 1}
-				<div class="flex justify-between items-center">
+				<div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
 					<span class="text-sm text-muted-foreground">
 						전체 {elementPager.total}개 중 {(elementPager.page - 1) * elementPager.pageSize + 1} - {Math.min(elementPager.page * elementPager.pageSize, elementPager.total)}
 					</span>
@@ -1125,7 +1232,37 @@
 			</div>
 		{:else}
 			<!-- 배치 목록 -->
-			<div class="bg-white rounded-lg border border-border overflow-x-auto mb-6">
+			<div class="md:hidden space-y-3 mb-6">
+				{#each batches as batch (batch.id)}
+					<article class="rounded-lg border border-border bg-card p-3 shadow-sm">
+						<div class="flex items-start justify-between gap-3">
+							<div class="min-w-0 flex-1">
+								<div class="mb-2 flex flex-wrap items-center gap-2">
+									<span class="text-sm font-medium text-foreground">배치 #{batch.id}</span>
+									<span class="rounded-full px-2 py-1 text-xs {getBatchStatusClass(batch.status)}">{getBatchStatusLabel(batch.status)}</span>
+								</div>
+								<div class="flex items-center gap-2">
+									<div class="h-2 flex-1 rounded-full bg-secondary">
+										<div
+											class="h-2 rounded-full bg-primary transition-all"
+											style="width: {batch.progress_percent}%"
+										></div>
+									</div>
+									<span class="w-16 text-right text-xs text-muted-foreground">{batch.completed}/{batch.total}</span>
+								</div>
+							</div>
+							<div class="shrink-0 text-right text-xs text-muted-foreground">
+								<div>{formatDateTime(batch.created_at)}</div>
+								<div>{formatDateTime(batch.completed_at)}</div>
+								<button onclick={() => viewBatchStatus(batch.id)} class="mt-2 rounded border border-primary/30 px-3 py-1.5 text-xs text-primary hover:bg-primary-light">
+									상세보기
+								</button>
+							</div>
+						</div>
+					</article>
+				{/each}
+			</div>
+			<div class="hidden bg-white rounded-lg border border-border overflow-x-auto mb-6 md:block">
 				<table class="w-full min-w-[600px]">
 					<thead class="bg-background border-b border-border">
 						<tr>
@@ -1177,7 +1314,7 @@
 
 			<!-- 페이지네이션 -->
 			{#if batchPager.totalPages > 1}
-				<div class="flex justify-between items-center">
+				<div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
 					<span class="text-sm text-muted-foreground">
 						전체 {batchPager.total}개 중 {(batchPager.page - 1) * batchPager.pageSize + 1} - {Math.min(batchPager.page * batchPager.pageSize, batchPager.total)}
 					</span>

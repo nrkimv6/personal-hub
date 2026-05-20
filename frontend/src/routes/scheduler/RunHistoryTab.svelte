@@ -59,7 +59,7 @@
 </script>
 
 <div class="p-6">
-	<div class="flex items-center justify-between mb-4">
+	<div class="flex flex-col gap-3 mb-4 sm:flex-row sm:items-center sm:justify-between">
 		<h2 class="text-lg font-semibold dark:text-white">실행 이력</h2>
 		<div class="flex items-center gap-2">
 			<select
@@ -95,7 +95,39 @@
 	{:else if logs.length === 0}
 		<div class="text-center py-12 text-muted-foreground text-sm">실행 이력이 없습니다</div>
 	{:else}
-		<div class="overflow-x-auto">
+		<div class="md:hidden space-y-3">
+			{#each logs as log}
+				<article class="rounded-lg border border-border bg-card p-3 shadow-sm">
+					<div class="flex items-start justify-between gap-3">
+						<div class="min-w-0 flex-1">
+							<div class="font-mono text-xs font-medium text-foreground">{log.task_name}</div>
+							<div class="mt-2 flex flex-wrap items-center gap-2 text-xs">
+								<span class="inline-flex items-center gap-1 {getStatusColor(log.status)}">
+									{#if log.status === 'success'}
+										<CheckCircle class="w-3.5 h-3.5" />
+									{:else if log.status === 'failed'}
+										<XCircle class="w-3.5 h-3.5" />
+									{:else}
+										<Clock class="w-3.5 h-3.5 animate-spin" />
+									{/if}
+									{log.status}
+								</span>
+								<span class="text-muted-foreground">{formatDuration(log.duration_seconds)}</span>
+							</div>
+							{#if log.error_message}
+								<p class="mt-2 line-clamp-2 text-xs text-red-500" title={log.error_message}>{log.error_message}</p>
+							{/if}
+						</div>
+						<div class="shrink-0 text-right text-xs text-muted-foreground">
+							<div>{formatDatetime(log.started_at)}</div>
+							<div class="mt-1">{formatDatetime(log.finished_at)}</div>
+						</div>
+					</div>
+				</article>
+			{/each}
+		</div>
+
+		<div class="hidden overflow-x-auto md:block">
 			<table class="w-full text-sm">
 				<thead>
 					<tr class="border-b border-border text-left text-muted-foreground">

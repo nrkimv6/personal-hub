@@ -159,9 +159,9 @@
 
 <div class="p-6 max-w-7xl mx-auto">
   <!-- 헤더 -->
-  <div class="flex items-center justify-between mb-6">
+  <div class="flex flex-col gap-3 mb-6 sm:flex-row sm:items-center sm:justify-between">
     <h2 class="text-xl font-semibold text-gray-800 dark:text-gray-100">Git 레포지토리 관리</h2>
-    <div class="flex gap-2">
+    <div class="flex flex-wrap gap-2">
       <button
         class="px-3 py-2 text-sm rounded-lg border border-gray-300 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-700 dark:text-gray-200 disabled:opacity-50"
         onclick={handleRefreshAll}
@@ -229,7 +229,70 @@
       >첫 레포지토리 추가</button>
     </div>
   {:else}
-    <div class="bg-white dark:bg-gray-800 rounded-xl shadow-sm overflow-hidden border border-gray-100 dark:border-gray-700">
+    <div class="md:hidden space-y-3">
+      {#each repos as repo (repo.id)}
+        {@const badge = statusBadge(repo.last_status)}
+        <article class="rounded-xl border border-gray-100 bg-white p-3 shadow-sm dark:border-gray-700 dark:bg-gray-800">
+          <div class="flex items-start gap-3">
+            <input
+              type="checkbox"
+              checked={selection.has(repo.id)}
+              onchange={() => selection.toggle(repo.id)}
+              class="mt-1 rounded"
+            />
+            <button class="min-w-0 flex-1 text-left" onclick={() => goto(`/git-repos/${repo.id}`)}>
+              <div class="flex flex-wrap items-center gap-2">
+                <p class="truncate font-medium text-blue-600 hover:underline dark:text-blue-400">{repo.alias || repo.path.split(/[/\\]/).pop()}</p>
+                <span class="inline-flex rounded-full px-2 py-0.5 text-xs font-medium {badge.cls}">{badge.label}</span>
+              </div>
+              <p class="mt-1 truncate text-xs text-gray-400 dark:text-gray-500">{repo.path}</p>
+            </button>
+          </div>
+          <div class="mt-3 grid grid-cols-2 gap-2 text-xs text-gray-500 dark:text-gray-400">
+            <div>
+              <span class="block text-gray-400">브랜치</span>
+              <span class="font-mono text-gray-700 dark:text-gray-300">{repo.last_branch || '-'}</span>
+            </div>
+            <div>
+              <span class="block text-gray-400">ahead / behind</span>
+              {#if repo.last_ahead != null || repo.last_behind != null}
+                <span class="text-green-600 dark:text-green-400">↑{repo.last_ahead ?? 0}</span>
+                <span class="mx-1 text-gray-300">/</span>
+                <span class="text-red-500 dark:text-red-400">↓{repo.last_behind ?? 0}</span>
+              {:else}
+                <span>-</span>
+              {/if}
+            </div>
+            <div class="col-span-2">
+              <span class="block text-gray-400">마지막 확인</span>
+              <span>{repo.last_checked_at ? new Date(repo.last_checked_at).toLocaleTimeString('ko-KR') : '-'}</span>
+            </div>
+          </div>
+          <div class="mt-3 flex flex-wrap justify-end gap-2">
+            <button
+              class="rounded bg-gray-100 px-3 py-1.5 text-xs text-gray-600 hover:bg-gray-200 dark:bg-gray-700 dark:text-gray-300 dark:hover:bg-gray-600"
+              onclick={() => handleRefreshOne(repo.id)}
+            >
+              새로고침
+            </button>
+            <button
+              class="rounded bg-blue-50 px-3 py-1.5 text-xs text-blue-600 hover:bg-blue-100 dark:bg-blue-900/30 dark:text-blue-400 dark:hover:bg-blue-800/40"
+              onclick={() => goto(`/git-repos/${repo.id}`)}
+            >
+              상세
+            </button>
+            <button
+              class="rounded bg-red-50 px-3 py-1.5 text-xs text-red-500 hover:bg-red-100 dark:bg-red-900/30 dark:text-red-400 dark:hover:bg-red-800/40"
+              onclick={() => handleDelete(repo.id)}
+            >
+              삭제
+            </button>
+          </div>
+        </article>
+      {/each}
+    </div>
+
+    <div class="hidden bg-white dark:bg-gray-800 rounded-xl shadow-sm overflow-hidden border border-gray-100 dark:border-gray-700 md:block">
       <table class="w-full text-sm">
         <thead class="bg-gray-50 dark:bg-gray-900/50 text-gray-500 dark:text-gray-400 text-xs uppercase">
           <tr>

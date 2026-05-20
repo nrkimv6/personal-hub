@@ -403,7 +403,107 @@
       </button>
     </div>
   {:else}
-    <div class="bg-white rounded-lg border border-border overflow-hidden">
+    <div class="md:hidden space-y-3">
+      {#each downloads as download (download.id)}
+        <article class="rounded-lg border border-border bg-white p-3 shadow-sm">
+          <div class="flex items-start justify-between gap-3">
+            <div class="min-w-0 flex-1">
+              <div class="mb-2 flex flex-wrap items-center gap-2">
+                <span class="inline-flex items-center rounded px-2 py-1 text-xs font-medium {typeStyles[download.download_type]?.color || 'bg-muted text-muted-foreground'}">
+                  {typeStyles[download.download_type]?.label || download.download_type}
+                </span>
+                <span class="inline-flex items-center rounded px-2 py-1 text-xs font-medium {statusStyles[download.status]?.color || 'bg-muted text-muted-foreground'}">
+                  {statusStyles[download.status]?.label || download.status}
+                </span>
+              </div>
+              {#if download.output_filename}
+                <h3 class="truncate text-sm font-medium text-foreground" title={download.output_filename}>
+                  {download.output_filename}
+                </h3>
+              {:else if download.title}
+                <h3 class="truncate text-sm font-medium text-foreground" title={download.title}>
+                  {download.title}
+                </h3>
+              {:else}
+                <h3 class="text-sm font-medium text-foreground">다운로드 #{download.id}</h3>
+              {/if}
+              {#if download.title && download.output_filename}
+                <p class="mt-0.5 truncate text-xs text-muted-foreground" title={download.title}>{download.title}</p>
+              {/if}
+              <a
+                href={download.url}
+                target="_blank"
+                rel="noopener noreferrer"
+                class="mt-1 block truncate text-xs text-primary hover:underline"
+                title={download.url}
+              >
+                {truncateUrl(download.url, 48)}
+              </a>
+            </div>
+            <div class="shrink-0 text-right text-xs text-muted-foreground">
+              <div>{formatDate(download.created_at)}</div>
+              <div class="mt-1">{formatBytes(download.file_size)}</div>
+            </div>
+          </div>
+
+          <div class="mt-3 flex flex-col gap-3">
+            {#if download.status === 'processing'}
+              <div>
+                <div class="h-2 overflow-hidden rounded-full bg-secondary">
+                  <div
+                    class="h-full bg-primary transition-all duration-300"
+                    style="width: {download.progress}%"
+                  ></div>
+                </div>
+                <div class="mt-1 text-xs text-muted-foreground">{download.progress}%</div>
+              </div>
+            {:else if download.status === 'completed'}
+              <div class="text-xs font-medium text-success">100%</div>
+            {/if}
+
+            {#if download.error_message}
+              <p class="line-clamp-2 text-xs text-error" title={download.error_message}>{download.error_message}</p>
+            {/if}
+
+            <div class="flex flex-wrap justify-end gap-2">
+              {#if download.status === 'pending' || download.status === 'picked' || download.status === 'processing'}
+                <button
+                  onclick={() => handleCancel(download.id)}
+                  class="rounded border border-error/30 px-3 py-1.5 text-xs font-medium text-error hover:bg-error-light"
+                >
+                  취소
+                </button>
+              {:else if download.status === 'failed' || download.status === 'cancelled'}
+                <button
+                  onclick={() => handleRetry(download.id)}
+                  class="rounded border border-primary/30 px-3 py-1.5 text-xs font-medium text-primary hover:bg-primary-light"
+                >
+                  재시도
+                </button>
+                <button
+                  onclick={() => handleDelete(download.id)}
+                  class="rounded border border-border px-3 py-1.5 text-xs font-medium text-muted-foreground hover:bg-muted"
+                >
+                  삭제
+                </button>
+              {:else if download.status === 'completed'}
+                {#if download.output_path}
+                  <span class="self-center text-xs text-muted-foreground" title={download.output_path}>저장됨</span>
+                {/if}
+                <button
+                  onclick={() => handleDelete(download.id)}
+                  class="rounded border border-border px-3 py-1.5 text-xs font-medium text-muted-foreground hover:bg-muted"
+                >
+                  삭제
+                </button>
+              {/if}
+            </div>
+          </div>
+        </article>
+      {/each}
+    </div>
+
+    <div class="hidden bg-white rounded-lg border border-border overflow-hidden md:block">
       <table class="w-full">
         <thead class="bg-background border-b border-border">
           <tr>
@@ -530,7 +630,7 @@
 
     <!-- 페이지네이션 -->
     {#if totalPages > 1}
-      <div class="flex items-center justify-between mt-4">
+      <div class="flex flex-col gap-3 mt-4 sm:flex-row sm:items-center sm:justify-between">
         <div class="text-sm text-muted-foreground">
           총 {total}개 중 {(page - 1) * pageSize + 1}-{Math.min(page * pageSize, total)}개
         </div>

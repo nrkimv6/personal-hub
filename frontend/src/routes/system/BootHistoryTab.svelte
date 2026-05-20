@@ -147,7 +147,52 @@
         아직 기록된 부팅 이력이 없습니다.
       </div>
     {:else}
-      <div class="overflow-hidden rounded-lg border border-border">
+      <div class="md:hidden space-y-3">
+        {#each items as item}
+          <article class="rounded-lg border border-border bg-background p-3 shadow-sm {item.needs_attention ? 'bg-amber-50/60' : item.current ? 'bg-emerald-50/40' : ''}">
+            <div class="flex items-start justify-between gap-3">
+              <div class="min-w-0 flex-1">
+                <div class="flex flex-wrap items-center gap-2">
+                  <span class={`inline-flex rounded-full px-2.5 py-1 text-xs font-medium ${statusClass(item.status)}`}>
+                    {statusLabel(item.status)}
+                  </span>
+                  {#if item.current}
+                    <span class="inline-flex rounded-full bg-emerald-600 px-2.5 py-1 text-xs font-medium text-white">현재</span>
+                  {/if}
+                  {#if item.needs_attention}
+                    <span class="inline-flex rounded-full bg-red-600 px-2.5 py-1 text-xs font-medium text-white">주의</span>
+                  {/if}
+                </div>
+                <div class="mt-2 text-sm font-medium text-foreground">{formatDateTime(item.started_at)}</div>
+                <div class="mt-1 text-xs text-muted-foreground">PID {item.pid}</div>
+              </div>
+              <div class="shrink-0 text-right text-xs text-muted-foreground">
+                <div>업타임 {formatDuration(item.uptime_seconds)}</div>
+                <div class="mt-1">재기동 {formatDuration(item.restart_gap_seconds)}</div>
+              </div>
+            </div>
+            <div class="mt-3 flex flex-wrap gap-2 text-xs">
+              <span class={`inline-flex rounded-full px-2.5 py-1 font-medium ${causeClass(item.end_cause, item.inferred_end)}`}>
+                {causeLabel(item.end_cause)}
+              </span>
+              {#if item.inferred_end}
+                <span class="inline-flex rounded-full bg-violet-600 px-2.5 py-1 font-medium text-white">추정</span>
+              {/if}
+              {#if item.restarted}
+                <span class="inline-flex rounded-full bg-blue-100 px-2.5 py-1 font-medium text-blue-700">다음 세션 시작</span>
+              {/if}
+            </div>
+            {#if item.end_details}
+              <p class="mt-2 line-clamp-2 text-xs text-muted-foreground">{item.end_details}</p>
+            {/if}
+            {#if item.last_request}
+              <p class="mt-2 truncate text-xs text-muted-foreground" title={item.last_request}>최근 요청: {item.last_request}</p>
+            {/if}
+          </article>
+        {/each}
+      </div>
+
+      <div class="hidden overflow-hidden rounded-lg border border-border md:block">
         <div class="overflow-x-auto">
           <table class="min-w-full divide-y divide-border text-sm">
             <thead class="bg-secondary/40">
