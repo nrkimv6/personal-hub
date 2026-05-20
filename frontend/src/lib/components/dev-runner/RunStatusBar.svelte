@@ -324,7 +324,11 @@
 						<span class="hidden sm:block text-[10px] text-muted-foreground shrink-0 font-mono">{runner.engine}</span>
 					{/if}
 
-					{#if resolveStaleLabel(runner)}
+					{#if runner.merge_status === 'approval_required'}
+						<span class="hidden shrink-0 rounded bg-yellow-100 px-1.5 py-0.5 text-[10px] text-yellow-800 md:inline-flex" title="service_lock: 실행 중 서비스와 겹치는 변경 — 승인 필요">
+							승인 필요 · service_lock
+						</span>
+					{:else if resolveStaleLabel(runner)}
 						<span class="hidden shrink-0 rounded bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground md:inline-flex">
 							{resolveStaleLabel(runner)}
 						</span>

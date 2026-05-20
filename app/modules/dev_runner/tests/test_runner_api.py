@@ -1065,6 +1065,73 @@ class TestMergeApprovalPayload:
         assert "MERGE_PRECHECK_FAILED[service_lock]" in data["message"]
         assert data["gate_evidence_summary"]["reason"] == "service_lock"
 
+    async def test_runner_list_includes_gate_evidence_changed_running_fields(self, client, mock_executor_redis):
+        """display: runner list API preserves gate_evidence_summary changed/running fields for service_lock."""
+        fake_async = mock_executor_redis["async"]
+        rid = "gate-evidence-fields-001"
+        prefix = f"plan-runner:runners:{rid}"
+        await fake_async.sadd("plan-runner:active_runners", rid)
+        await fake_async.set(f"{prefix}:status", "stopped")
+        await fake_async.set(f"{prefix}:trigger", "user")
+        await fake_async.set(f"{prefix}:plan_file", "docs/plan/test.md")
+        await fake_async.set(f"{prefix}:merge_status", "approval_required")
+        await fake_async.set(f"{prefix}:merge_reason", "service_lock")
+        await fake_async.set(
+            f"{prefix}:gate_evidence_summary",
+            json.dumps({
+                "reason": "service_lock",
+                "status": "approval_required",
+                "changed": ["scripts/services/service_run.py"],
+                "running": ["MonitorPage-Admin"],
+            }),
+        )
+
+        response = await client.get("/api/v1/dev-runner/runners")
+        assert response.status_code == 200
+        data = response.json()
+        runner = next((r for r in data if r["runner_id"] == rid), None)
+        assert runner is not None
+        assert runner["merge_status"] == "approval_required"
+        ges = runner["gate_evidence_summary"]
+        assert ges is not None
+        assert ges["reason"] == "service_lock"
+        assert ges["changed"] == ["scripts/services/service_run.py"]
+        assert ges["running"] == ["MonitorPage-Admin"]
+
+    async def test_runner_detail_includes_gate_evidence_changed_running_fields(self, client, mock_executor_redis):
+        """display: runner detail API preserves changed/running from gate_evidence_summary."""
+        fake_async = mock_executor_redis["async"]
+        rid = "gate-evidence-detail-001"
+        prefix = f"plan-runner:runners:{rid}"
+        await fake_async.zadd("plan-runner:recent_runners", {rid: 1})
+        await fake_async.set(f"{prefix}:status", "stopped")
+        await fake_async.set(f"{prefix}:trigger", "user")
+        await fake_async.set(f"{prefix}:plan_file", "docs/plan/test.md")
+        await fake_async.set(f"{prefix}:merge_status", "approval_required")
+        await fake_async.set(f"{prefix}:merge_reason", "service_lock")
+        await fake_async.set(f"{prefix}:branch_exists", "true")
+        await fake_async.set(
+            f"{prefix}:gate_evidence_summary",
+            json.dumps({
+                "reason": "service_lock",
+                "status": "approval_required",
+                "changed": ["scripts/services/service_run.py", "app/modules/dev_runner/services/merge_service.py"],
+                "running": ["MonitorPage-Admin", "MonitorPage-Public"],
+            }),
+        )
+
+        response = await client.get(f"/api/v1/dev-runner/runners/{rid}")
+        assert response.status_code == 200
+        data = response.json()
+        assert data["display_state"] == "approval_required"
+        ges = data["gate_evidence_summary"]
+        assert ges is not None
+        assert ges["changed"] == [
+            "scripts/services/service_run.py",
+            "app/modules/dev_runner/services/merge_service.py",
+        ]
+        assert ges["running"] == ["MonitorPage-Admin", "MonitorPage-Public"]
+
 
 class TestMergeQueueReadContract:
     async def test_get_merge_queue_R_reads_pending_db_rows_before_redis(
