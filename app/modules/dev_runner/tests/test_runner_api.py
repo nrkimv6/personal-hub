@@ -18,6 +18,7 @@ from sqlalchemy.pool import StaticPool
 
 from app.modules.claude_worker.services.profile_store import LLMProfile
 from app.modules.dev_runner.schemas import RunRequest
+from app.modules.dev_runner.services import executor_service as executor_module
 from app.modules.dev_runner.services import visibility
 from app.modules.dev_runner.services.executor_service import executor_service
 from app.modules.dev_runner.services.event_payload import build_status_payload
@@ -88,7 +89,7 @@ class TestGetStatus:
         assert data["pid"] == 12345
         assert data["listener_alive"] is True
 
-    async def test_status_prefers_recent_approval_required_runner(self, client, mock_executor_redis, runner_state_db):
+    async def test_status_prefers_recent_approval_required_runner(self, client, mock_executor_redis, runner_state_db, tmp_path, monkeypatch):
         fake_async = mock_executor_redis["async"]
         rid = "approval-status-001"
         prefix = f"plan-runner:runners:{rid}"
@@ -96,7 +97,7 @@ class TestGetStatus:
         await fake_async.zadd("plan-runner:recent_runners", {rid: 1})
         await fake_async.set(f"{prefix}:status", "stopped")
         await fake_async.set(f"{prefix}:trigger", "user")
-        await fake_async.set(f"{prefix}:plan_file", "docs/plan/approval.md")
+        await fake_async.set(f"{prefix}:plan_file", _real_plan_evidence(tmp_path, monkeypatch, "2026-05-20_approval-status.md"))
         await fake_async.set(f"{prefix}:merge_status", "approval_required")
         await fake_async.set(f"{prefix}:merge_reason", "service_lock")
         await fake_async.set(f"{prefix}:merge_message", "MERGE_PRECHECK_FAILED[service_lock]")
@@ -827,10 +828,14 @@ class TestListRunners:
         assert data[0]["display_state"] == "approval_required"
         assert data[0]["hide_stale_branch_badge"] is True
 
-    async def test_list_runners_preserves_completed_merge_error_with_post_merge_tasks(self, client, mock_executor_redis, tmp_path):
+    async def test_list_runners_preserves_completed_merge_error_with_post_merge_tasks(self, client, mock_executor_redis, tmp_path, monkeypatch):
         """T5-R: completed lifecycle과 merge error/post-merge 잔여는 HTTP 응답에서 함께 보존된다."""
         fake_async = mock_executor_redis["async"]
-        plan = tmp_path / "blocked-plan.md"
+        plan_file = "docs/plan/2026-05-20_blocked-real-plan.md"
+        plan = tmp_path / "docs" / "plan" / "2026-05-20_blocked-real-plan.md"
+        plan.parent.mkdir(parents=True, exist_ok=True)
+        monkeypatch.setattr(executor_module, "PROJECT_ROOT", tmp_path)
+        monkeypatch.setattr(visibility, "_project_root", lambda: tmp_path)
         plan.write_text(
             "# blocked\n\n"
             "### Phase 1\n\n"
@@ -844,7 +849,7 @@ class TestListRunners:
         await fake_async.zadd("plan-runner:recent_runners", {rid: 1})
         await fake_async.set(f"{prefix}:status", "stopped")
         await fake_async.set(f"{prefix}:trigger", "user")
-        await fake_async.set(f"{prefix}:plan_file", str(plan))
+        await fake_async.set(f"{prefix}:plan_file", plan_file)
         await fake_async.set(f"{prefix}:exit_reason", "completed")
         await fake_async.set(f"{prefix}:merge_status", "error")
         await fake_async.set(f"{prefix}:merge_reason", "stale_merge_blocked")
@@ -901,14 +906,14 @@ class TestListRunners:
             runner_state_db.query(DevRunnerState).filter_by(runner_id=rid).delete()
             runner_state_db.commit()
 
-    async def test_get_all_runners_B_runner_state_redis_active_without_db_backfills_row(self, client, mock_executor_redis, runner_state_db):
+    async def test_get_all_runners_B_runner_state_redis_active_without_db_backfills_row(self, client, mock_executor_redis, runner_state_db, tmp_path, monkeypatch):
         fake_async = mock_executor_redis["async"]
         rid = "redis-only-runner-001"
         prefix = f"plan-runner:runners:{rid}"
         await fake_async.sadd("plan-runner:active_runners", rid)
         await fake_async.set(f"{prefix}:status", "running")
         await fake_async.set(f"{prefix}:trigger", "user")
-        await fake_async.set(f"{prefix}:plan_file", "docs/plan/redis-only.md")
+        await fake_async.set(f"{prefix}:plan_file", _real_plan_evidence(tmp_path, monkeypatch, "2026-05-20_redis-only.md"))
         await fake_async.set(f"{prefix}:branch", "impl/redis-only")
         await fake_async.set(f"{prefix}:worktree_path", "D:/work/redis-only")
         await fake_async.set(f"{prefix}:start_time", datetime.now().isoformat())
@@ -919,7 +924,7 @@ class TestListRunners:
             assert response.status_code == 200
             row = runner_state_db.get(DevRunnerState, rid)
             assert row is not None
-            assert row.plan_file == "docs/plan/redis-only.md"
+            assert row.plan_file == "docs/plan/2026-05-20_redis-only.md"
             assert row.branch == "impl/redis-only"
         finally:
             runner_state_db.query(DevRunnerMergeRequest).filter_by(runner_id=rid).delete()
@@ -1203,7 +1208,7 @@ class TestApprovalRequiredDivergeEvidence:
     수정: gate_evidence_summary에 diverged_commits, already_in_main_commits 필드 보존
     """
 
-    async def test_gate_evidence_summary_preserves_diverge_fields(self, client, mock_executor_redis):
+    async def test_gate_evidence_summary_preserves_diverge_fields(self, client, mock_executor_redis, tmp_path, monkeypatch):
         """approval_required runner의 gate_evidence_summary에 diverge evidence가 보존된다."""
         fake_async = mock_executor_redis["async"]
         rid = "approval-diverge-001"
@@ -1222,7 +1227,7 @@ class TestApprovalRequiredDivergeEvidence:
         await fake_async.zadd("plan-runner:recent_runners", {rid: 100})
         await fake_async.set(f"{prefix}:status", "stopped")
         await fake_async.set(f"{prefix}:trigger", "user")
-        await fake_async.set(f"{prefix}:plan_file", "docs/plan/test-diverge.md")
+        await fake_async.set(f"{prefix}:plan_file", _real_plan_evidence(tmp_path, monkeypatch, "2026-05-20_test-diverge.md"))
         await fake_async.set(f"{prefix}:merge_status", "approval_required")
         await fake_async.set(f"{prefix}:merge_reason", "service_lock")
         await fake_async.set(f"{prefix}:merge_message", "MERGE_PRECHECK_FAILED[service_lock]: branch diverged 1080 commits from main (2 already in main)")
