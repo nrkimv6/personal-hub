@@ -27,7 +27,7 @@ from app.modules.claude_worker.services.profile_store import (
 from app.modules.claude_worker.services.profile_env import ENGINE_ENV_KEYS
 from app.modules.dev_runner.services.plan_path_resolver import is_archive_or_history_path
 from app.modules.dev_runner.services.settings_service import settings_service
-from app.modules.dev_runner.services.visibility import is_visible_runner
+from app.modules.dev_runner.services.visibility import is_visible_runner, is_visible_runner_evidence
 from app.modules.dev_runner.services.log_file_resolver import LogFileResolver
 from app.modules.dev_runner.schemas import (
     OrphanRunnerCandidate,
@@ -477,9 +477,22 @@ class ExecutorService:
 
     def _best_effort_backfill_runner_state_from_redis(self, runner_id: str, data: dict, recent_meta: dict | None = None) -> None:
         recent_meta = recent_meta or {}
+        if not is_visible_runner_evidence(
+            runner_id=runner_id,
+            trigger=data.get("trigger") or recent_meta.get("trigger"),
+            plan_file=data.get("plan_file") or recent_meta.get("plan_file"),
+            worktree_path=data.get("worktree_path") or recent_meta.get("worktree_path"),
+            branch=data.get("branch") or recent_meta.get("branch"),
+            status=data.get("status"),
+            test_source=data.get("test_source") or recent_meta.get("test_source"),
+            log_file=recent_meta.get("stream_log_path") or recent_meta.get("log_file_path"),
+        ):
+            logger.debug("[dev-runner] skip synthetic runner state DB backfill: runner=%s", runner_id)
+            return
         metadata = {
             "engine": data.get("engine") or recent_meta.get("engine"),
             "trigger": data.get("trigger") or recent_meta.get("trigger"),
+            "test_source": data.get("test_source") or recent_meta.get("test_source"),
             "execution_count": data.get("execution_count") or recent_meta.get("execution_count"),
             "merge_status": data.get("merge_status") or recent_meta.get("merge_status"),
             "merge_reason": data.get("merge_reason") or recent_meta.get("merge_reason"),
@@ -1160,7 +1173,17 @@ class ExecutorService:
                 continue
             meta = evidence.get("meta") or {}
             trigger = meta.get("trigger")
-            if not is_visible_runner(trigger, runner_id):
+            plan_file = meta.get("plan") or meta.get("plan_key")
+            header = self._read_plan_header_metadata(plan_file)
+            if not is_visible_runner_evidence(
+                runner_id=runner_id,
+                trigger=trigger,
+                plan_file=plan_file,
+                worktree_path=header.get("worktree_path"),
+                branch=header.get("branch"),
+                redis_missing=True,
+                log_file=evidence.get("log_file"),
+            ):
                 continue
             warnings = list(evidence.get("warnings") or [])
             if "runner_id_mismatch" in warnings:
@@ -1174,9 +1197,7 @@ class ExecutorService:
             if pid_kind not in {"parent", "child_engine", "none"}:
                 pid_kind = "none"
 
-            plan_file = meta.get("plan") or meta.get("plan_key")
             engine = meta.get("engine") or (process.get("engine") if process else None)
-            header = self._read_plan_header_metadata(plan_file)
             confidence = "low"
             mode = "log_only"
             if pid_kind == "parent":
@@ -1411,8 +1432,16 @@ class ExecutorService:
             cutoff_ts = time.time() - RECENT_RUNNERS_TTL
             expired_entries = await self.async_redis.zrangebyscore(RECENT_RUNNERS_KEY, "-inf", cutoff_ts)
             for rid in expired_entries:
-                trigger = await self.async_redis.get(self._runner_key(rid, "trigger"))
-                if is_visible_runner(trigger, rid):
+                d_expired = await self._get_runner_fields(rid, "trigger", "plan_file", "worktree_path", "branch", "test_source")
+                if is_visible_runner_evidence(
+                    runner_id=rid,
+                    trigger=d_expired.get("trigger"),
+                    plan_file=d_expired.get("plan_file"),
+                    worktree_path=d_expired.get("worktree_path"),
+                    branch=d_expired.get("branch"),
+                    redis_missing=False,
+                    test_source=d_expired.get("test_source"),
+                ):
                     # user/user:all: 만료되어도 dismiss 전까지 보존
                     continue
                 await self.async_redis.zrem(RECENT_RUNNERS_KEY, rid)
@@ -1441,7 +1470,7 @@ class ExecutorService:
                     d = await self._get_runner_fields(rid, "status", "pid", "plan_file", "engine",
                                                       "start_time", "execution_count", "worktree_path", "merge_status",
                                                       "merge_reason", "merge_message",
-                                                      "branch", "trigger", "exit_reason", "stop_stage", "error",
+                                                      "branch", "trigger", "test_source", "exit_reason", "stop_stage", "error",
                                                       "worktree_exists", "branch_exists",
                                                       "branch_merged_to_main", "metadata_checked_at",
                                                       "gate_evidence_summary")
@@ -1551,8 +1580,19 @@ class ExecutorService:
 
                     # orphan: runner가 실행 중이 아닌데 DB에 running/merge_pending 워크플로우가 있는 경우
                     is_orphan = self._fix_orphan_workflows(db, rid, running, status)
-                    # visibility.py 단일 함수로 판별 (화이트리스트 + 이중 방어)
-                    is_user = is_visible_runner(trigger, rid)
+                    test_source = d["test_source"] or db_meta.get("test_source")
+                    # visibility.py 단일 함수로 판별 (화이트리스트 + evidence gate)
+                    is_user = is_visible_runner_evidence(
+                        runner_id=rid,
+                        trigger=trigger,
+                        plan_file=plan_file,
+                        worktree_path=worktree_path,
+                        branch=branch,
+                        redis_missing=redis_missing,
+                        status=status,
+                        test_source=test_source,
+                        log_file=str(filesystem_log) if filesystem_log else None,
+                    )
                     # plan_file 소실 시 recent-meta/log header/worktree_path/branch 순으로 fallback 이름 추출
                     display_plan_name: str | None = None
                     if not plan_file:

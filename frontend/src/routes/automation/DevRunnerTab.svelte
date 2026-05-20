@@ -230,6 +230,7 @@
 		log_file_found?: boolean;
 		exit_reason?: string | null;
 		error?: string | null;
+		visible?: boolean;
 		display_plan_name?: string | null;
 		execution_count?: number | null;
 		remaining_post_merge_tasks?: number | null;
@@ -317,6 +318,7 @@
 			log_file_found: runner.log_file_found ?? false,
 			exit_reason: runner.exit_reason ?? undefined,
 			error: runner.error ?? undefined,
+			visible: runner.visible === true,
 			display_plan_name: runner.display_plan_name ?? null,
 			execution_count: runner.execution_count ?? null,
 			remaining_post_merge_tasks: runner.remaining_post_merge_tasks ?? null,
@@ -510,10 +512,11 @@
 		if (typeof runner.visible === 'boolean') {
 			return runner.visible;
 		}
-		return runner.trigger === 'user' || runner.trigger === 'user:all';
+		return false;
 	}
 
 	function shouldPreserveMissingRunnerTab(tab: RunnerTab): boolean {
+		if (tab.visible === false) return false;
 		if (tab.running) return true;
 		if (tab.orphan_alive || tab.can_reattach) return true;
 		return tab.confidence === 'high' || tab.confidence === 'medium';

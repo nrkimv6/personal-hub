@@ -5,7 +5,8 @@ visibility.py의 단일 진실 원천 함수를 검증한다.
 """
 
 import pytest
-from app.modules.dev_runner.services.visibility import is_visible_runner
+from app.modules.dev_runner.services import visibility
+from app.modules.dev_runner.services.visibility import is_visible_runner, is_visible_runner_evidence
 
 
 class TestIsVisibleRunner:
@@ -70,3 +71,65 @@ class TestIsVisibleRunner:
     def test_tc_pytest_prefix_with_none_trigger_false(self):
         """E: runner_id="tc-pytest-xxx", trigger=None → False"""
         assert is_visible_runner(None, "tc-pytest-xxx") is False
+
+
+class TestIsVisibleRunnerEvidence:
+    def test_user_trigger_without_plan_evidence_is_false(self):
+        assert is_visible_runner_evidence(runner_id="abc12345", trigger="user") is False
+
+    def test_existing_plan_evidence_makes_user_runner_visible(self, tmp_path, monkeypatch):
+        plans_dir = tmp_path / ".worktrees" / "plans" / "docs" / "plan"
+        plans_dir.mkdir(parents=True)
+        (plans_dir / "2026-05-20_real-plan.md").write_text("# real\n", encoding="utf-8")
+        monkeypatch.setattr(visibility, "_project_root", lambda: tmp_path)
+
+        assert is_visible_runner_evidence(
+            runner_id="abc12345",
+            trigger="user",
+            plan_file="docs/plan/2026-05-20_real-plan.md",
+        ) is True
+
+    @pytest.mark.parametrize("plan_file", [
+        "docs/plan/test.md",
+        "docs/plan/blocked-plan.md",
+        "docs/plan/approval-t5.md",
+        "docs/plan/approval-t5b.md",
+        "docs/plan/orphan.md",
+    ])
+    def test_synthetic_plan_names_are_never_visible(self, tmp_path, monkeypatch, plan_file):
+        plans_dir = tmp_path / ".worktrees" / "plans" / "docs" / "plan"
+        plans_dir.mkdir(parents=True)
+        (plans_dir / plan_file.rsplit("/", 1)[-1]).write_text("# synthetic\n", encoding="utf-8")
+        monkeypatch.setattr(visibility, "_project_root", lambda: tmp_path)
+
+        assert is_visible_runner_evidence(
+            runner_id="abc12345",
+            trigger="user",
+            plan_file=plan_file,
+        ) is False
+
+    def test_test_source_overrides_user_trigger(self, tmp_path, monkeypatch):
+        plans_dir = tmp_path / ".worktrees" / "plans" / "docs" / "plan"
+        plans_dir.mkdir(parents=True)
+        (plans_dir / "2026-05-20_real-plan.md").write_text("# real\n", encoding="utf-8")
+        monkeypatch.setattr(visibility, "_project_root", lambda: tmp_path)
+
+        assert is_visible_runner_evidence(
+            runner_id="abc12345",
+            trigger="user",
+            plan_file="docs/plan/2026-05-20_real-plan.md",
+            test_source="unit-test",
+        ) is False
+
+    def test_pytest_temp_worktree_path_is_negative_evidence(self, tmp_path, monkeypatch):
+        plans_dir = tmp_path / ".worktrees" / "plans" / "docs" / "plan"
+        plans_dir.mkdir(parents=True)
+        (plans_dir / "2026-05-20_real-plan.md").write_text("# real\n", encoding="utf-8")
+        monkeypatch.setattr(visibility, "_project_root", lambda: tmp_path)
+
+        assert is_visible_runner_evidence(
+            runner_id="abc12345",
+            trigger="user",
+            plan_file="docs/plan/2026-05-20_real-plan.md",
+            worktree_path=str(tmp_path / "pytest-of-user" / "pytest-1" / "worktree"),
+        ) is False

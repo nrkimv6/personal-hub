@@ -11,7 +11,9 @@ import fakeredis.aioredis
 import redis as sync_redis
 import redis.asyncio as aioredis
 from unittest.mock import patch, MagicMock
+from types import SimpleNamespace
 
+from app.modules.dev_runner.services import visibility
 from app.modules.dev_runner.services.executor_service import ExecutorService
 
 RUNNER_KEY_PREFIX = "plan-runner:runners"
@@ -27,11 +29,11 @@ async def _make_executor_with_fakeredis():
     return svc, fake_redis
 
 
-async def _seed_runner(fake_redis, runner_id: str, trigger: str | None, status: str = "running"):
+async def _seed_runner(fake_redis, runner_id: str, trigger: str | None, status: str = "running", plan_file: str = "docs/plan/test.md"):
     """fakeredis에 runner 키를 직접 세팅"""
     await fake_redis.sadd(ACTIVE_RUNNERS_KEY, runner_id)
     await fake_redis.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:status", status)
-    await fake_redis.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:plan_file", "docs/plan/test.md")
+    await fake_redis.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:plan_file", plan_file)
     if trigger is not None:
         await fake_redis.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:trigger", trigger)
     # trigger 키를 세팅하지 않으면 Redis에서 None 반환 → TTL 만료/소실 시나리오
@@ -161,11 +163,17 @@ async def test_reproduce_5th_visible_leak():
 
 
 @pytest.mark.asyncio
-async def test_user_trigger_visible_true_integration():
-    """통합: trigger="user" → get_all_runners() → visible=True (프론트엔드 정상 표시)"""
+async def test_user_trigger_with_real_plan_evidence_visible_true_integration(tmp_path, monkeypatch):
+    """통합: trigger="user" + 실제 plan evidence → get_all_runners() → visible=True."""
+    plans_dir = tmp_path / ".worktrees" / "plans" / "docs" / "plan"
+    plans_dir.mkdir(parents=True)
+    plan_name = "2026-05-20_real-user-plan.md"
+    (plans_dir / plan_name).write_text("# real\n", encoding="utf-8")
+    monkeypatch.setattr(visibility, "_project_root", lambda: tmp_path)
+
     svc, fake_redis = await _make_executor_with_fakeredis()
     runner_id = "user-runner-001"
-    await _seed_runner(fake_redis, runner_id, trigger="user")
+    await _seed_runner(fake_redis, runner_id, trigger="user", plan_file=f"docs/plan/{plan_name}")
 
     mock_db = MagicMock()
     mock_db.query.return_value.filter.return_value.first.return_value = None
@@ -178,3 +186,66 @@ async def test_user_trigger_visible_true_integration():
         f"trigger='user' runner가 visible=False! "
         f"프론트엔드에서 사용자 실행 runner가 표시되지 않습니다. visible={runner.visible!r}"
     )
+
+
+@pytest.mark.asyncio
+async def test_user_trigger_synthetic_plan_hidden_integration():
+    """통합: trigger=user여도 synthetic plan이면 get_all_runners()에서 visible=False."""
+    svc, fake_redis = await _make_executor_with_fakeredis()
+    runner_id = "synthetic-user-runner-001"
+    await _seed_runner(fake_redis, runner_id, trigger="user", plan_file="docs/plan/approval-t5.md")
+
+    mock_db = MagicMock()
+    mock_db.query.return_value.filter.return_value.first.return_value = None
+    with patch("app.database.SessionLocal", return_value=mock_db):
+        runners = await svc.get_all_runners()
+
+    assert len(runners) == 1
+    assert runners[0].visible is False
+
+
+@pytest.mark.asyncio
+async def test_user_trigger_synthetic_plan_skips_db_backfill(monkeypatch):
+    """통합: Redis synthetic user row는 Postgres mirror backfill 대상이 아니다."""
+    svc, fake_redis = await _make_executor_with_fakeredis()
+    runner_id = "synthetic-backfill-user-001"
+    await _seed_runner(fake_redis, runner_id, trigger="user", plan_file="docs/plan/blocked-plan.md")
+    upsert = MagicMock()
+    monkeypatch.setattr(svc, "_best_effort_upsert_runner_state", upsert)
+
+    mock_db = MagicMock()
+    mock_db.query.return_value.filter.return_value.first.return_value = None
+    with patch("app.database.SessionLocal", return_value=mock_db):
+        runners = await svc.get_all_runners()
+
+    assert [item.runner_id for item in runners] == [runner_id]
+    assert runners[0].visible is False
+    upsert.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_db_only_user_trigger_synthetic_plan_hidden_integration(monkeypatch):
+    """통합: Postgres mirror row만 남아도 synthetic plan은 visible=False."""
+    svc, _fake_redis = await _make_executor_with_fakeredis()
+    runner_id = "db-only-synthetic-user-001"
+    row = SimpleNamespace(
+        runner_id=runner_id,
+        status="stopped",
+        plan_file="docs/plan/test.md",
+        started_at=None,
+        branch=None,
+        worktree_path=None,
+        exit_reason=None,
+        merge_requested=False,
+        metadata_json={"trigger": "user"},
+    )
+    monkeypatch.setattr(svc, "_load_db_runner_states", lambda limit=200: {runner_id: row})
+
+    mock_db = MagicMock()
+    mock_db.query.return_value.filter.return_value.first.return_value = None
+    with patch("app.database.SessionLocal", return_value=mock_db):
+        runners = await svc.get_all_runners()
+
+    matching = [item for item in runners if item.runner_id == runner_id]
+    assert len(matching) == 1
+    assert matching[0].visible is False

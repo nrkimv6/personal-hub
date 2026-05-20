@@ -6,6 +6,7 @@ import redis
 
 from app.modules.dev_runner.config import config
 from app.modules.dev_runner.services.log_file_resolver import LogFileResolver
+from app.modules.dev_runner.services.visibility import is_visible_runner_evidence
 from app.modules.dev_runner.services.redis_connection import RECENT_RUNNERS_TTL
 from app.shared.redis.client import RedisClient
 
@@ -232,16 +233,33 @@ class DiagnosticsService:
 
             db = SessionLocal()
             try:
-                db_ids = {row.runner_id for row in list_runner_states(db, limit=500)}
+                rows = list_runner_states(db, limit=500)
+                db_ids = {row.runner_id for row in rows}
             finally:
                 db.close()
 
             redis_only = sorted(redis_ids - db_ids)
             db_only = sorted(db_ids - redis_ids)
+            hidden_db_rows = []
+            for row in rows:
+                meta = getattr(row, "metadata_json", None) or {}
+                if meta.get("trigger") in {"user", "user:all"} and not is_visible_runner_evidence(
+                    runner_id=row.runner_id,
+                    trigger=meta.get("trigger"),
+                    plan_file=getattr(row, "plan_file", None),
+                    worktree_path=getattr(row, "worktree_path", None),
+                    branch=getattr(row, "branch", None),
+                    redis_missing=row.runner_id not in redis_ids,
+                    status=getattr(row, "status", None),
+                    test_source=meta.get("test_source"),
+                ):
+                    hidden_db_rows.append(row.runner_id)
             ok = not redis_only and not db_only
             detail = (
                 f"redis_only={len(redis_only)}, db_only={len(db_only)}"
+                f", hidden_db_rows={len(hidden_db_rows)}"
                 + (f" sample={','.join((redis_only + db_only)[:5])}" if (redis_only or db_only) else "")
+                + (f" hidden_sample={','.join(hidden_db_rows[:5])}" if hidden_db_rows else "")
             )
             steps.append({"step": 9, "name": "runner DB mirror drift", "ok": ok, "detail": detail})
         except Exception as e:
