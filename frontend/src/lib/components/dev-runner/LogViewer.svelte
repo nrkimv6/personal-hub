@@ -218,7 +218,7 @@
 			// full log API로 원천 취득 (isStale/truncation 없이 raw 그대로)
 			const res = await devRunnerLogApi.full(runnerId, 0, 5000);
 			logLines = res.lines.filter((raw: string) => {
-				const parsed = parseRawLine(raw, true);
+				const parsed = parseRawLine(raw, true, createLineId);
 				return parsed.tag !== 'NOISE';
 			});
 		} catch {
