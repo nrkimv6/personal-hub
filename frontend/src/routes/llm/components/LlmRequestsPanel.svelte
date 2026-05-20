@@ -237,7 +237,41 @@
 			<p class="text-lg">그룹화된 이력이 없습니다</p>
 		</div>
 	{:else}
-		<div class="bg-white rounded-lg border border-border overflow-x-auto mb-6">
+		<div class="md:hidden space-y-3 mb-6">
+			{#each callerGroups as group}
+				<article class="rounded-lg border border-border bg-card p-3 shadow-sm {group.has_success ? '' : 'bg-error-light'}">
+					<div class="flex items-start gap-3">
+						<input
+							type="checkbox"
+							checked={selectedGroupKeys.includes(getGroupKey(group))}
+							onchange={() => onToggleGroupSelect(group)}
+							class="mt-1 rounded"
+						/>
+						<div class="min-w-0 flex-1">
+							<div class="mb-2 flex flex-wrap items-center gap-2">
+								<span class="rounded-full bg-muted px-2 py-1 text-xs text-muted-foreground">{group.caller_type}</span>
+								<span class="rounded-full px-2 py-1 text-xs {getStatusColor(group.last_status)}">{getStatusLabel(group.last_status)}</span>
+								{#if group.has_success}
+									<span class="rounded-full bg-success-light px-2 py-1 text-xs text-success">성공 있음</span>
+								{:else}
+									<span class="rounded-full bg-error-light px-2 py-1 text-xs text-error">성공 없음</span>
+								{/if}
+							</div>
+							<h3 class="truncate font-mono text-sm text-foreground">{group.caller_id}</h3>
+							<p class="mt-1 line-clamp-2 text-xs text-muted-foreground" title={group.prompt}>{truncatePrompt(group.prompt)}</p>
+							<div class="mt-2 flex flex-wrap gap-2 text-xs text-muted-foreground">
+								<span>요청 {group.total_count}</span>
+								<span class="text-success">성공 {group.completed_count}</span>
+								<span class="text-error">실패 {group.failed_count}</span>
+								<span class="text-warning-foreground">대기 {group.pending_count}</span>
+							</div>
+						</div>
+						<div class="shrink-0 text-right text-xs text-muted-foreground">{formatDateTime(group.last_requested_at)}</div>
+					</div>
+				</article>
+			{/each}
+		</div>
+		<div class="hidden bg-white rounded-lg border border-border overflow-x-auto mb-6 md:block">
 			<table class="w-full min-w-[900px]">
 				<thead class="bg-background border-b border-border">
 					<tr>
@@ -301,7 +335,7 @@
 		</div>
 
 		{#if groupPages > 1}
-			<div class="flex justify-between items-center">
+			<div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
 				<span class="text-sm text-muted-foreground">
 					전체 {groupTotal}개 중 {(groupCurrentPage - 1) * groupPageSize + 1} - {Math.min(groupCurrentPage * groupPageSize, groupTotal)}
 				</span>
@@ -337,7 +371,57 @@
 		{/if}
 	</div>
 {:else}
-	<div class="bg-white rounded-lg border border-border overflow-x-auto mb-6">
+	<div class="md:hidden space-y-3 mb-6">
+		{#each requests as request (request.id)}
+			{@const pauseInfo = getPendingPauseInfo(request, quotaStatus)}
+			<article class="rounded-lg border border-border bg-card p-3 shadow-sm" onclick={() => onOpenRequest(request)}>
+				<div class="flex items-start gap-3">
+					<input
+						type="checkbox"
+						checked={selectedIds.includes(request.id)}
+						onchange={() => onToggleSelect(request.id)}
+						onclick={(e) => e.stopPropagation()}
+						class="mt-1 rounded"
+					/>
+					<div class="min-w-0 flex-1">
+						<div class="mb-2 flex flex-wrap items-center gap-2">
+							<span class="rounded-full bg-muted px-2 py-1 text-xs text-muted-foreground">#{request.id}</span>
+							{#if request.queue_name === 'system'}
+								<span class="rounded-full bg-blue-100 px-2 py-1 text-xs text-blue-700">system</span>
+							{:else}
+								<span class="rounded-full bg-gray-100 px-2 py-1 text-xs text-gray-600">utility</span>
+							{/if}
+							<span class="rounded-full px-2 py-1 text-xs {getStatusColor(request.status)}">{getStatusLabel(request.status)}</span>
+							{#if pauseInfo}
+								<span class="rounded-full px-2 py-1 text-xs {pauseInfo.tone === 'window' ? 'bg-blue-100 text-blue-700' : 'bg-warning-light text-warning-foreground'}" title={pauseInfo.title}>
+									{pauseInfo.label}
+								</span>
+							{/if}
+						</div>
+						<h3 class="truncate font-mono text-sm text-foreground">{request.caller_id}</h3>
+						<div class="mt-1 flex flex-wrap gap-2 text-xs text-muted-foreground">
+							<span>{request.caller_type}</span>
+							<span>{request.requested_by || '-'}</span>
+							<span>{request.provider ? (request.provider === 'claude' ? 'Claude' : 'Gemini') : 'Claude'}</span>
+						</div>
+					</div>
+					<div class="shrink-0 text-right text-xs text-muted-foreground">{formatDateTime(request.requested_at)}</div>
+				</div>
+				<div class="mt-3 flex flex-wrap justify-end gap-2" onclick={(e) => e.stopPropagation()}>
+					{#if request.status === 'pending'}
+						<button onclick={() => onCancelRequest(request.id)} class="rounded border border-warning/30 px-3 py-1.5 text-xs text-warning-foreground hover:bg-warning-light">취소</button>
+					{/if}
+					{#if request.status === 'failed' || request.status === 'completed'}
+						<button onclick={() => onRetryRequest(request.id)} class="rounded border border-primary/30 px-3 py-1.5 text-xs text-primary hover:bg-primary-light">
+							{request.status === 'completed' ? '재분석' : '재시도'}
+						</button>
+					{/if}
+					<button onclick={() => onDeleteRequest(request.id)} class="rounded border border-error/30 px-3 py-1.5 text-xs text-error hover:bg-error-light">삭제</button>
+				</div>
+			</article>
+		{/each}
+	</div>
+	<div class="hidden bg-white rounded-lg border border-border overflow-x-auto mb-6 md:block">
 		<table class="w-full min-w-[700px]">
 			<thead class="bg-background border-b border-border">
 				<tr>
@@ -436,7 +520,7 @@
 	</div>
 
 	{#if pages > 1}
-		<div class="flex justify-between items-center">
+		<div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
 			<span class="text-sm text-muted-foreground">
 				전체 {total}개 중 {(currentPage - 1) * pageSize + 1} - {Math.min(currentPage * pageSize, total)}
 			</span>

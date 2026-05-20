@@ -246,14 +246,14 @@
 
 	<!-- 필터 -->
 	<div class="card mb-6">
-		<div class="flex flex-wrap gap-4 items-center">
-			<div>
+		<div class="grid gap-3 sm:grid-cols-3 lg:flex lg:flex-wrap lg:items-center">
+			<div class="min-w-0">
 				<label for="sourceType" class="block text-sm font-medium text-foreground mb-1">소스</label>
 				<select
 					id="sourceType"
 					bind:value={sourceType}
 					onchange={handleFilterChange}
-					class="input input-sm w-40"
+					class="input input-sm w-full lg:w-40"
 				>
 					<option value="">전체</option>
 					<option value="instagram">Instagram</option>
@@ -264,13 +264,13 @@
 					<option value="report">보고서</option>
 				</select>
 			</div>
-			<div>
+			<div class="min-w-0">
 				<label for="status" class="block text-sm font-medium text-foreground mb-1">상태</label>
 				<select
 					id="status"
 					bind:value={status}
 					onchange={handleFilterChange}
-					class="input input-sm w-32"
+					class="input input-sm w-full lg:w-32"
 				>
 					<option value="">전체</option>
 					<option value="pending">대기</option>
@@ -279,13 +279,13 @@
 					<option value="failed">실패</option>
 				</select>
 			</div>
-			<div>
+			<div class="min-w-0">
 				<label for="period" class="block text-sm font-medium text-foreground mb-1">기간</label>
 				<select
 					id="period"
 					bind:value={period}
 					onchange={handleFilterChange}
-					class="input input-sm w-32"
+					class="input input-sm w-full lg:w-32"
 				>
 					<option value="today">오늘</option>
 					<option value="week">최근 7일</option>
@@ -318,7 +318,42 @@
 			<p class="text-muted-foreground">워커 실행 이력이 없습니다</p>
 		</div>
 	{:else}
-		<div class="card overflow-hidden">
+		<div class="md:hidden space-y-3">
+			{#each items as item}
+				{@const typeBadge = getHistoryTypeBadge(item.history_type)}
+				{@const sourceBadge = getSourceBadge(item.source_type)}
+				{@const statusBadge = getStatusBadge(item.status)}
+				<article class="rounded-lg border border-border bg-card p-3 shadow-sm">
+					<div class="flex items-start justify-between gap-3">
+						<div class="min-w-0 flex-1">
+							<div class="mb-2 flex flex-wrap gap-2">
+								<span class="rounded-full px-2 py-1 text-xs {typeBadge.class}">{typeBadge.text}</span>
+								<span class="rounded-full px-2 py-1 text-xs {sourceBadge.class}">{sourceBadge.text}</span>
+								<span class="rounded-full px-2 py-1 text-xs {statusBadge.class}">{statusBadge.text}</span>
+							</div>
+							<div class="text-sm font-medium text-foreground">
+								{#if item.history_type === 'schedule_run'}
+									{item.schedule_name || '-'}
+								{:else if item.history_type === 'google_search'}
+									{extractGoogleQuery(item.url)}
+								{:else}
+									{truncateUrl(item.url, 48)}
+								{/if}
+							</div>
+							<p class="mt-1 line-clamp-2 text-xs text-muted-foreground" title={item.error_message || getResultSummary(item)}>
+								{getResultSummary(item)}
+							</p>
+						</div>
+						<div class="shrink-0 text-right text-xs text-muted-foreground">
+							<div>{formatDateTime(item.started_at)}</div>
+							<div class="mt-1">{formatDuration(item.duration_seconds)}</div>
+						</div>
+					</div>
+				</article>
+			{/each}
+		</div>
+
+		<div class="card hidden overflow-hidden md:block">
 			<div class="overflow-x-auto">
 				<table class="min-w-full divide-y divide-border table-fixed">
 					<thead class="bg-background">
