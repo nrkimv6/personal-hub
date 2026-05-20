@@ -9,6 +9,7 @@
     PopupFallbackStrategy,
     PopupMonitorCheckNowResponse,
     PopupMonitorItem,
+    PopupMonitorKind,
     PopupMonitorLatest,
     PopupRequestProfile,
     PopupUrlMonitor,
@@ -17,15 +18,18 @@
   } from '$lib/types';
 
   const DEFAULT_POPUP_URL = 'https://pcmap.place.naver.com/popupstore/list';
+  const DEFAULT_PLACE_RESERVATION_URL = 'https://m.place.naver.com/popupstore/2015421037/home';
 
   interface PopupMonitorFormState {
     name: string;
     url: string;
+    monitor_kind: PopupMonitorKind;
     request_profile: PopupRequestProfile;
     fallback_strategy: PopupFallbackStrategy;
     proxy_enabled: boolean;
     notify_on_new: boolean;
     min_new_count: number;
+    stop_on_detected: boolean;
     monitoring_mode: MonitoringMode;
     service_account_id: number | null;
     browser_fallback_enabled: boolean;
@@ -35,11 +39,13 @@
   const createDefaultForm = (): PopupMonitorFormState => ({
     name: '',
     url: DEFAULT_POPUP_URL,
+    monitor_kind: 'popup_list',
     request_profile: 'A',
     fallback_strategy: 'reinforce',
     proxy_enabled: false,
     notify_on_new: true,
     min_new_count: 1,
+    stop_on_detected: false,
     monitoring_mode: 'anonymous',
     service_account_id: null,
     browser_fallback_enabled: false,
@@ -70,9 +76,12 @@
   let notice: string | null = null;
 
   $: selectedMonitor = monitors.find((monitor) => monitor.id === selectedMonitorId) ?? null;
-  $: latestItems = Array.isArray(latest?.snapshot?.items)
+  $: latestItems = selectedMonitor?.monitor_kind === 'popup_list' && Array.isArray(latest?.snapshot?.items)
     ? (latest?.snapshot?.items as PopupMonitorItem[])
     : [];
+  $: reservationState = selectedMonitor?.monitor_kind === 'place_reservation'
+    ? latest?.snapshot?.reservation_state
+    : null;
 
   function getErrorMessage(err: unknown): string {
     return err instanceof Error ? err.message : '알 수 없는 오류';
@@ -91,11 +100,13 @@
     form = {
       name: monitor.name || '',
       url: monitor.url,
+      monitor_kind: monitor.monitor_kind,
       request_profile: monitor.request_profile,
       fallback_strategy: monitor.fallback_strategy,
       proxy_enabled: monitor.proxy_enabled,
       notify_on_new: monitor.notify_on_new,
       min_new_count: Math.max(1, monitor.min_new_count || 1),
+      stop_on_detected: monitor.stop_on_detected,
       monitoring_mode: monitor.monitoring_mode,
       service_account_id: monitor.service_account_id,
       browser_fallback_enabled: monitor.browser_fallback_enabled,
@@ -107,6 +118,22 @@
     formMode = 'create';
     form = createDefaultForm();
     notice = null;
+  }
+
+  function selectMonitorKind(kind: PopupMonitorKind): void {
+    form.monitor_kind = kind;
+    if (kind === 'place_reservation' && form.url === DEFAULT_POPUP_URL) {
+      form.url = DEFAULT_PLACE_RESERVATION_URL;
+      form.stop_on_detected = true;
+    }
+    if (kind === 'popup_list' && form.url === DEFAULT_PLACE_RESERVATION_URL) {
+      form.url = DEFAULT_POPUP_URL;
+      form.stop_on_detected = false;
+    }
+  }
+
+  function monitorKindLabel(kind: PopupMonitorKind): string {
+    return kind === 'place_reservation' ? '예약신호' : '팝업목록';
   }
 
   async function loadAccounts(): Promise<void> {
@@ -182,11 +209,13 @@
     return {
       name: name.length > 0 ? name : null,
       url: form.url.trim(),
+      monitor_kind: form.monitor_kind,
       request_profile: form.request_profile,
       fallback_strategy: form.fallback_strategy,
       proxy_enabled: form.proxy_enabled,
       notify_on_new: form.notify_on_new,
       min_new_count: Math.max(1, Number(form.min_new_count || 1)),
+      stop_on_detected: form.stop_on_detected,
       monitoring_mode: form.monitoring_mode,
       service_account_id: form.service_account_id,
       browser_fallback_enabled: form.browser_fallback_enabled,
@@ -384,11 +413,24 @@
                       <div class="text-xs text-muted-foreground mt-1">
                         최근 체크: {formatDateTime(monitor.latest_checked_at)}
                       </div>
+                      {#if monitor.detected_at}
+                        <div class="text-xs text-warning mt-1">
+                          감지 종료: {formatDateTime(monitor.detected_at)}
+                        </div>
+                      {/if}
                     </td>
                     <td class="text-xs">
+                      <div class="mb-1">
+                        <Badge variant={monitor.monitor_kind === 'place_reservation' ? 'info' : 'secondary'}>
+                          {monitorKindLabel(monitor.monitor_kind)}
+                        </Badge>
+                      </div>
                       <div class="whitespace-nowrap">프로필: {monitor.request_profile}</div>
                       <div class="whitespace-nowrap">fallback: {monitor.fallback_strategy}</div>
                       <div class="whitespace-nowrap">프록시: {monitor.proxy_enabled ? 'ON' : 'OFF'}</div>
+                      {#if monitor.monitor_kind === 'place_reservation'}
+                        <div class="whitespace-nowrap">감지 종료: {monitor.stop_on_detected ? 'ON' : 'OFF'}</div>
+                      {/if}
                     </td>
                   </tr>
                 {/each}
@@ -431,9 +473,38 @@
             </div>
           </div>
 
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+            <div>
+              <label for="popup-monitor-kind" class="block text-sm font-medium text-foreground mb-1">감시 타입</label>
+              <select
+                id="popup-monitor-kind"
+                class="input"
+                value={form.monitor_kind}
+                onchange={(e) => selectMonitorKind((e.currentTarget as HTMLSelectElement).value as PopupMonitorKind)}
+              >
+                <option value="popup_list">팝업목록</option>
+                <option value="place_reservation">예약신호</option>
+              </select>
+            </div>
+            <div>
+              <div class="block text-sm font-medium text-foreground mb-1">종료 조건</div>
+              <label class="flex items-center gap-2 mt-2">
+                <input type="checkbox" bind:checked={form.stop_on_detected} disabled={form.monitor_kind !== 'place_reservation'} />
+                <span class="text-sm text-foreground">예약신호 감지 시 자동 종료</span>
+              </label>
+            </div>
+          </div>
+
           <div>
-            <label for="popup-monitor-url" class="block text-sm font-medium text-foreground mb-1">팝업 URL</label>
-            <input id="popup-monitor-url" class="input" bind:value={form.url} placeholder={DEFAULT_POPUP_URL} />
+            <label for="popup-monitor-url" class="block text-sm font-medium text-foreground mb-1">
+              {form.monitor_kind === 'place_reservation' ? 'Place URL' : '팝업 URL'}
+            </label>
+            <input
+              id="popup-monitor-url"
+              class="input"
+              bind:value={form.url}
+              placeholder={form.monitor_kind === 'place_reservation' ? DEFAULT_PLACE_RESERVATION_URL : DEFAULT_POPUP_URL}
+            />
           </div>
 
           <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
@@ -519,8 +590,11 @@
         <h3 class="text-base font-semibold">실행 결과 / 최신 리스트 / 이력</h3>
         {#if selectedMonitor}
           <div class="flex items-center gap-2 text-sm">
+            <Badge variant={selectedMonitor.monitor_kind === 'place_reservation' ? 'info' : 'secondary'}>
+              {monitorKindLabel(selectedMonitor.monitor_kind)}
+            </Badge>
             <Badge variant={selectedMonitor.is_enabled ? 'success' : 'secondary'}>
-              {selectedMonitor.is_enabled ? '활성' : '비활성'}
+              {selectedMonitor.is_enabled ? '활성' : selectedMonitor.detected_at ? '감지 종료' : '사용자 off'}
             </Badge>
             {#if latest?.last_run?.has_new}
               <Badge variant="warning">신규 {latest.last_run.new_count}건</Badge>
@@ -548,9 +622,43 @@
         <div class="space-y-6">
           <div>
             <div class="text-sm text-muted-foreground mb-2">
-              마지막 체크: {formatDateTime(latest?.latest_checked_at)} / 아이템 {latest?.item_count || 0}건
+              마지막 체크: {formatDateTime(latest?.latest_checked_at)}
+              {#if selectedMonitor.monitor_kind === 'popup_list'}
+                / 아이템 {latest?.item_count || 0}건
+              {/if}
             </div>
-            {#if latestItems.length === 0}
+            {#if selectedMonitor.monitor_kind === 'place_reservation'}
+              {#if reservationState}
+                <div class="grid grid-cols-1 md:grid-cols-5 gap-3 text-sm">
+                  <div>
+                    <div class="text-xs text-muted-foreground">available</div>
+                    <div class="font-medium">{reservationState.available ? 'true' : 'false'}</div>
+                  </div>
+                  <div>
+                    <div class="text-xs text-muted-foreground">bookingBusinessId</div>
+                    <div class="font-medium truncate" title={reservationState.booking_business_id || ''}>
+                      {reservationState.booking_business_id || '-'}
+                    </div>
+                  </div>
+                  <div>
+                    <div class="text-xs text-muted-foreground">bookingUrl</div>
+                    <div class="font-medium truncate" title={reservationState.booking_url || ''}>
+                      {reservationState.booking_url || '-'}
+                    </div>
+                  </div>
+                  <div>
+                    <div class="text-xs text-muted-foreground">ticket_count</div>
+                    <div class="font-medium">{reservationState.ticket_count}</div>
+                  </div>
+                  <div>
+                    <div class="text-xs text-muted-foreground">detected_at</div>
+                    <div class="font-medium">{formatDateTime(selectedMonitor.detected_at)}</div>
+                  </div>
+                </div>
+              {:else}
+                <p class="text-sm text-muted-foreground">예약신호 스냅샷이 없습니다.</p>
+              {/if}
+            {:else if latestItems.length === 0}
               <p class="text-sm text-muted-foreground">최신 스냅샷 아이템이 없습니다.</p>
             {:else}
               <div class="overflow-x-auto">

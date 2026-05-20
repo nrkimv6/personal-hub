@@ -50,6 +50,39 @@ def _build_apollo_html(items: list[dict]) -> str:
     )
 
 
+def _build_place_reservation_html(
+    *,
+    booking_business_id: str | None = None,
+    booking_url: str | None = None,
+    ticket_total: int = 0,
+) -> str:
+    apollo = {
+        "ROOT_QUERY": {
+            'placeDetail({"input":{"deviceType":"pc","id":"2015421037","isNx":false}})': {
+                "__typename": "PlaceDetail",
+                "naverBooking": {
+                    "__typename": "PlaceDetailNaverBooking",
+                    "bookingBusinessId": booking_business_id,
+                    "naverBookingUrl": booking_url,
+                    "naverBookingHubUrl": None,
+                    "bookingButtonName": "예약",
+                },
+                "tickets": {
+                    "__typename": "TicketItemsResult",
+                    "total": ticket_total,
+                    "items": [],
+                    "moreBookingUrl": "",
+                },
+            }
+        }
+    }
+    return (
+        "<html><body><script>"
+        f"window.__APOLLO_STATE__ = {json.dumps(apollo, ensure_ascii=False)}"
+        "</script></body></html>"
+    )
+
+
 class FakeFetcher:
     def __init__(self, results: list[PopupFetchResult]):
         self._results = results
@@ -417,4 +450,330 @@ async def test_monitor_service_preserves_partial_run_after_success(
     assert [run["status"] for run in runs_payload] == ["partial", "success"]
     assert runs_payload[0]["snapshot"]["items"] == []
     assert runs_payload[0]["snapshot"]["diff"]["new_count"] == 0
+    db.close()
+
+
+@pytest.mark.asyncio
+async def test_place_reservation_monitor_first_unavailable_run_saves_latest_baseline(
+    integration_session_factory,
+):
+    db = integration_session_factory()
+    monitor = PopupUrlMonitor(
+        name="place-baseline",
+        url="https://m.place.naver.com/popupstore/2015421037/home",
+        monitor_kind="place_reservation",
+        request_profile="A",
+        fallback_strategy="reinforce",
+        proxy_enabled=False,
+        notify_on_new=False,
+        min_new_count=1,
+        stop_on_detected=True,
+        monitoring_mode="anonymous",
+        is_enabled=True,
+    )
+    db.add(monitor)
+    db.commit()
+    db.refresh(monitor)
+
+    service = PopupMonitorService(
+        fetcher=FakeFetcher(
+            [
+                PopupFetchResult(
+                    success=True,
+                    html=_build_place_reservation_html(),
+                    status=200,
+                    final_url=monitor.url,
+                    request_profile="A",
+                    proxy_url=None,
+                    fallback_applied=False,
+                )
+            ]
+        ),
+        notification_service=MagicMock(should_notify=MagicMock(return_value=False)),
+    )
+
+    outcome = await service.run_monitor_once(db, monitor, trigger="manual")
+    db.refresh(monitor)
+    latest_payload = service.get_latest_payload(db, monitor.id)
+
+    assert outcome.status == "success"
+    assert outcome.has_new is False
+    assert monitor.is_enabled is True
+    assert monitor.detected_at is None
+    assert latest_payload["item_count"] == 0
+    assert latest_payload["snapshot"]["reservation_state"]["available"] is False
+    assert latest_payload["snapshot"]["meta"]["monitor_kind"] == "place_reservation"
+    db.close()
+
+
+@pytest.mark.asyncio
+async def test_place_reservation_monitor_false_to_true_disables_and_notifies(
+    integration_session_factory,
+):
+    db = integration_session_factory()
+    monitor = PopupUrlMonitor(
+        name="place-transition",
+        url="https://m.place.naver.com/popupstore/2015421037/home",
+        monitor_kind="place_reservation",
+        request_profile="A",
+        fallback_strategy="reinforce",
+        proxy_enabled=False,
+        notify_on_new=True,
+        min_new_count=1,
+        stop_on_detected=True,
+        monitoring_mode="anonymous",
+        is_enabled=True,
+    )
+    db.add(monitor)
+    db.commit()
+    db.refresh(monitor)
+
+    notification = MagicMock()
+    notification.should_notify.return_value = True
+    notification.send_notification_message = AsyncMock()
+    service = PopupMonitorService(
+        fetcher=FakeFetcher(
+            [
+                PopupFetchResult(
+                    success=True,
+                    html=_build_place_reservation_html(),
+                    status=200,
+                    final_url=monitor.url,
+                    request_profile="A",
+                    proxy_url=None,
+                    fallback_applied=False,
+                ),
+                PopupFetchResult(
+                    success=True,
+                    html=_build_place_reservation_html(
+                        booking_business_id="1643675",
+                        booking_url="https://booking.naver.com/booking/6/bizes/1643675/search",
+                    ),
+                    status=200,
+                    final_url=monitor.url,
+                    request_profile="A",
+                    proxy_url=None,
+                    fallback_applied=False,
+                ),
+            ]
+        ),
+        notification_service=notification,
+    )
+
+    first = await service.run_monitor_once(db, monitor, trigger="manual")
+    second = await service.run_monitor_once(db, monitor, trigger="worker")
+    db.refresh(monitor)
+
+    assert first.has_new is False
+    assert second.has_new is True
+    assert second.new_count >= 1
+    assert monitor.is_enabled is False
+    assert monitor.detected_at is not None
+    latest_payload = service.get_latest_payload(db, monitor.id)
+    assert latest_payload["snapshot"]["reservation_state"]["available"] is True
+    notification.send_notification_message.assert_called_once()
+    db.close()
+
+
+@pytest.mark.asyncio
+async def test_place_reservation_monitor_stop_on_detected_false_keeps_enabled(
+    integration_session_factory,
+):
+    db = integration_session_factory()
+    monitor = PopupUrlMonitor(
+        name="place-no-stop",
+        url="https://m.place.naver.com/popupstore/2015421037/home",
+        monitor_kind="place_reservation",
+        request_profile="A",
+        fallback_strategy="reinforce",
+        proxy_enabled=False,
+        notify_on_new=False,
+        min_new_count=1,
+        stop_on_detected=False,
+        monitoring_mode="anonymous",
+        is_enabled=True,
+    )
+    db.add(monitor)
+    db.commit()
+    db.refresh(monitor)
+
+    service = PopupMonitorService(
+        fetcher=FakeFetcher(
+            [
+                PopupFetchResult(
+                    success=True,
+                    html=_build_place_reservation_html(),
+                    status=200,
+                    final_url=monitor.url,
+                    request_profile="A",
+                    proxy_url=None,
+                    fallback_applied=False,
+                ),
+                PopupFetchResult(
+                    success=True,
+                    html=_build_place_reservation_html(booking_business_id="1643675"),
+                    status=200,
+                    final_url=monitor.url,
+                    request_profile="A",
+                    proxy_url=None,
+                    fallback_applied=False,
+                ),
+            ]
+        ),
+        notification_service=MagicMock(should_notify=MagicMock(return_value=False)),
+    )
+
+    await service.run_monitor_once(db, monitor, trigger="manual")
+    outcome = await service.run_monitor_once(db, monitor, trigger="manual")
+    db.refresh(monitor)
+
+    assert outcome.has_new is True
+    assert monitor.is_enabled is True
+    assert monitor.detected_at is None
+    db.close()
+
+
+@pytest.mark.asyncio
+async def test_place_reservation_monitor_older_run_cannot_overwrite_detected_latest(
+    integration_session_factory,
+    monkeypatch,
+):
+    db = integration_session_factory()
+    detected_at = datetime(2026, 5, 6, 10, 0, 5)
+    latest_snapshot = {
+        "reservation_state": {
+            "available": True,
+            "signals": [{"kind": "booking_business_id", "path": "state", "value": "1643675"}],
+            "booking_business_id": "1643675",
+            "booking_url": None,
+            "ticket_count": 0,
+            "concrete_links": [],
+        },
+        "signals": [{"kind": "booking_business_id", "path": "state", "value": "1643675"}],
+        "meta": {"monitor_kind": "place_reservation"},
+        "diff": {"previous_available": False, "available": True, "new_count": 1, "has_new": True},
+    }
+    monitor = PopupUrlMonitor(
+        name="place-late-writer",
+        url="https://m.place.naver.com/popupstore/2015421037/home",
+        monitor_kind="place_reservation",
+        request_profile="A",
+        fallback_strategy="reinforce",
+        proxy_enabled=False,
+        notify_on_new=False,
+        min_new_count=1,
+        stop_on_detected=True,
+        monitoring_mode="anonymous",
+        is_enabled=False,
+        detected_at=detected_at,
+        latest_snapshot_json=json.dumps(latest_snapshot, ensure_ascii=False),
+        latest_snapshot_hash="detected-hash",
+        latest_checked_at=datetime(2026, 5, 6, 10, 0, 0),
+    )
+    db.add(monitor)
+    db.commit()
+    db.refresh(monitor)
+
+    service = PopupMonitorService(
+        fetcher=FakeFetcher(
+            [
+                PopupFetchResult(
+                    success=True,
+                    html=_build_place_reservation_html(),
+                    status=200,
+                    final_url=monitor.url,
+                    request_profile="A",
+                    proxy_url=None,
+                    fallback_applied=False,
+                )
+            ]
+        ),
+        notification_service=MagicMock(should_notify=MagicMock(return_value=False)),
+    )
+
+    class OrderedDatetime(datetime):
+        calls = [
+            datetime(2026, 5, 6, 9, 59, 0),
+            datetime(2026, 5, 6, 10, 1, 0),
+        ]
+
+        @classmethod
+        def now(cls, tz=None):
+            value = cls.calls.pop(0)
+            if tz is not None:
+                return value.replace(tzinfo=tz)
+            return value
+
+    monkeypatch.setattr(monitor_service_module, "datetime", OrderedDatetime)
+
+    outcome = await service.run_monitor_once(db, monitor, trigger="worker")
+    db.refresh(monitor)
+    latest_payload = service.get_latest_payload(db, monitor.id)
+
+    assert outcome.status == "success"
+    assert monitor.detected_at == detected_at
+    assert monitor.latest_snapshot_hash == "detected-hash"
+    assert latest_payload["snapshot"]["reservation_state"]["available"] is True
+    db.close()
+
+
+@pytest.mark.asyncio
+async def test_place_reservation_monitor_notify_off_still_stops_on_detected(
+    integration_session_factory,
+):
+    db = integration_session_factory()
+    monitor = PopupUrlMonitor(
+        name="place-notify-off",
+        url="https://m.place.naver.com/popupstore/2015421037/home",
+        monitor_kind="place_reservation",
+        request_profile="A",
+        fallback_strategy="reinforce",
+        proxy_enabled=False,
+        notify_on_new=False,
+        min_new_count=1,
+        stop_on_detected=True,
+        monitoring_mode="anonymous",
+        is_enabled=True,
+    )
+    db.add(monitor)
+    db.commit()
+    db.refresh(monitor)
+
+    notification = MagicMock()
+    notification.should_notify.return_value = True
+    notification.send_notification_message = AsyncMock()
+    service = PopupMonitorService(
+        fetcher=FakeFetcher(
+            [
+                PopupFetchResult(
+                    success=True,
+                    html=_build_place_reservation_html(),
+                    status=200,
+                    final_url=monitor.url,
+                    request_profile="A",
+                    proxy_url=None,
+                    fallback_applied=False,
+                ),
+                PopupFetchResult(
+                    success=True,
+                    html=_build_place_reservation_html(booking_business_id="1643675"),
+                    status=200,
+                    final_url=monitor.url,
+                    request_profile="A",
+                    proxy_url=None,
+                    fallback_applied=False,
+                ),
+            ]
+        ),
+        notification_service=notification,
+    )
+
+    await service.run_monitor_once(db, monitor, trigger="manual")
+    outcome = await service.run_monitor_once(db, monitor, trigger="manual")
+    db.refresh(monitor)
+
+    assert outcome.has_new is True
+    assert monitor.is_enabled is False
+    assert monitor.detected_at is not None
+    notification.send_notification_message.assert_not_called()
     db.close()

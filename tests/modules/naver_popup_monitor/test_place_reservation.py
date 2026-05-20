@@ -1,7 +1,9 @@
 import json
 
 from app.modules.naver_popup_monitor.services.place_reservation import (
+    build_place_reservation_url,
     extract_place_reservation_state,
+    extract_place_id,
 )
 
 
@@ -161,4 +163,46 @@ def test_extract_place_reservation_state_B_empty_apollo_returns_unavailable():
         "ticket_count": 0,
         "concrete_links": [],
     }
+
+
+def test_extract_place_id_C_cross_check_naver_place_url_variants():
+    assert extract_place_id("2015421037") == "2015421037"
+    assert (
+        extract_place_id("https://map.naver.com/p/entry/place/2015421037?c=15.00,0,0,0,dh")
+        == "2015421037"
+    )
+    assert extract_place_id("https://pcmap.place.naver.com/place/2015421037/home") == "2015421037"
+    assert (
+        extract_place_id("https://m.place.naver.com/popupstore/2015421037/home")
+        == "2015421037"
+    )
+    assert extract_place_id("https://example.com/not-place") is None
+
+
+def test_build_place_reservation_url_C_canonical_popupstore_home():
+    assert (
+        build_place_reservation_url("2015421037")
+        == "https://m.place.naver.com/popupstore/2015421037/home"
+    )
+
+
+def test_extract_place_reservation_state_R_2015421037_baseline_unavailable():
+    state = extract_place_reservation_state(
+        _html(
+            _place_state(
+                {
+                    "__typename": "PlaceDetailNaverBooking",
+                    "bookingBusinessId": None,
+                    "naverBookingUrl": None,
+                    "naverBookingHubUrl": None,
+                    "bookingButtonName": "예약",
+                    "bookingDisplayName": "사전예약",
+                }
+            )
+        )
+    )
+
+    assert state.available is False
+    assert state.ticket_count == 0
+    assert state.concrete_links == []
 
