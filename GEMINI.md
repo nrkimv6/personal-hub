@@ -8,6 +8,10 @@
 - **Credential 보호**: `.env` 파일, `.git` 폴더, 그리고 `data\*.db` 파일은 절대 외부로 유출하거나 커밋하지 않도록 보호합니다.
 - **Git 조작 주의**: `git clean -fd`나 `git reset --hard`와 같은 파괴적인 명령은 사용자의 명시적인 요청 없이 수행하지 않습니다.
 - **커밋 규칙**: `git commit`을 직접 사용하지 않고 반드시 `& "D:\work\project\tools\common\commit.ps1"` 스크립트를 사용하여 커밋합니다.
+- **Mirror surface 보호**: monitor-page의 `.agents\`, `.agent\`, `.claude\`, `.gemini\`는 wtools에서 동기화되는 receiver mirror surface입니다. 이 경로를 직접 수정하거나 로컬 mirror-only 커밋으로 닫지 않습니다.
+- **Sync 수신 규칙**: wtools 원본 변경은 원격 sync commit을 `git pull --ff-only`로 수신합니다. root `main`과 `origin/main`이 diverged이면 push-first나 plain pull로 닫지 않고 owner-approved merge/rebase/source regeneration/abort 중 하나로 처리합니다.
+- **Primary/mirror 구분**: wtools 내부 `.agents`와 `.claude`는 각 엔진의 독립 primary surface입니다. monitor-page의 동일 경로명은 sync mirror이므로 두 개념을 혼동하지 않습니다.
+- **정책 cross-link**: mirror 정책의 상세 기준은 monitor-page `AGENTS.md`의 mirror surface 항목과 `CLAUDE.md`의 "이 프로젝트에서 `.claude/skills/`, `.claude/agents/` 직접 수정 금지" 섹션을 따릅니다.
 
 ### 1.2 실행 환경 (Windows/PowerShell)
 - **PowerShell 전용**: 모든 쉘 명령은 PowerShell 문법을 따릅니다. bash 문법(ls, rm, export 등) 사용을 금지하며, PowerShell 명령어(Get-ChildItem, Remove-Item, $env:VAR 등)를 사용합니다.
@@ -24,7 +28,7 @@
 
 - **Backend**: FastAPI (Python 3.12+), SQLAlchemy, Playwright
 - **Frontend**: SvelteKit 2 (Svelte 5), TailwindCSS 4, TypeScript
-- **Database**: SQLite (data\monitor.db)
+- **Database**: PostgreSQL 16 (`monitor` database)
 - **Messaging**: Redis (Task Queue 및 상태 공유)
 - **Process Management**: NSSM(Session 0) 및 `scripts\browser_workers.py`(Session 1) 통합 관리
 
@@ -38,12 +42,15 @@
   - `models\`: SQLAlchemy 데이터베이스 모델
   - `migrations\`: DB 마이그레이션 SQL 파일
 - `frontend\`: SvelteKit 프론트엔드
-- `data\`: SQLite DB 파일 및 데이터 보관
+- `data\`: runtime evidence, exports, and local data artifacts
 - `scripts\`: 서비스 관리 및 자동화용 PowerShell/Python 스크립트
-- `docs\`: 프로젝트 문서, 가이드, 계획(plan) 및 아카이브
+- `.worktrees\plans\docs\plan\`: 프로젝트 계획(plan) 문서
+- `.worktrees\plans\docs\archive\`: 완료된 계획 아카이브
+- `docs\`: 프로젝트 문서 및 가이드
 - `tests\`: 테스트 수트 (Unit, Integration, E2E, dev_runner 등)
 - `logs\`: 실행 로그 관리
 - `.agent\`: Gemini CLI 전용 설정 및 워크플로우
+- `.agents\`, `.claude\`, `.gemini\`: wtools sync로만 갱신되는 mirror surface
 
 ---
 
@@ -80,8 +87,11 @@ python "scripts\browser_workers.py" restart-api
 
 | 명령 | 설명 |
 |:---|:---|
-| `/plan` | `docs\plan\`에 새로운 기능 설계 및 단계별 계획 수립 |
-| `/implement` | 수립된 계획에 따라 구현 및 단위 테스트 수행 |
+| `/plan` | `.worktrees\plans\docs\plan\`에 새로운 기능 설계 및 단계별 계획 수립 |
+| `/implement` | 수립된 계획에 따라 linked worktree에서 구현 및 단위 테스트 수행 |
+| `/merge-test` | 구현 branch를 main에 머지한 뒤 post-merge 검증과 cleanup 수행 |
+| `/reflect` | 구현 후 회고와 후속 corrective plan 생성 |
+| `/review-plan` | 새 계획서 재검토, TODO 확장, docs commit 처리 |
 | `/webapp-testing` | 프론트엔드/백엔드 통합 테스트 및 빌드 확인 |
 | `/done` | 구현 완료 후 TODO 업데이트 및 문서 정리 |
 | `/codebase-audit` | 코드 품질 및 아키텍처 점검 (명시적 요청 시 실행) |
