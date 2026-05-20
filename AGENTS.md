@@ -17,6 +17,8 @@
 - 스킬 원본 수정: monitor-page의 `.claude/skills`, `.claude/agents` 직접 수정 금지  
   `D:\work\project\service\wtools\.claude\`에서 수정 후 동기화
 - `.claude/skills/` 또는 `.agents/skills/`를 수정할 때는 wtools 원본에서 반영이 필요한지 검토하고 결과를 `반영|비반영|별도 계획|해당 없음`으로 기록한다. monitor-page mirror surface 직접 수정은 금지한다.
+- wtools 내부 `.agents`와 `.claude`는 각 엔진의 독립 primary surface이며 서로 mirror가 아니다. monitor-page의 동일 경로명은 receiver mirror surface로만 취급한다.
+- cross-model surface 변경은 wtools 원본 기준으로 분류한다. 공통 정책/워크플로우 계약은 다른 surface 반영을 검토하고, 모델별 authoring/실행 메커니즘은 해당 surface 한정으로 둔다.
 - mirror surface(`.agents/`, `.agent/`, `.claude/`, `.gemini/`) 직접 수정·로컬 커밋 금지. wtools 원본 수정 후 원격 sync commit을 `git pull --ff-only`로만 수신한다.
 - backup/restore 브랜치를 main에 반영할 때 source branch에 mirror/skill 변경이 섞여 있는지 먼저 확인한다: `git diff --name-status <base> <source> -- .agents .agent .claude .gemini`. 사용자가 skill 제외를 지시했거나 mirror 변경이 범위 밖이면 병합 입력 단계에서 제외하고, merge 전후 `.agents/.agent/.claude/.gemini` diff가 비어 있지 않으면 완료 처리 금지.
 - root `main`과 `origin/main` 관계는 `git rev-list --left-right --count HEAD...origin/main`으로 분류한다. `behind-only`는 `git pull --ff-only` 수신 후보이고, `diverged`는 즉시 blocker가 아니라 mirror diff와 충돌 가능성을 먼저 보고하는 `명시 merge 결정 필요` 상태다. 단, sync tip을 plain `git pull`이나 push-first local merge로 닫지 않는다.
@@ -25,6 +27,7 @@
 ## Receiver Mirror Scope
 
 - monitor-page root의 `.agents/`, `.claude/`, `.gemini/`, `.agent/` mirror surface는 모두 wtools sync 결과로 취급한다.
+- 여기서 mirror surface는 monitor-page receiver 복제본을 뜻한다. wtools 원본의 `.agents`/`.claude` primary authoring surface 관계를 mirror로 해석하지 않는다.
 - Codex, Claude, Gemini 운영자는 root에서 mirror conflict를 직접 resolve하거나 mirror-only sync merge를 만들지 않는다.
 - mirror sync routing은 `git fetch origin` 후 `git rev-list --left-right --count HEAD...origin/main` tuple을 기준으로 한다. `git status --short --branch`는 display evidence다.
 - `behind-only`(`left=0,right>0`)는 `git pull --ff-only` 수신 후보다.
