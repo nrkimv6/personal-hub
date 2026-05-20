@@ -420,7 +420,11 @@ def _do_resolve_conflict(runner_id: str, redis_client: redis.Redis, command_id: 
         if _is_service_lock_approval_required(redis_client, runner_id):
             result = {
                 "success": False,
-                "message": "service_lock approval_required 상태는 conflict resolver 대상이 아닙니다.",
+                "message": (
+                    "service_lock은 conflict가 아니라 런타임 안전성 게이트이므로 resolve-conflict 대상이 아닙니다. "
+                    "NSSM 서비스로 실행 중인 파일을 덮어쓰는 위험을 차단하는 precheck입니다. "
+                    "서비스 다운타임을 허용하는 경우 retry-merge에 approve_service_lock=true를 설정하여 승인하세요."
+                ),
                 "merge_status": "approval_required",
                 "reason": "service_lock",
                 "action": "resolve-conflict",
