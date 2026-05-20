@@ -14,6 +14,8 @@ from _dr_constants import (
     RUNNER_KEY_PREFIX, RESULTS_KEY, PLAN_FILE_ALL, _LEGACY_ALL,
     LOG_CHANNEL_PREFIX, WORKTREE_BASE_DIR, WTOOLS_BASE_DIR, PROJECT_ROOT,
     RECENT_RUNNERS_TTL, ACTIVE_RUNNERS_KEY,
+    REROUTE_REQUIRED_PATH_KEY, ROOT_DIRTY_CLOSEOUT_STATUS_KEY, ROOT_DIRTY_PATHS_KEY,
+    ROOT_DIRTY_STATUS_BLOCKED, ROOT_DIRTY_STATUS_REROUTE_REQUIRED,
 )
 from _dr_merge import _execute_merge_with_lock, _pub_and_log
 from _dr_merge_persistence import MergePersistence
@@ -343,6 +345,9 @@ def _do_direct_merge(branch: str, worktree_path_str, plan_file, redis_client: re
         final_status = _redis_text(redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_status")) or "unknown"
         reason = _redis_text(redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_reason"))
         quarantine_diff_path = _redis_text(redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:quarantine_diff_path"))
+        root_dirty_status = _redis_text(redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:{ROOT_DIRTY_CLOSEOUT_STATUS_KEY}"))
+        root_dirty_paths = _redis_text(redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:{ROOT_DIRTY_PATHS_KEY}"))
+        reroute_required_path = _redis_text(redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:{REROUTE_REQUIRED_PATH_KEY}"))
         success = final_status == "merged"
         result = {
             "success": success,
@@ -355,6 +360,16 @@ def _do_direct_merge(branch: str, worktree_path_str, plan_file, redis_client: re
             result["reason"] = reason
         if quarantine_diff_path:
             result["quarantine_diff_path"] = quarantine_diff_path
+        if root_dirty_status:
+            result[ROOT_DIRTY_CLOSEOUT_STATUS_KEY] = root_dirty_status
+        if root_dirty_paths:
+            result[ROOT_DIRTY_PATHS_KEY] = root_dirty_paths
+        if reroute_required_path:
+            result[REROUTE_REQUIRED_PATH_KEY] = reroute_required_path
+        if root_dirty_status in {ROOT_DIRTY_STATUS_REROUTE_REQUIRED, ROOT_DIRTY_STATUS_BLOCKED}:
+            result["success"] = False
+            result["reason"] = result.get("reason") or "root_dirty_reroute_required"
+            result["message"] = f"direct-merge blocked: root dirty closeout {root_dirty_status}"
 
     except Exception as e:
         import traceback
@@ -503,17 +518,39 @@ def _do_cleanup_worktree(runner_id: str, redis_client: redis.Redis, command_id: 
     from worktree_manager import WorktreeManager
     result_key = f"{RESULTS_KEY}:{command_id}" if command_id else RESULTS_KEY
     try:
-        plan_file = redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:plan_file")
-        if plan_file in (PLAN_FILE_ALL, _LEGACY_ALL):
-            plan_file = None
-        _cw_base = (get_plan_git_root(plan_file) / ".worktrees") if plan_file else WORKTREE_BASE_DIR
-        WorktreeManager.remove(runner_id, _cw_base, plan_file=plan_file or None)
-        redis_client.delete(
-            f"{RUNNER_KEY_PREFIX}:{runner_id}:worktree_path",
-            f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_status",
+        root_dirty_status = _redis_text(
+            redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:{ROOT_DIRTY_CLOSEOUT_STATUS_KEY}")
         )
-        logger.info(f"[cleanup_worktree] 정리 완료: {runner_id}")
-        result = {"success": True, "message": f"worktree {runner_id} 정리 완료", "action": "cleanup-worktree"}
+        if root_dirty_status in {ROOT_DIRTY_STATUS_REROUTE_REQUIRED, ROOT_DIRTY_STATUS_BLOCKED}:
+            reroute_required_path = _redis_text(
+                redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:{REROUTE_REQUIRED_PATH_KEY}")
+            )
+            root_dirty_paths = _redis_text(
+                redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:{ROOT_DIRTY_PATHS_KEY}")
+            )
+            result = {
+                "success": False,
+                "message": "cleanup-worktree blocked: root dirty closeout requires reroute evidence and root clean verification",
+                "action": "cleanup-worktree",
+                "reason": "root_dirty_reroute_required",
+                ROOT_DIRTY_CLOSEOUT_STATUS_KEY: root_dirty_status,
+            }
+            if reroute_required_path:
+                result[REROUTE_REQUIRED_PATH_KEY] = reroute_required_path
+            if root_dirty_paths:
+                result[ROOT_DIRTY_PATHS_KEY] = root_dirty_paths
+        else:
+            plan_file = redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:plan_file")
+            if plan_file in (PLAN_FILE_ALL, _LEGACY_ALL):
+                plan_file = None
+            _cw_base = (get_plan_git_root(plan_file) / ".worktrees") if plan_file else WORKTREE_BASE_DIR
+            WorktreeManager.remove(runner_id, _cw_base, plan_file=plan_file or None)
+            redis_client.delete(
+                f"{RUNNER_KEY_PREFIX}:{runner_id}:worktree_path",
+                f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_status",
+            )
+            logger.info(f"[cleanup_worktree] 정리 완료: {runner_id}")
+            result = {"success": True, "message": f"worktree {runner_id} 정리 완료", "action": "cleanup-worktree"}
     except Exception as e:
         logger.error(f"[cleanup_worktree] 실패: {e}")
         result = {"success": False, "message": str(e), "action": "cleanup-worktree"}
