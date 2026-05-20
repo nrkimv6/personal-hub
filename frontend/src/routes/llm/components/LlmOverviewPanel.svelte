@@ -71,22 +71,22 @@
 					<div class="text-sm text-muted-foreground">전체</div>
 					<div class="text-2xl font-bold text-foreground">{stats.total}</div>
 				</div>
-				<div class="card p-4 {activeTab !== 'create' ? 'cursor-pointer hover:bg-warning-light' : ''}" onclick={() => activeTab !== 'create' && onSwitchTab('queue')}>
+				<button type="button" class="card p-4 text-left {activeTab !== 'create' ? 'hover:bg-warning-light' : ''}" onclick={() => onSwitchTab('queue')} disabled={activeTab === 'create'}>
 					<div class="text-sm text-muted-foreground">대기중</div>
 					<div class="text-2xl font-bold text-warning-foreground">{stats.pending}</div>
-				</div>
-				<div class="card p-4 {activeTab !== 'create' ? 'cursor-pointer hover:bg-primary-light' : ''}" onclick={() => activeTab !== 'create' && onSwitchTab('queue')}>
+				</button>
+				<button type="button" class="card p-4 text-left {activeTab !== 'create' ? 'hover:bg-primary-light' : ''}" onclick={() => onSwitchTab('queue')} disabled={activeTab === 'create'}>
 					<div class="text-sm text-muted-foreground">처리중</div>
 					<div class="text-2xl font-bold text-primary">{stats.processing}</div>
-				</div>
-				<div class="card p-4 {activeTab !== 'create' ? 'cursor-pointer hover:bg-success-light' : ''}" onclick={() => activeTab !== 'create' && onSwitchTab('history')}>
+				</button>
+				<button type="button" class="card p-4 text-left {activeTab !== 'create' ? 'hover:bg-success-light' : ''}" onclick={() => onSwitchTab('history')} disabled={activeTab === 'create'}>
 					<div class="text-sm text-muted-foreground">완료</div>
 					<div class="text-2xl font-bold text-success">{stats.completed}</div>
-				</div>
-				<div class="card p-4 {activeTab !== 'create' ? 'cursor-pointer hover:bg-error-light' : ''}" onclick={() => activeTab !== 'create' && onSwitchTab('history')}>
+				</button>
+				<button type="button" class="card p-4 text-left {activeTab !== 'create' ? 'hover:bg-error-light' : ''}" onclick={() => onSwitchTab('history')} disabled={activeTab === 'create'}>
 					<div class="text-sm text-muted-foreground">실패</div>
 					<div class="text-2xl font-bold text-error">{stats.failed}</div>
-				</div>
+				</button>
 			{/if}
 		</div>
 	{/if}
