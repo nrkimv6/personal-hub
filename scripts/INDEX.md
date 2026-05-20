@@ -196,6 +196,7 @@
 | ✅ | `debug_sse_log.py` | SSE 로그 디버그 |
 | ✅ | `debug_sse_log2.py` | SSE 로그 디버그 v2 |
 | ✅ | `check-helper-contract.ps1` | mirror 문서의 `common\tools` helper mention inventory를 수집하고 repo-local → wtools canonical → missing 해석 결과를 JSON/table로 출력 |
+| ✅ | `check-root-artifacts.ps1` | Codex Browser 조사 산출물로 보이는 root 직하위 untracked 파일을 감지하고 pre-commit에서 root dirty를 차단 |
 | ✅ | `diagnose-api.ps1` | API 진단 스크립트 — api-watchdog.ps1에서 참조, _todo-6에서 이관 완료 |
 | ✅ | `ps-python-processes.ps1` | 파이썬 프로세스 트리 출력 |
 | ✅ | `show-processes.ps1` | 프로세스 요약 출력 |

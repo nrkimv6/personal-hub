@@ -4,6 +4,14 @@
 #
 # --no-verify 사용 절대 금지
 
+$rootArtifactGuard = Join-Path (Split-Path -Parent $PSScriptRoot) "diagnostics\check-root-artifacts.ps1"
+if (Test-Path -LiteralPath $rootArtifactGuard) {
+    & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $rootArtifactGuard -Quiet
+    if ($LASTEXITCODE -ne 0) {
+        exit $LASTEXITCODE
+    }
+}
+
 $rootBranchGuard = Join-Path $PSScriptRoot "root-branch-guard.ps1"
 if (Test-Path -LiteralPath $rootBranchGuard) {
     & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $rootBranchGuard -Mode Commit
