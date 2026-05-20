@@ -67,6 +67,7 @@ def _stub_active_runner(page: Page, runner_id: str, recent_handler, full_handler
             ],
         ),
     )
+    page.route("**/api/v1/dev-runner/runners/orphans", lambda route: _fulfill_json(route, []))
     page.route("**/api/v1/dev-runner/tasks/current-tracking", lambda route: _fulfill_json(route, None))
     page.route("**/api/v1/dev-runner/plans", lambda route: _fulfill_json(route, []))
     page.route("**/api/v1/dev-runner/logs/diagnostics", lambda route: route.fulfill(status=503, body="diagnostics down"))
@@ -163,6 +164,72 @@ def test_ps_prefix_line_renders_same_as_pr_prefix(
     expect(page.get_by_text("ps prefix tool call result")).to_be_visible(timeout=5000)
     # None of them should appear as raw [PS:...] text
     expect(page.get_by_text(re.compile(r"\[PS:a9694a1d\]"))).to_have_count(0)
+
+
+def test_copy_log_includes_full_log_not_header_only(
+    page: Page,
+    frontend_url: str,
+    system_mode: str,
+):
+    """
+    copyLog() must use /logs/full API and include all lines.
+    Regression: #3→#4 approval_required/service_lock WARN lines were silently
+    dropped by isStale filter + lines-state limitation.
+    """
+    _skip_admin_mode_if_public(system_mode)
+
+    page.context.grant_permissions(["clipboard-read", "clipboard-write"])
+
+    runner_id = "copy-log-full-state-test"
+
+    def handle_recent(route):
+        _fulfill_json(
+            route,
+            {
+                "lines": [
+                    "[PR:a9694a1d] [10:00:01] [TRIGGER] user request",
+                    "[PR:a9694a1d] [10:00:02] [RUN_META] plan=copy-test",
+                    "[PR:a9694a1d] [10:00:03] [START] execution started",
+                    "[PR:a9694a1d] [10:00:04] [INFO] some content line",
+                ],
+                "total_lines": 4,
+                "from_line": 0,
+            },
+        )
+
+    def handle_full(route):
+        _fulfill_json(
+            route,
+            {
+                "lines": [
+                    "[PR:a9694a1d] [10:00:01] [TRIGGER] user request",
+                    "[PR:a9694a1d] [10:00:02] [RUN_META] plan=copy-test",
+                    "[PR:a9694a1d] [10:00:03] [START] execution started",
+                    "[PR:a9694a1d] [10:00:04] [INFO] some content line",
+                    "[PR:a9694a1d] [10:00:05] [WARN] MERGE_PRECHECK_FAILED[service_lock] deployment blocked",
+                ],
+                "total_lines": 5,
+                "offset": 0,
+                "has_more": False,
+            },
+        )
+
+    _stub_active_runner(page, runner_id, handle_recent, full_handler=handle_full)
+    page.goto(f"{frontend_url}/automation?tab=dev-runner&runner={runner_id}")
+
+    expect(page.get_by_text("some content line")).to_be_visible(timeout=10000)
+
+    copy_btn = page.get_by_title("로그 복사 (full log + 머지 상태)")
+    expect(copy_btn).to_be_visible(timeout=5000)
+    copy_btn.click()
+
+    expect(page.get_by_title("복사됨")).to_be_visible(timeout=5000)
+
+    clipboard_text = page.evaluate("navigator.clipboard.readText()")
+
+    assert "MERGE_PRECHECK_FAILED[service_lock]" in clipboard_text, (
+        f"Expected MERGE_PRECHECK_FAILED[service_lock] in clipboard, got: {clipboard_text[:300]}"
+    )
 
 
 def test_non_error_content_visible_with_error_filter_hidden(
