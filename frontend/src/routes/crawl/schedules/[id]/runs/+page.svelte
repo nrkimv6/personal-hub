@@ -32,6 +32,9 @@
 	let scheduleId = $derived.by(() => parseInt($page.params.id ?? '0', 10));
 	let totalPages = $derived.by(() => Math.ceil(total / limit));
 	let postsTotalPages = $derived.by(() => Math.ceil(postsTotal / postsLimit));
+	let scheduleRequiresRepair = $derived(Boolean(schedule?.requires_time_window_repair));
+	let scheduleHealthError = $derived(schedule?.schedule_health === 'error');
+	let candidateCountNext24h = $derived(schedule?.candidate_count_next_24h ?? null);
 
 	async function fetchSchedule() {
 		try {
@@ -193,6 +196,16 @@
 	>
 		<a href="/crawl/schedules" class="btn btn-secondary btn-sm">스케줄 목록</a>
 	</PageHeader>
+
+	{#if scheduleRequiresRepair || scheduleHealthError}
+		<div class="mb-6 rounded-lg border border-error bg-error-light px-4 py-3 text-error">
+			<p class="font-semibold">스케줄 시간대 수정 필요</p>
+			<p class="mt-1 text-sm">
+				다음 24시간 후보 수: {candidateCountNext24h ?? 0}. 시작/종료 시각이 같은 기존 시간대가 있으면 실행 후보가 생성되지 않습니다.
+			</p>
+			<a href="/crawl/schedules" class="mt-2 inline-flex text-sm font-medium underline">스케줄 목록에서 수정</a>
+		</div>
+	{/if}
 
 	<!-- 통계 요약 -->
 	{#if stats}

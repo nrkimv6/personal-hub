@@ -47,6 +47,18 @@ class InstagramFeedScheduler(ScheduleHandler):
             daily_runs=schedule_value.get("daily_runs", 3),
             time_windows=parse_time_windows(schedule_value.get("time_windows", [])),
         )
+        health = svc.get_schedule_health(schedule)
+        if health.get("health") == "error":
+            logger.warning(
+                "[%s] Instagram schedule health error: schedule_id=%s reason=%s "
+                "candidate_count=%s daily_runs=%s time_windows_count=%s",
+                ctx.worker_name,
+                schedule.id,
+                health.get("reason"),
+                health.get("candidate_count"),
+                health.get("daily_runs"),
+                health.get("time_window_count"),
+            )
         deferred_run = svc.get_oldest_deferred_run(schedule.id)
         if deferred_run and not svc.has_active_run(schedule.id):
             claimed = svc.claim_deferred_run(deferred_run.id, worker_id=ctx.worker_name)

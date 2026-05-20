@@ -99,6 +99,18 @@ class GoogleSearchScheduler(ScheduleHandler):
                 daily_runs=daily_runs,
                 time_windows=parse_time_windows(time_windows),
             )
+        health = svc.get_schedule_health(schedule)
+        if health.get("health") == "error":
+            logger.warning(
+                "[%s] Google search schedule health error: schedule_id=%s reason=%s "
+                "candidate_count=%s daily_runs=%s time_windows_count=%s",
+                ctx.worker_name,
+                schedule.id,
+                health.get("reason"),
+                health.get("candidate_count"),
+                health.get("daily_runs"),
+                health.get("time_window_count"),
+            )
 
         last_run = svc.get_latest_run(schedule.id)
         last_run_time = last_run.started_at if last_run else None

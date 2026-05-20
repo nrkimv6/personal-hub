@@ -12,6 +12,7 @@ from app.models import TaskSchedule, TaskScheduleRun
 from app.modules.instagram.models.schemas import TimeWindow
 from app.modules.instagram.schedulers.feed_schedule import InstagramFeedScheduler
 from app.modules.instagram.services.scheduler import InstagramScheduler
+from app.services.schedule_contracts import build_time_window_candidate_summary
 from app.services.task_schedule_service import TaskScheduleService
 from app.worker.schedule_handler_base import ClaimedRun, ScheduleExecutionSpec, WorkerContext
 
@@ -53,6 +54,20 @@ def test_exact_slot_schedule_returns_empty_and_requires_repair():
     )
 
     assert scheduler.generate_daily_schedule(date(2026, 5, 4)) == []
+
+    summary = build_time_window_candidate_summary(
+        {
+            "daily_runs": 8,
+            "time_windows": [
+                {"start": "07:00", "end": "07:00"},
+                {"start": "09:20", "end": "09:20"},
+            ],
+        },
+        start_date=date(2026, 5, 4),
+    )
+    assert summary["health"] == "error"
+    assert summary["reason"] == "exact_time_window_zero_candidates"
+    assert summary["candidate_count"] == 0
 
 
 def test_claim_run_R_runs_due_slot_even_when_last_run_was_recent(monkeypatch):

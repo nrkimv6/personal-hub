@@ -47,7 +47,18 @@ def db_session():
         connect_args={"check_same_thread": False},
         poolclass=StaticPool,
     )
-    Base.metadata.create_all(engine)
+    needed_tables = {
+        "task_schedules",
+        "task_schedule_runs",
+        "google_saved_searches",
+        "google_search_queue",
+        "google_search_history",
+        "google_search_results",
+        "service_accounts",
+        "browser_profiles",
+    }
+    tables = [table for name, table in Base.metadata.tables.items() if name in needed_tables]
+    Base.metadata.create_all(engine, tables=tables)
     Session = sessionmaker(bind=engine)
     session = Session()
     yield session
@@ -391,8 +402,8 @@ class TestGoogleScheduleAPI:
         assert data["enabled"] is True
         assert data["expires_at"].startswith(expires_at)
 
-    def test_wanderlust_saved_search_and_schedule_registration_contract(self, test_client):
-        """T3: 원더러스트 초대권 7일 알림 등록 데이터 모양을 고정한다."""
+    def test_wanderlust_exact_schedule_registration_is_rejected(self, test_client):
+        """Google schedule API must not persist start == end time windows."""
         saved_response = test_client.post(
             "/api/v1/google/saved",
             json={
@@ -405,10 +416,6 @@ class TestGoogleScheduleAPI:
         )
         assert saved_response.status_code == 200
         saved = saved_response.json()
-        assert saved["query"] == "원더러스트 초대권"
-        assert saved["date_filter"] == "24h"
-        assert saved["max_pages"] == 1
-        assert saved["notify_on_new"] is True
 
         schedule_response = test_client.post(
             "/api/v1/google/schedule/",
@@ -428,16 +435,27 @@ class TestGoogleScheduleAPI:
                 "enabled": True,
             },
         )
-        assert schedule_response.status_code == 201
-        schedule = schedule_response.json()
-        assert schedule["enabled"] is True
-        assert schedule["expires_at"] == "2026-05-18T23:59:59+09:00"
-        assert schedule["schedule_value"]["daily_runs"] == 2
-        assert schedule["schedule_value"]["min_interval_hours"] == 8
-        assert schedule["schedule_value"]["time_windows"] == [
-            {"start": "09:00", "end": "09:00"},
-            {"start": "21:00", "end": "21:00"},
-        ]
+        assert schedule_response.status_code == 422
+        assert "start" in schedule_response.json()["detail"]
+
+    def test_update_schedule_exact_time_window_rejected(
+        self,
+        test_client,
+        sample_google_schedule,
+    ):
+        response = test_client.put(
+            f"/api/v1/google/schedule/{sample_google_schedule.id}",
+            json={
+                "schedule_value": {
+                    "time_windows": [{"start": "09:00", "end": "09:00"}],
+                    "daily_runs": 1,
+                    "min_interval_hours": 1,
+                },
+            },
+        )
+
+        assert response.status_code == 422
+        assert "start" in response.json()["detail"]
 
     def test_list_schedules(self, test_client, db_session, sample_google_schedule):
         """스케줄 목록 조회 API."""

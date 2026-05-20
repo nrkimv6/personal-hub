@@ -51,6 +51,10 @@ class ScheduleResponse(BaseModel):
     enabled: bool
     last_run_at: Optional[datetime] = None
     next_run_at: Optional[datetime] = None
+    requires_time_window_repair: bool = False
+    candidate_count_next_24h: Optional[int] = None
+    schedule_health: Optional[str] = None
+    schedule_health_reason: Optional[str] = None
     created_at: datetime
     updated_at: datetime
 
@@ -127,7 +131,7 @@ async def create_schedule(
         schedule_value=data.schedule_value,
         enabled=data.enabled
     )
-    return _schedule_to_response(schedule)
+    return _schedule_to_response(schedule, service)
 
 
 @router.get("/schedules")
@@ -147,7 +151,7 @@ async def get_schedules(
             query = query.filter(TaskSchedule.enabled == True)
         schedules = query.all()
 
-    return [_schedule_to_response(s) for s in schedules]
+    return [_schedule_to_response(s, service) for s in schedules]
 
 
 @router.get("/schedules/{schedule_id}", response_model=ScheduleResponse)
@@ -160,7 +164,7 @@ async def get_schedule(
     schedule = service.get_schedule_by_id(schedule_id)
     if not schedule:
         raise HTTPException(status_code=404, detail="Schedule not found")
-    return _schedule_to_response(schedule)
+    return _schedule_to_response(schedule, service)
 
 
 @router.put("/schedules/{schedule_id}", response_model=ScheduleResponse)
@@ -182,7 +186,7 @@ async def update_schedule(
 
     if not schedule:
         raise HTTPException(status_code=404, detail="Schedule not found")
-    return _schedule_to_response(schedule)
+    return _schedule_to_response(schedule, service)
 
 
 @router.post("/schedules/{schedule_id}/toggle")
@@ -369,8 +373,12 @@ async def get_all_runs(
 
 # ============= Helper Functions =============
 
-def _schedule_to_response(schedule: TaskSchedule) -> ScheduleResponse:
+def _schedule_to_response(
+    schedule: TaskSchedule,
+    service: TaskScheduleService | None = None,
+) -> ScheduleResponse:
     """스케줄을 응답 스키마로 변환."""
+    health = service.get_schedule_health(schedule) if service else {}
     return ScheduleResponse(
         id=schedule.id,
         name=schedule.name,
@@ -382,6 +390,10 @@ def _schedule_to_response(schedule: TaskSchedule) -> ScheduleResponse:
         enabled=schedule.enabled,
         last_run_at=schedule.last_run_at,
         next_run_at=schedule.next_run_at,
+        requires_time_window_repair=bool(health.get("requires_time_window_repair", False)),
+        candidate_count_next_24h=health.get("candidate_count"),
+        schedule_health=health.get("health"),
+        schedule_health_reason=health.get("reason"),
         created_at=schedule.created_at,
         updated_at=schedule.updated_at
     )

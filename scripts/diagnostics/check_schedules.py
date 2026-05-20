@@ -11,6 +11,8 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from app.database import SessionLocal
+from app.models import TaskSchedule
+from app.services.task_schedule_service import TaskScheduleService
 
 
 def _print_header(title: str) -> None:
@@ -54,7 +56,7 @@ def main() -> int:
         active_rows = db.execute(
             text(
                 """
-                SELECT id, name, target_type, enabled, last_run_at, next_run_at, target_config
+                SELECT id, name, target_type, enabled, last_run_at, next_run_at, target_config, schedule_value
                 FROM task_schedules
                 WHERE enabled = true
                 ORDER BY CASE WHEN next_run_at IS NULL THEN 1 ELSE 0 END, next_run_at, id
@@ -64,21 +66,41 @@ def main() -> int:
         ).mappings().all()
 
         _print_header("Active Schedules")
+        service = TaskScheduleService(db)
+        health_errors = []
         if not active_rows:
             print("(활성 스케줄 없음)")
         for row in active_rows:
             config = _load_config(row["target_config"])
+            schedule = db.query(TaskSchedule).filter_by(id=row["id"]).first()
+            health = service.get_schedule_health(schedule) if schedule else {}
             print(f"ID: {row['id']}, Name: {row['name']}, Type: {row['target_type']}")
             print(f"  enabled: {row['enabled']}")
             print(f"  Last: {row['last_run_at']}")
             print(f"  Next: {row['next_run_at']}")
+            print(
+                f"  Health: {health.get('health')} "
+                f"(reason={health.get('reason')}, candidates={health.get('candidate_count')})"
+            )
             print(f"  target_config keys: {sorted(config.keys()) if config else []}")
+            print()
+            if health.get("health") == "error":
+                health_errors.append((row, health))
+
+        _print_header("Schedule Health Errors")
+        if not health_errors:
+            print("(active zero-candidate schedule 없음)")
+        for row, health in health_errors:
+            print(f"ID: {row['id']}, Name: {row['name']}, Type: {row['target_type']}")
+            print(f"  reason: {health.get('reason')}")
+            print(f"  candidate_count: {health.get('candidate_count')}")
+            print(f"  schedule_value: {row['schedule_value']}")
             print()
 
         _print_header("Recent Schedule Runs (last 20)")
         if "task_schedule_runs" not in tables:
             print("task_schedule_runs 테이블이 없습니다.")
-            return 0
+            return 2 if health_errors else 0
 
         run_rows = db.execute(
             text(
@@ -94,7 +116,7 @@ def main() -> int:
 
         if not run_rows:
             print("(최근 실행 이력 없음)")
-            return 0
+            return 2 if health_errors else 0
 
         for row in run_rows:
             print(f"Run #{row['id']}: {row['name']} ({row['target_type']})")
@@ -105,7 +127,7 @@ def main() -> int:
             print(f"  Reason: {row['stop_reason']}")
             print()
 
-        return 0
+        return 2 if health_errors else 0
     finally:
         db.close()
 
