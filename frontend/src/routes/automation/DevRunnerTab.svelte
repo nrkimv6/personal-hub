@@ -318,7 +318,7 @@
 			log_file_found: runner.log_file_found ?? false,
 			exit_reason: runner.exit_reason ?? undefined,
 			error: runner.error ?? undefined,
-			visible: runner.visible === true,
+			visible: runner.visible,
 			display_plan_name: runner.display_plan_name ?? null,
 			execution_count: runner.execution_count ?? null,
 			remaining_post_merge_tasks: runner.remaining_post_merge_tasks ?? null,
