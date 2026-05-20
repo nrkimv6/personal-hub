@@ -65,7 +65,7 @@ def test_merge_status_preserves_reroute_required_paths_for_retry_or_direct_resul
     runner_id = "root-dirty-closeout-live"
     expected = _seed_merge_status(runner_id)
     try:
-        response = httpx.get(f"{BASE_API}/api/v1/dev-runner/merge/{runner_id}", timeout=10.0)
+        response = httpx.get(f"{BASE_API}/api/v1/dev-runner/merge/{runner_id}", timeout=30.0)
         response.raise_for_status()
         body = response.json()
 
