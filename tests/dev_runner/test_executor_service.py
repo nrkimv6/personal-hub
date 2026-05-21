@@ -710,6 +710,45 @@ class TestStartDevRunnerClaimIntegration:
         assert result.claim_state == "queued"
 
     @pytest.mark.asyncio
+    async def test_test_repo_root_claim_skips_canonical_header_io(
+        self,
+        executor,
+        fake_async_redis,
+        tmp_path,
+        monkeypatch,
+    ):
+        """B: test_repo_root 격리 실행은 root plan header를 쓰지 않도록 claim을 만든다."""
+        await _setup_listener_success(fake_async_redis)
+        monkeypatch.setenv("DEV_RUNNER_ALLOW_TEST_REPO_ROOT", "1")
+        repo = tmp_path / "real-runner-repo"
+        (repo / ".git").mkdir(parents=True)
+        mock_sl, mock_cp, mock_rel, fake_claim = self._patch_claim_layer()
+        captured = []
+
+        with patch("app.database.SessionLocal", mock_sl), \
+             patch(
+                 "app.modules.dev_runner.services.plan_execution_claim_service.claim_plan",
+                 mock_cp,
+             ), \
+             patch.object(executor.async_redis, "lpush",
+                          side_effect=_make_capture_lpush(fake_async_redis, captured)):
+            result = await executor.start_dev_runner(
+                RunRequest(
+                    test_source="claim_tc",
+                    test_repo_root=str(repo),
+                    plan_file="docs/plan/2026-05-21_test-real-dummy-plan.md",
+                )
+            )
+
+        kwargs = mock_cp.call_args.kwargs
+        assert kwargs["write_header"] is False
+        assert kwargs["claim_metadata"]["test_repo_root"] == str(repo.resolve())
+        command = json.loads(captured[0])
+        assert command["test_repo_root"] == str(repo.resolve())
+        assert command["claim_id"] == fake_claim.claim_id
+        assert result.claim_id == fake_claim.claim_id
+
+    @pytest.mark.asyncio
     async def test_claim_conflict_returns_409(self, executor, fake_async_redis):
         """E: ClaimConflictError → 409 with structured detail containing claim_id"""
         await _setup_listener_success(fake_async_redis)
@@ -731,13 +770,11 @@ class TestStartDevRunnerClaimIntegration:
         assert "claim_state" in detail
 
     @pytest.mark.asyncio
-    async def test_claim_released_on_listener_failure(self, executor, fake_async_redis):
-        """R: listener 실패(success=False) → _release_claim_safe(claim_id)가 호출된다"""
+    async def test_claim_released_on_enqueue_failure(self, executor, fake_async_redis):
+        """R: enqueue 실패 → 아직 시작되지 않은 claim을 release한다."""
+        import redis
         await fake_async_redis.set("plan-runner:listener:heartbeat", "alive")
         mock_sl, mock_cp, mock_rel, fake_claim = self._patch_claim_layer()
-
-        result_data = {"success": False, "message": "spawn failed"}
-        captured = []
 
         with patch("app.database.SessionLocal", mock_sl), \
              patch(
@@ -748,8 +785,7 @@ class TestStartDevRunnerClaimIntegration:
                  "app.modules.dev_runner.services.executor_service._release_claim_safe",
                  mock_rel,
              ), \
-             patch.object(executor.async_redis, "lpush",
-                          side_effect=_make_capture_lpush(fake_async_redis, captured, result_data)):
+             patch.object(executor, "_enqueue_command", side_effect=redis.ConnectionError("enqueue failed")):
             with pytest.raises(HTTPException):
                 await executor.start_dev_runner(
                     RunRequest(test_source="claim_tc", plan_file="common/docs/plan/test.md")

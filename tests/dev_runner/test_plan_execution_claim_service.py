@@ -100,6 +100,17 @@ class TestClaimPlan:
         path = PLAN_PATH + "_header"
         claim = claim_plan(db, path)
         mock_write.assert_called_once_with(path, claim.claim_id)
+        assert claim.claim_metadata["header_written"] is True
+
+    def test_claim_plan_can_skip_header_io(self, db, no_header_io):
+        """B: test repo 격리 실행은 DB claim만 만들고 plan header를 건드리지 않을 수 있다."""
+        mock_write, _ = no_header_io
+        path = PLAN_PATH + "_no_header"
+        claim = claim_plan(db, path, write_header=False, claim_metadata={"test_repo_root": "C:/tmp/repo"})
+
+        mock_write.assert_not_called()
+        assert claim.claim_metadata["header_written"] is False
+        assert claim.claim_metadata["test_repo_root"] == "C:/tmp/repo"
 
     # B: Boundary — 빈 plan_path 허용 여부 (모델 제약 없음, 빈 문자열 저장 가능)
     def test_claim_plan_empty_optional_fields(self, db):
@@ -246,6 +257,16 @@ class TestReleaseClaim:
         claim = claim_plan(db, path)
         release_claim(db, claim.claim_id)
         mock_clear.assert_called_once_with(path)
+
+    def test_release_claim_skips_clear_when_header_was_not_written(self, db, no_header_io):
+        """B: header를 쓰지 않은 claim release는 plan 파일을 다시 쓰지 않는다."""
+        _, mock_clear = no_header_io
+        path = PLAN_PATH + "_release_no_header"
+        claim = claim_plan(db, path, write_header=False)
+
+        release_claim(db, claim.claim_id)
+
+        mock_clear.assert_not_called()
 
     def test_release_claim_removes_from_active_query(self, db):
         """R: release 후 get_active_claim_for_plan()이 None 반환"""

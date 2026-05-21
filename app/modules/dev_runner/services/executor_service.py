@@ -778,6 +778,10 @@ class ExecutorService:
                         engine=resolved_engine,
                         session_id=session_id,
                         runner_id=runner_id,
+                        claim_metadata={
+                            "test_repo_root": test_repo_root,
+                        } if test_repo_root else None,
+                        write_header=not bool(test_repo_root),
                     )
                     _new_claim_id = _new_claim.claim_id
                     command["claim_id"] = _new_claim_id
@@ -808,6 +812,7 @@ class ExecutorService:
                 logger.warning(f"[claim] claim_plan 실패 (무시, 실행 계속): {_claim_err}")
         # ────────────────────────────────────────────────────────────────
 
+        accepted_sent = False
         try:
             # session_id를 Redis에 저장 (TTL 24h)
             await self.async_redis.set(
@@ -815,6 +820,7 @@ class ExecutorService:
             )
 
             accepted = await self._enqueue_command(command)
+            accepted_sent = True
             accepted_at = datetime.now()
 
             self._best_effort_upsert_runner_state(
@@ -851,18 +857,26 @@ class ExecutorService:
             )
 
         except redis.ConnectionError:
+            if not accepted_sent:
+                _release_claim_safe(_new_claim_id)
             raise HTTPException(
                 status_code=503,
                 detail="Redis connection failed - command listener may not be running"
             )
         except json.JSONDecodeError as e:
+            if not accepted_sent:
+                _release_claim_safe(_new_claim_id)
             raise HTTPException(
                 status_code=500,
                 detail=f"Invalid response from listener: {str(e)}"
             )
         except HTTPException:
+            if not accepted_sent:
+                _release_claim_safe(_new_claim_id)
             raise
         except Exception as e:
+            if not accepted_sent:
+                _release_claim_safe(_new_claim_id)
             logger.error(f"[dev-runner] start 실패: {traceback.format_exc()}")
             raise HTTPException(status_code=500, detail=f"Failed to start: {str(e)}")
 

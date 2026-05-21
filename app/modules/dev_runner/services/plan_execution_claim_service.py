@@ -40,8 +40,9 @@ def claim_plan(
     queue_after: Optional[datetime] = None,
     claim_metadata: Optional[dict] = None,
     lease_seconds: int = DEFAULT_LEASE_SECONDS,
+    write_header: bool = True,
 ) -> PlanExecutionClaim:
-    """plan_path에 대한 queued claim을 생성하고 헤더 포인터를 기록한다.
+    """plan_path에 대한 queued claim을 생성하고 필요 시 헤더 포인터를 기록한다.
 
     중복 active/queued claim이 있으면 ClaimConflictError를 발생시킨다.
     """
@@ -54,6 +55,8 @@ def claim_plan(
 
     claim_id = str(uuid.uuid4())
     now = datetime.now()
+    metadata = dict(claim_metadata or {})
+    metadata.setdefault("header_written", bool(write_header))
     claim = PlanExecutionClaim(
         claim_id=claim_id,
         plan_record_id=plan_record_id,
@@ -66,12 +69,13 @@ def claim_plan(
         claimed_at=now,
         lease_expires_at=now + timedelta(seconds=lease_seconds),
         queue_after=queue_after,
-        claim_metadata=claim_metadata,
+        claim_metadata=metadata,
     )
     db.add(claim)
     db.flush()
 
-    _write_header(plan_path, claim_id)
+    if write_header:
+        _write_header(plan_path, claim_id)
     db.commit()
     return claim
 
@@ -129,7 +133,9 @@ def release_claim(
     claim.released_at = datetime.now()
     db.commit()
 
-    _clear_header(claim.plan_path)
+    metadata = claim.claim_metadata if isinstance(claim.claim_metadata, dict) else {}
+    if metadata.get("header_written", True):
+        _clear_header(claim.plan_path)
     return claim
 
 
