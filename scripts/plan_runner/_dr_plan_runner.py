@@ -573,6 +573,10 @@ def _ensure_test_repo_plan_materialized(plan_file: str | None, worktree_path: Pa
         )
 
 
+def _should_write_canonical_plan_header(command: Dict) -> bool:
+    return not bool(command.get("test_repo_root"))
+
+
 def _do_start_plan_runner(command: Dict, redis_client: redis.Redis):
     """plan-runner CLI 실행 (백그라운드 스레드에서 호출 — worktree 생성 포함)"""
     from worktree_manager import WorktreeManager, WorktreeError, ensure_main_branch
@@ -658,6 +662,7 @@ def _do_start_plan_runner(command: Dict, redis_client: redis.Redis):
     try:
         ensure_main_branch(plan_project_root)
         _reused_worktree = False
+        write_canonical_plan_header = _should_write_canonical_plan_header(command)
         if plan_file:
             _active, existing_branch, existing_wt_abs = is_worktree_active(plan_file, plan_project_root)
             if _active:
@@ -668,13 +673,14 @@ def _do_start_plan_runner(command: Dict, redis_client: redis.Redis):
                         worktree_rel = str(worktree_path.relative_to(plan_project_root)).replace("\\", "/")
                     except ValueError:
                         worktree_rel = str(worktree_path)
-                    if not _write_plan_worktree_info(plan_file, branch, worktree_rel, owner=plan_file):
+                    if write_canonical_plan_header and not _write_plan_worktree_info(plan_file, branch, worktree_rel, owner=plan_file):
                         _set_error_status(f"plan worktree header 기록 실패: {plan_file}")
                         return
                     logger.info(f"기존 워크트리 재사용: {worktree_path} (branch: {branch})")
             else:
                     # 경로 없음 또는 worktree 검증 실패 → plan 헤더에서 필드 제거 후 신규 생성
-                    _remove_plan_header_fields(plan_file)
+                    if write_canonical_plan_header:
+                        _remove_plan_header_fields(plan_file)
                     logger.info(f"워크트리 없음 또는 검증 실패, 신규 생성: plan={plan_file}")
         if not _reused_worktree:
             worktree_path, branch = WorktreeManager.create(
@@ -684,7 +690,7 @@ def _do_start_plan_runner(command: Dict, redis_client: redis.Redis):
                 use_runner_identity=bool(command.get("test_source")),
             )
             # Phase 4: plan 헤더에 branch/worktree 기록 (수동 /implement와 동일 패턴)
-            if plan_file:
+            if plan_file and write_canonical_plan_header:
                 worktree_rel = str(worktree_path.relative_to(plan_project_root)).replace("\\", "/")
                 if not _write_plan_worktree_info(plan_file, branch, worktree_rel, owner=plan_file):
                     _set_error_status(f"plan worktree header 기록 실패: {plan_file}")

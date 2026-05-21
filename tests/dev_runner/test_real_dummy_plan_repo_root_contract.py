@@ -14,7 +14,11 @@ if str(PLAN_RUNNER_DIR) not in sys.path:
 
 from worktree_manager import WorktreeManager  # noqa: E402
 from plan_worktree_helpers import parse_plan_worktree_info, write_plan_worktree_info  # noqa: E402
-from _dr_plan_runner import _ensure_test_repo_plan_materialized, _resolve_subprocess_plan_file  # noqa: E402
+from _dr_plan_runner import (  # noqa: E402
+    _ensure_test_repo_plan_materialized,
+    _resolve_subprocess_plan_file,
+    _should_write_canonical_plan_header,
+)
 
 
 def _run(cmd: list[str], cwd: Path) -> subprocess.CompletedProcess[str]:
@@ -132,3 +136,8 @@ def test_normal_runner_keeps_canonical_plan_for_subprocess(tmp_path):
     )
 
     assert effective == str(plan)
+
+
+def test_test_repo_root_does_not_write_canonical_plan_header():
+    assert _should_write_canonical_plan_header({"test_repo_root": "C:/tmp/repo"}) is False
+    assert _should_write_canonical_plan_header({}) is True
