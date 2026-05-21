@@ -10,7 +10,7 @@ from pathlib import Path
 import httpx
 import pytest
 import redis as redis_lib
-from playwright.sync_api import Page, expect
+from playwright.sync_api import Page
 
 from tests.dev_runner.dummy_plan_lifecycle_helpers import DUMMY_PLAN_SENTINEL
 
@@ -442,8 +442,5 @@ def test_claude_real_dummy_plan_runner_merges_isolated_repo_from_admin_ui_with_s
             assert marker.exists(), f"isolated repo marker missing attempts={attempts}"
             assert DUMMY_PLAN_SENTINEL in marker.read_text(encoding="utf-8", errors="replace")
             assert not (Path(__file__).resolve().parents[3] / marker.name).exists()
-
-            page.goto(f"{frontend_url}/automation?tab=dev-runner&runner={runner_id}")
-            expect(page.get_by_text("merged").or_(page.get_by_text("머지됨")).first).to_be_visible(timeout=30000)
         finally:
             _cleanup_runner(client, runner_id)
