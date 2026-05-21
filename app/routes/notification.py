@@ -25,12 +25,14 @@ _DEFAULT_NOTIFY_STATES = [
     "popup_new",
 ]
 
+_ALLOWED_NOTIFY_STATES = {*_DEFAULT_NOTIFY_STATES, "failure_warning"}
+
 
 def _normalize_notify_states(states: list[str] | None) -> list[str]:
     """알림 상태 목록에서 지원하지 않는 항목을 제거합니다."""
     if not states:
         return []
-    return [state for state in states if state in _DEFAULT_NOTIFY_STATES]
+    return [state for state in states if state in _ALLOWED_NOTIFY_STATES]
 
 
 def get_notification_settings_from_db() -> NotificationSettings:
