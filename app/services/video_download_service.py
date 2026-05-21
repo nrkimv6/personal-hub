@@ -252,6 +252,9 @@ class VideoDownloadService:
             request.status = VideoDownload.STATUS_PENDING
             request.progress = 0
             request.error_message = None
+            request.output_path = None
+            request.file_size = None
+            request.title = None
             request.picked_at = None
             request.processed_at = None
             request.worker_id = None
@@ -336,6 +339,11 @@ class VideoDownloadService:
 
         count = 0
         for request in stale_requests:
+            if request.download_type == VideoDownload.TYPE_YOUTUBE_STREAM and request.error_message:
+                request.status = VideoDownload.STATUS_FAILED
+                request.processed_at = datetime.now()
+                count += 1
+                continue
             request.mark_failed(f"Timeout: {request.status} 상태가 {timeout_minutes}분 초과")
             count += 1
 

@@ -1,4 +1,4 @@
-"""Video download queue integration tests."""
+"""YouTube Live video download queue integration tests."""
 
 import pytest
 from sqlalchemy import create_engine
@@ -26,14 +26,14 @@ def test_db_engine():
 
 
 @pytest.mark.asyncio
-async def test_instagram_reel_request_flows_through_queue(monkeypatch, test_db_engine, tmp_path):
+async def test_youtube_stream_ffmpeg_failure_marks_request_failed(monkeypatch, test_db_engine, tmp_path):
     session_factory = sessionmaker(autocommit=False, autoflush=False, bind=test_db_engine)
     queued_tasks = []
 
     with session_factory() as db:
         db.query(VideoDownload).delete(synchronize_session=False)
         db.commit()
-        request = VideoDownloadService(db).create_request("https://www.instagram.com/reel/C8abc123xyz/")
+        request = VideoDownloadService(db).create_request("https://www.youtube.com/live/PHEGRsZckhI")
         request_id = request.id
 
     monkeypatch.setattr(worker_module, "SessionLocal", session_factory)
@@ -43,49 +43,40 @@ async def test_instagram_reel_request_flows_through_queue(monkeypatch, test_db_e
     def fake_create_task(coro, task_name):
         queued_tasks.append((coro, task_name))
 
-    async def fake_download_instagram(request):
+    async def fake_download_youtube_stream(request):
         return {
-            "success": True,
-            "output_path": str(tmp_path / "reel.mp4"),
-            "file_size": 4096,
-            "title": "Test reel",
+            "success": False,
+            "error": "YouTube Live 녹화/병합 실패: ffmpeg exited with code 3199971767",
         }
 
     monkeypatch.setattr(worker, "_create_task", fake_create_task)
-    monkeypatch.setattr(worker, "_download_instagram", fake_download_instagram)
+    monkeypatch.setattr(worker, "_download_youtube_stream", fake_download_youtube_stream)
 
     await worker._dispatch_pending_requests(limit=1)
 
     assert len(queued_tasks) == 1
     assert queued_tasks[0][1] == f"download_{request_id}"
 
-    with session_factory() as db:
-        picked = db.query(VideoDownload).filter(VideoDownload.id == request_id).first()
-        assert picked is not None
-        assert picked.download_type == VideoDownload.TYPE_INSTAGRAM
-        assert picked.status == VideoDownload.STATUS_PICKED
-        assert picked.worker_id == worker.name
-
     await queued_tasks[0][0]
 
     with session_factory() as db:
-        completed = db.query(VideoDownload).filter(VideoDownload.id == request_id).first()
-        assert completed is not None
-        assert completed.status == VideoDownload.STATUS_COMPLETED
-        assert completed.output_path == str(tmp_path / "reel.mp4")
-        assert completed.file_size == 4096
-        assert completed.title == "Test reel"
+        failed = db.query(VideoDownload).filter(VideoDownload.id == request_id).first()
+        assert failed is not None
+        assert failed.download_type == VideoDownload.TYPE_YOUTUBE_STREAM
+        assert failed.status == VideoDownload.STATUS_FAILED
+        assert "ffmpeg exited with code 3199971767" in (failed.error_message or "")
+        assert "다운로드된 파일을 찾을 수 없음" not in (failed.error_message or "")
 
 
 @pytest.mark.asyncio
-async def test_instagram_reel_login_required_marks_request_failed(monkeypatch, test_db_engine, tmp_path):
+async def test_youtube_stream_failure_preserves_artifact_basenames(monkeypatch, test_db_engine, tmp_path):
     session_factory = sessionmaker(autocommit=False, autoflush=False, bind=test_db_engine)
     queued_tasks = []
 
     with session_factory() as db:
         db.query(VideoDownload).delete(synchronize_session=False)
         db.commit()
-        request = VideoDownloadService(db).create_request("https://www.instagram.com/reel/C8abc999xyz/")
+        request = VideoDownloadService(db).create_request("https://www.youtube.com/live/PHEGRsZckhI")
         request_id = request.id
 
     monkeypatch.setattr(worker_module, "SessionLocal", session_factory)
@@ -95,19 +86,26 @@ async def test_instagram_reel_login_required_marks_request_failed(monkeypatch, t
     def fake_create_task(coro, task_name):
         queued_tasks.append((coro, task_name))
 
-    async def fake_download_instagram(request):
-        return {"success": False, "error": "Instagram 로그인 필요: 공개 Reel만 1차 지원합니다."}
+    async def fake_download_youtube_stream(request):
+        return {
+            "success": False,
+            "error": (
+                "YouTube Live 녹화/병합 실패: ffmpeg exited with code 3199971767 "
+                "(artifacts=ts_20260521_120000.info.json, ts_20260521_120000.mp4.part)"
+            ),
+        }
 
     monkeypatch.setattr(worker, "_create_task", fake_create_task)
-    monkeypatch.setattr(worker, "_download_instagram", fake_download_instagram)
+    monkeypatch.setattr(worker, "_download_youtube_stream", fake_download_youtube_stream)
 
     await worker._dispatch_pending_requests(limit=1)
-
     assert len(queued_tasks) == 1
+
     await queued_tasks[0][0]
 
     with session_factory() as db:
         failed = db.query(VideoDownload).filter(VideoDownload.id == request_id).first()
         assert failed is not None
         assert failed.status == VideoDownload.STATUS_FAILED
-        assert "로그인 필요" in (failed.error_message or "")
+        assert "ts_20260521_120000.info.json" in (failed.error_message or "")
+        assert "ts_20260521_120000.mp4.part" in (failed.error_message or "")

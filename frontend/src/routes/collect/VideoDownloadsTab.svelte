@@ -462,7 +462,9 @@
             {/if}
 
             {#if download.error_message}
-              <p class="line-clamp-2 text-xs text-error" title={download.error_message}>{download.error_message}</p>
+              <p class="whitespace-pre-wrap break-words rounded border border-error/20 bg-error-light/40 p-2 text-xs text-error" title={download.error_message}>
+                {download.error_message}
+              </p>
             {/if}
 
             <div class="flex flex-wrap justify-end gap-2">
@@ -557,9 +559,12 @@
                   {statusStyles[download.status]?.label || download.status}
                 </span>
                 {#if download.error_message}
-                  <div class="text-xs text-error mt-1 truncate max-w-32" title={download.error_message}>
-                    {download.error_message}
-                  </div>
+                  <details class="mt-1 max-w-xs text-xs text-error">
+                    <summary class="cursor-pointer truncate" title={download.error_message}>오류 상세</summary>
+                    <div class="mt-1 whitespace-pre-wrap break-words rounded border border-error/20 bg-error-light/40 p-2">
+                      {download.error_message}
+                    </div>
+                  </details>
                 {/if}
               </td>
               <td class="px-4 py-3">
