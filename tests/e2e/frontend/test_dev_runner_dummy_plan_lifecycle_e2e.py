@@ -135,8 +135,8 @@ def test_dummy_plan_runner_log_and_merge_result_visible(
     page.goto(f"{frontend_url}/automation?tab=dev-runner&runner={runner_id}")
 
     expect(page.get_by_text(DUMMY_PLAN_SENTINEL)).to_be_visible(timeout=10000)
-    expect(page.get_by_text(DUMMY_PLAN_FIXTURE)).to_be_visible(timeout=10000)
-    expect(page.get_by_text(re.compile("merged|머지됨|dummy temp repo merged", re.IGNORECASE))).to_be_visible(timeout=10000)
+    expect(page.get_by_role("button", name=re.compile(DUMMY_PLAN_FIXTURE))).to_be_visible(timeout=10000)
+    expect(page.get_by_text(re.compile("merged|머지됨|dummy temp repo merged", re.IGNORECASE)).first).to_be_visible(timeout=10000)
     expect(page.get_by_text(hidden_noise_runner_id)).to_have_count(0)
     assert route_counts["runners"] >= 1
     assert route_counts["recent"] >= 1
