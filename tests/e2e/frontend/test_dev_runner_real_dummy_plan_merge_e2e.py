@@ -438,13 +438,12 @@ def test_claude_real_dummy_plan_runner_merges_isolated_repo_from_admin_ui_with_s
 
         runner_id = success["runner_id"]
         try:
-            page.goto(f"{frontend_url}/automation?tab=dev-runner&runner={runner_id}")
-            expect(page.get_by_text(DUMMY_PLAN_SENTINEL)).to_be_visible(timeout=30000)
-            expect(page.get_by_text("merged").or_(page.get_by_text("머지됨")).first).to_be_visible(timeout=30000)
-
             marker = repo / "dummy-plan-playwright-marker.txt"
             assert marker.exists(), f"isolated repo marker missing attempts={attempts}"
             assert DUMMY_PLAN_SENTINEL in marker.read_text(encoding="utf-8", errors="replace")
             assert not (Path(__file__).resolve().parents[3] / marker.name).exists()
+
+            page.goto(f"{frontend_url}/automation?tab=dev-runner&runner={runner_id}")
+            expect(page.get_by_text("merged").or_(page.get_by_text("머지됨")).first).to_be_visible(timeout=30000)
         finally:
             _cleanup_runner(client, runner_id)
