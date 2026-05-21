@@ -58,6 +58,7 @@ ADMIN_ONLY_READ_PREFIXES = (
     "/api/v1/file-search",
     "/api/v1/test-runs",
     "/api/v1/claude-sessions",
+    "/api/v1/notification",
     "/api/v1/system",
     "/api/v1/worker",
     "/api/v1/llm",

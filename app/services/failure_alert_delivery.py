@@ -14,6 +14,8 @@ from app.services.failure_alert_policy import (
     build_failure_alert_message,
     classify_failure_event,
 )
+from app.services.alert_rule_settings_service import get_effective_alert_rule_policy
+from app.database import SessionLocal
 from app.shared.notification.notification_service import NotificationService
 
 logger = logging.getLogger(__name__)
@@ -38,10 +40,25 @@ async def report_failure_alert(
     *,
     registry=None,
     notification_service_factory: Callable[[], NotificationService] = NotificationService,
+    db_session_factory: Callable[[], object] = SessionLocal,
     now: float | None = None,
 ) -> AlertDecision:
     """Classify and deliver a failure alert without raising delivery errors."""
     decision = classify_failure_event(event, registry=registry)
+    policy = _load_effective_policy(event.source, registry=registry, db_session_factory=db_session_factory)
+    if policy is not None:
+        if policy.stale or not policy.enabled:
+            return replace(decision, should_send=False, suppressed_reason="rule_disabled")
+        if policy.burst_threshold is not None and (event.count or 0) < policy.burst_threshold:
+            return replace(decision, should_send=False, suppressed_reason="burst_threshold")
+        if policy.severity_override is not None:
+            decision = replace(
+                decision,
+                severity=policy.severity_override,
+                should_send=policy.severity_override in (AlertSeverity.CRITICAL, AlertSeverity.WARNING),
+                force_send=policy.severity_override == AlertSeverity.CRITICAL,
+            )
+
     dedup_key = build_failure_alert_dedup_key(event, now=now)
     decision = replace(decision, dedup_key=dedup_key)
 
@@ -60,7 +77,12 @@ async def report_failure_alert(
             logger.warning("Failure alert settings check failed: %s", exc)
             return replace(decision, should_send=False, suppressed_reason="warning_settings_error")
 
-    if _is_duplicate(dedup_key, now=now):
+    cooldown_seconds = policy.cooldown_seconds if policy is not None else FAILURE_ALERT_BUCKET_SECONDS
+    channel = policy.channel if policy is not None else "telegram"
+    if channel == "ui_only":
+        return replace(decision, should_send=False, suppressed_reason="ui_only")
+
+    if _is_duplicate(dedup_key, now=now, ttl_seconds=cooldown_seconds):
         return replace(decision, should_send=False, suppressed_reason="duplicate")
 
     message = build_failure_alert_message(event, decision)
@@ -68,7 +90,14 @@ async def report_failure_alert(
     try:
         if service is None:
             service = notification_service_factory()
-        if decision.severity == AlertSeverity.CRITICAL:
+        if channel == "desktop":
+            await service.send_notification_message(
+                message,
+                send_desktop=True,
+                send_telegram=False,
+                force_send=decision.force_send,
+            )
+        elif decision.severity == AlertSeverity.CRITICAL:
             await service.send_telegram(message, force_send=True)
         elif decision.severity == AlertSeverity.WARNING:
             await service.send_telegram(message, force_send=False)
@@ -101,6 +130,21 @@ async def report_video_failure_alert(
     )
 
 
+def _load_effective_policy(event_source: str, *, registry, db_session_factory):
+    db = None
+    try:
+        db = db_session_factory()
+        return get_effective_alert_rule_policy(db, event_source, registry=registry)
+    except Exception as exc:
+        logger.warning("Failure alert rule settings check failed: %s", exc)
+        return None
+    finally:
+        if db is not None:
+            close = getattr(db, "close", None)
+            if callable(close):
+                close()
+
+
 def build_failure_alert_dedup_key(event: FailureEvent, *, now: float | None = None) -> str:
     entity = str(event.entity_id) if event.entity_id is not None else "-"
     kind = (event.failure_kind or "unknown").strip().lower().replace(" ", "_").replace("-", "_")
@@ -112,17 +156,17 @@ def build_failure_alert_dedup_key(event: FailureEvent, *, now: float | None = No
     return f"{event.source}:{entity}:{kind}:{attempt_or_bucket}"
 
 
-def _is_duplicate(dedup_key: str, *, now: float | None = None) -> bool:
+def _is_duplicate(dedup_key: str, *, now: float | None = None, ttl_seconds: int = FAILURE_ALERT_BUCKET_SECONDS) -> bool:
     current = time.time() if now is None else now
-    _expire_old_keys(current)
+    _expire_old_keys(current, ttl_seconds=ttl_seconds)
     if dedup_key in _sent_alert_keys:
         return True
     _sent_alert_keys[dedup_key] = current
     return False
 
 
-def _expire_old_keys(current: float) -> None:
-    ttl = FAILURE_ALERT_BUCKET_SECONDS * 2
+def _expire_old_keys(current: float, *, ttl_seconds: int = FAILURE_ALERT_BUCKET_SECONDS) -> None:
+    ttl = max(ttl_seconds, 1) * 2
     expired = [key for key, seen_at in _sent_alert_keys.items() if current - seen_at > ttl]
     for key in expired:
         _sent_alert_keys.pop(key, None)
