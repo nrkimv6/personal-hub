@@ -28,6 +28,7 @@ from app.database import SessionLocal
 from app.models import ServiceAccount, CrawlRequest, TaskScheduleRun
 
 from app.services.crawl_request_service import CrawlRequestService
+from app.services.failure_alert_policy import FailureEvent, classify_failure_event
 from app.modules.instagram.services.crawl_service import CrawlService
 from app.modules.instagram.services.crawler import InstagramCrawler
 from app.utils.error_utils import format_error_message
@@ -195,10 +196,30 @@ class OnDemandCrawlWorker(CrawlWorkerBase):
             cleaned = request_service.cleanup_stale_processing(timeout_minutes=30)
             if cleaned > 0:
                 logger.info(f"[{self.name}] {cleaned}개의 오래된 processing 요청 정리 완료")
+                self._classify_crawl_failure(
+                    FailureEvent(
+                        source="crawl_requests",
+                        failure_kind="stale_cleanup_burst",
+                        error_summary="On-demand stale processing cleanup",
+                        count=cleaned,
+                    )
+                )
         except Exception as e:
             logger.error(f"[{self.name}] Stale request 정리 오류: {e}")
         finally:
             db.close()
+
+    def _classify_crawl_failure(self, event: FailureEvent):
+        decision = classify_failure_event(event)
+        logger.debug(
+            "[%s] Crawl failure alert decision: source=%s kind=%s severity=%s send=%s",
+            self.name,
+            event.source,
+            event.failure_kind,
+            decision.severity.value,
+            decision.should_send,
+        )
+        return decision
 
     # ========== Redis 큐 처리 ==========
 
@@ -404,6 +425,15 @@ class OnDemandCrawlWorker(CrawlWorkerBase):
 
                 if not account:
                     request_service.fail_request(request.id, "Instagram 계정 없음")
+                    self._classify_crawl_failure(
+                        FailureEvent(
+                            source="crawl_requests",
+                            entity_id=request.id,
+                            failure_kind="instagram_account_missing",
+                            error_summary="Instagram 계정 없음",
+                            url=request.url,
+                        )
+                    )
                     logger.warning(f"[{self.name}] Instagram 계정 없음")
                     return
 
@@ -532,6 +562,15 @@ class OnDemandCrawlWorker(CrawlWorkerBase):
 
                 if not account:
                     request_service.fail_request(request.id, f"계정을 찾을 수 없음: id={service_account_id}")
+                    self._classify_crawl_failure(
+                        FailureEvent(
+                            source="crawl_requests",
+                            entity_id=request.id,
+                            failure_kind="instagram_account_missing",
+                            error_summary=f"계정을 찾을 수 없음: id={service_account_id}",
+                            url=request.url,
+                        )
+                    )
                     logger.warning(f"[{self.name}] 계정 없음: service_account_id={service_account_id}")
                     return
 

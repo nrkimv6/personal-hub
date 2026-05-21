@@ -7,7 +7,13 @@ from unittest.mock import MagicMock, patch
 
 os.environ.setdefault("TESTING", "1")
 
-from app.routes.notification import get_notification_settings_from_db, _DEFAULT_NOTIFY_STATES
+from app.routes.notification import (
+    _DEFAULT_NOTIFY_STATES,
+    _normalize_notify_states,
+    get_notification_settings_from_db,
+    update_notification_settings_in_db,
+)
+from app.schemas.notification import NotificationSettingsUpdate
 
 
 def _make_mock_db(first_result):
@@ -61,3 +67,31 @@ class TestGetNotificationSettingsNamedAccess:
         assert result.enable_telegram is False
         assert result.enable_desktop is True
         assert result.notify_states == ["available"]
+
+    def test_update_notification_settings_right_accepts_failure_warning_state(self):
+        """R: 운영 실패 warning opt-in state가 저장/응답에서 유지된다."""
+        mock_db = MagicMock()
+        mock_db.execute.return_value.fetchone.return_value = (1,)
+        settings = NotificationSettingsUpdate(
+            enable_telegram=True,
+            enable_desktop=False,
+            notify_states=["available", "failure_warning"],
+        )
+        with patch("app.routes.notification.SessionLocal", return_value=mock_db):
+            result = update_notification_settings_in_db(settings)
+
+        assert result.notify_states == ["available", "failure_warning"]
+        assert mock_db.commit.called
+
+    def test_update_notification_settings_boundary_filters_unknown_failure_state(self):
+        """B: 미지원 state는 저장 전에 제거된다."""
+        normalized = _normalize_notify_states(["failure_warning", "unknown_failure_state"])
+
+        assert normalized == ["failure_warning"]
+
+    def test_critical_force_send_reference_independent_from_notify_states(self):
+        """Re: critical force-send는 notify_states opt-in 목록에 들어가지 않는다."""
+        assert "failure_warning" not in _DEFAULT_NOTIFY_STATES
+        assert _normalize_notify_states(["failure_warning"]) == ["failure_warning"]
+        assert "critical" not in _DEFAULT_NOTIFY_STATES
+        assert "failure_critical" not in _DEFAULT_NOTIFY_STATES

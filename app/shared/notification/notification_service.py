@@ -35,6 +35,7 @@ _ALLOWED_NOTIFY_STATES = {
     "booking_failed",
     "error",
     "popup_new",
+    "failure_warning",
 }
 
 class NotificationService:

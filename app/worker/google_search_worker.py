@@ -26,6 +26,8 @@ from datetime import datetime
 from typing import Optional, TYPE_CHECKING
 
 from app.core.database import db_circuit
+from app.services.failure_alert_delivery import report_failure_alert
+from app.services.failure_alert_policy import FailureEvent
 from app.shared.worker.base_worker import BaseWorker
 from app.worker.crawl_worker_base import CrawlWorkerBase
 from app.database import SessionLocal
@@ -351,6 +353,16 @@ class GoogleSearchWorker(BaseWorker):
                 queue_item.error_message = "CAPTCHA 감지됨. 수동 해결이 필요합니다."
                 queue_item.completed_at = datetime.now()
                 db.commit()
+                await report_failure_alert(
+                    FailureEvent(
+                        source="google_search_queue",
+                        entity_id=queue_item.id,
+                        failure_kind="captcha_terminal",
+                        error_summary=queue_item.error_message,
+                        attempt=queue_item.search_id,
+                        metadata={"query": queue_item.query},
+                    )
+                )
                 return
 
             except Exception as e:

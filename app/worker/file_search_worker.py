@@ -29,6 +29,8 @@ import time
 from datetime import datetime, timedelta
 from typing import Optional
 
+from app.services.failure_alert_delivery import report_failure_alert
+from app.services.failure_alert_policy import FailureEvent
 from app.shared.worker.base_worker import BaseWorker
 from app.database import SessionLocal
 from app.models.file_search_request import FileSearchRequest
@@ -253,6 +255,16 @@ class FileSearchWorker(BaseWorker):
             )
             req.mark_failed(error_message=str(e))
             db.commit()
+            failure_kind = "ripgrep_unavailable" if _is_ripgrep_unavailable_error(e) else "search_failed"
+            await report_failure_alert(
+                FailureEvent(
+                    source="file_search_requests",
+                    entity_id=req.search_id,
+                    failure_kind=failure_kind,
+                    error_summary=str(e),
+                    attempt=req.id,
+                )
+            )
 
     # ========== 파일 열기 ==========
 
@@ -334,6 +346,24 @@ class FileSearchWorker(BaseWorker):
                 f"[{self.name}] 도구 상태 업데이트: "
                 f"everything={everything_ok}, ripgrep={ripgrep_ok}"
             )
+            if not ripgrep_ok:
+                await report_failure_alert(
+                    FailureEvent(
+                        source="file_search_requests",
+                        entity_id="tool_status",
+                        failure_kind="ripgrep_unavailable",
+                        error_summary="ripgrep is unavailable for file search worker",
+                    )
+                )
+            if not everything_ok:
+                await report_failure_alert(
+                    FailureEvent(
+                        source="file_search_requests",
+                        entity_id="tool_status",
+                        failure_kind="everything_unavailable",
+                        error_summary="Everything is unavailable for file search worker",
+                    )
+                )
         except Exception as e:
             logger.error(f"[{self.name}] 도구 상태 DB 업데이트 실패: {e}")
         finally:
@@ -370,8 +400,21 @@ class FileSearchWorker(BaseWorker):
                         error_message=f"워커 재시작으로 인한 stale 처리 (임계값: {STALE_THRESHOLD_MINUTES}분)"
                     )
                 db.commit()
+                await report_failure_alert(
+                    FailureEvent(
+                        source="file_search_requests",
+                        failure_kind="stale_cleanup_burst",
+                        error_summary="File search stale cleanup marked requests failed",
+                        count=len(stale),
+                    )
+                )
 
         except Exception as e:
             logger.error(f"[{self.name}] Stale 요청 정리 실패: {e}")
         finally:
             db.close()
+
+
+def _is_ripgrep_unavailable_error(error: Exception) -> bool:
+    text = str(error).lower()
+    return "ripgrep" in text and any(token in text for token in ("unavailable", "not found", "없", "실패"))

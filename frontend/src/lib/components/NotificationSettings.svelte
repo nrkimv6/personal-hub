@@ -19,7 +19,8 @@
 		{ value: 'booking_success', label: '예약 성공' },
 		{ value: 'booking_failed', label: '예약 실패' },
 		{ value: 'error', label: '오류 발생' },
-		{ value: 'popup_new', label: '팝업 신규 감지' }
+		{ value: 'popup_new', label: '팝업 신규 감지' },
+		{ value: 'failure_warning', label: '운영 실패 경고' }
 	];
 
 	const allowedNotifyStates = new Set(notifyStateOptions.map((option) => option.value));

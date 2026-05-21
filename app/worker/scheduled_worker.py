@@ -14,12 +14,15 @@ TaskSchedule 설정에 따라 정해진 시간에 도메인별 handler를 실행
 
 from __future__ import annotations
 
+import asyncio
 import inspect
 import logging
 from datetime import datetime
 
 from app.database import SessionLocal
 from app.models import TaskScheduleRun
+from app.services.failure_alert_delivery import report_failure_alert
+from app.services.failure_alert_policy import FailureEvent
 from app.modules.dev_runner.schedulers.archive_rotation_schedule import ArchiveRotationScheduler
 from app.modules.dev_runner.schedulers.auto_dev_runner_schedule import AutoDevRunnerScheduler
 from app.modules.dev_runner.schedulers.devguide_staleness_schedule import DevguideStalenessScheduler
@@ -124,10 +127,27 @@ class ScheduledCrawlWorker(CrawlWorkerBase):
             cleaned = schedule_service.cleanup_stale_runs(timeout_minutes=30)
             if cleaned > 0:
                 logger.info("[%s] %s개의 오래된 running 실행 정리 완료", self.name, cleaned)
+                if cleaned >= 3:
+                    self._enqueue_failure_alert(
+                        FailureEvent(
+                            source="task_schedule_runs",
+                            failure_kind="stale_cleanup_burst",
+                            error_summary="Scheduled run stale cleanup exceeded threshold",
+                            count=cleaned,
+                        )
+                    )
         except Exception as exc:
             logger.error("[%s] Stale run 정리 오류: %s", self.name, exc)
         finally:
             db.close()
+
+    def _enqueue_failure_alert(self, event: FailureEvent) -> None:
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            logger.warning("[%s] Failure alert skipped because no event loop is running", self.name)
+            return
+        loop.create_task(report_failure_alert(event))
 
     async def _dispatch_scheduled_runs(self) -> None:
         """Query active schedules per handler and enqueue claimed runs."""
