@@ -790,6 +790,18 @@ def _do_start_plan_runner(command: Dict, redis_client: redis.Redis):
             plan_file,
             subprocess_plan_file,
         )
+        try:
+            effective_worktree_rel = str(worktree_path.relative_to(plan_project_root)).replace("\\", "/")
+        except ValueError:
+            effective_worktree_rel = str(worktree_path)
+        if not _write_plan_worktree_info(
+            subprocess_plan_file,
+            branch,
+            effective_worktree_rel,
+            owner=plan_file,
+        ):
+            _set_error_status(f"subprocess plan worktree header 기록 실패: {subprocess_plan_file}")
+            return
 
     result = _launch_plan_runner_process(
         command,

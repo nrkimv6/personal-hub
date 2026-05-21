@@ -13,6 +13,7 @@ if str(PLAN_RUNNER_DIR) not in sys.path:
     sys.path.insert(0, str(PLAN_RUNNER_DIR))
 
 from worktree_manager import WorktreeManager  # noqa: E402
+from plan_worktree_helpers import parse_plan_worktree_info, write_plan_worktree_info  # noqa: E402
 from _dr_plan_runner import _ensure_test_repo_plan_materialized, _resolve_subprocess_plan_file  # noqa: E402
 
 
@@ -86,6 +87,32 @@ def test_test_repo_root_runner_uses_worktree_plan_for_subprocess(tmp_path):
     )
 
     assert effective == str(worktree_path / "docs" / "plan" / "dummy.md")
+
+
+def test_test_repo_root_worktree_plan_can_receive_required_headers(tmp_path):
+    repo = tmp_path / "isolated-repo"
+    _init_repo(repo)
+    plan = repo / "docs" / "plan" / "dummy.md"
+    plan.parent.mkdir(parents=True)
+    plan.write_text("# dummy\n\n> 상태: 구현중\n", encoding="utf-8")
+    _run(["git", "add", "docs/plan/dummy.md"], repo)
+    _run(["git", "commit", "-m", "test: add dummy plan"], repo)
+
+    worktree_path, branch = WorktreeManager.create(
+        "t-real_dummy_plan-9012",
+        repo / ".worktrees",
+        plan_file=str(plan),
+        use_runner_identity=True,
+    )
+    _ensure_test_repo_plan_materialized(str(plan), worktree_path)
+    worktree_plan = worktree_path / "docs" / "plan" / "dummy.md"
+    worktree_rel = str(worktree_path.relative_to(repo)).replace("\\", "/")
+
+    assert write_plan_worktree_info(str(worktree_plan), branch, worktree_rel, owner=str(plan))
+
+    header_branch, header_worktree = parse_plan_worktree_info(str(worktree_plan))
+    assert header_branch == branch
+    assert header_worktree == worktree_rel
 
 
 def test_normal_runner_keeps_canonical_plan_for_subprocess(tmp_path):
