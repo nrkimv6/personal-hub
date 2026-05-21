@@ -142,6 +142,14 @@
 		return m ? `${h}시간 ${m}분` : `${h}시간`;
 	}
 
+	function formatPropertyValue(value: unknown): string {
+		if (value === null || value === undefined || value === '') return '—';
+		if (typeof value === 'boolean') return value ? '예' : '아니오';
+		if (Array.isArray(value)) return value.length > 0 ? value.join(', ') : '—';
+		if (typeof value === 'object') return JSON.stringify(value);
+		return String(value);
+	}
+
 	onMount(loadAll);
 </script>
 
@@ -241,7 +249,50 @@
 	{:else if items.length === 0}
 		<div class="rounded-lg border border-border bg-card px-4 py-3 text-sm text-muted-foreground">아이템이 없습니다. 위에서 Markdown을 import해 주세요.</div>
 	{:else}
-		<div class="overflow-hidden rounded-lg border border-border bg-card">
+		<div class="space-y-2 md:hidden">
+			{#each items as item (item.id)}
+				<article class="rounded-lg border border-border bg-card p-3 shadow-sm">
+					<div class="flex items-start justify-between gap-3">
+						<div class="min-w-0 flex-1">
+							<a
+								href={item.url}
+								target="_blank"
+								rel="noopener noreferrer"
+								class="block truncate text-sm font-medium text-primary hover:underline"
+							>{item.title}</a>
+							<div class="mt-1 flex flex-wrap gap-1.5 text-xs text-muted-foreground">
+								<span class="rounded bg-muted px-1.5 py-0.5">{item.source ?? 'source 없음'}</span>
+								<span class="rounded bg-muted px-1.5 py-0.5">{item.badge_type ?? 'badge 없음'}</span>
+							</div>
+						</div>
+						<span class="shrink-0 rounded bg-secondary px-2 py-0.5 text-xs text-secondary-foreground">
+							{formatDuration(item.duration_minutes)}
+						</span>
+					</div>
+
+					{#if columns.filter((c) => c.is_visible).length > 0}
+						<div class="mt-3 grid grid-cols-1 gap-2 text-xs">
+							{#each columns.filter((c) => c.is_visible).slice(0, 4) as col (col.id)}
+								<div class="min-w-0 rounded-md bg-muted/50 px-2 py-1.5">
+									<div class="text-muted-foreground">{col.display_name}</div>
+									<div class="truncate text-foreground" title={formatPropertyValue(item.properties[col.key])}>
+										{formatPropertyValue(item.properties[col.key])}
+									</div>
+								</div>
+							{/each}
+						</div>
+					{/if}
+
+					{#if columns.filter((c) => c.is_visible).length > 4}
+						<div class="mt-2 text-xs text-muted-foreground">
+							추가 속성 {columns.filter((c) => c.is_visible).length - 4}개는 데스크톱 표에서 편집
+						</div>
+					{/if}
+				</article>
+			{/each}
+		</div>
+
+		<div class="hidden overflow-hidden rounded-lg border border-border bg-card md:block">
 			<div class="overflow-x-auto">
 				<table class="w-full text-xs">
 					<thead class="border-b border-border bg-muted">

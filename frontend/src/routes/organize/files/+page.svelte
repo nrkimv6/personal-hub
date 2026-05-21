@@ -164,7 +164,45 @@
 	{:else if error}
 		<div class="rounded-md border border-warning/30 bg-warning-light p-3 text-sm text-warning-foreground">{error}</div>
 	{:else if result}
-		<div class="overflow-x-auto rounded-lg border border-border">
+		<div class="space-y-3 md:hidden">
+			{#each result.items as item}
+				<article class="rounded-lg border border-border bg-card p-3">
+					<div class="mb-2 flex items-start justify-between gap-3">
+						<div class="min-w-0">
+							<div class="truncate text-sm font-medium text-foreground" title={item.file_path}>
+								{item.file_name}
+							</div>
+							<div class="mt-1 truncate text-xs text-muted-foreground" title={item.file_path}>
+								{item.file_path}
+							</div>
+						</div>
+						<span class="shrink-0 rounded-full px-2 py-0.5 text-xs font-medium
+							{item.status === 'moved' ? 'bg-green-500/15 text-green-600' :
+							item.status === 'approved' ? 'bg-blue-500/15 text-blue-600' :
+							item.status === 'error' ? 'bg-red-500/15 text-red-600' :
+							'bg-muted text-muted-foreground'}">
+							{item.status}
+						</span>
+					</div>
+					<div class="grid grid-cols-3 gap-2 text-xs">
+						<div>
+							<div class="text-muted-foreground">그룹</div>
+							<div class="mt-0.5 truncate text-foreground">{item.file_group}</div>
+						</div>
+						<div>
+							<div class="text-muted-foreground">확장자</div>
+							<div class="mt-0.5 text-foreground">{item.extension ?? '-'}</div>
+						</div>
+						<div class="text-right">
+							<div class="text-muted-foreground">크기</div>
+							<div class="mt-0.5 text-foreground">{formatSize(item.file_size)}</div>
+						</div>
+					</div>
+				</article>
+			{/each}
+		</div>
+
+		<div class="hidden overflow-x-auto rounded-lg border border-border md:block">
 			<table class="w-full text-sm">
 				<thead class="bg-muted/50">
 					<tr>

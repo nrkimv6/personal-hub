@@ -145,7 +145,52 @@
 	{:else if files.length === 0}
 		<div class="py-8 text-center text-sm text-muted-foreground">분류된 파일이 없습니다</div>
 	{:else}
-		<div class="overflow-x-auto rounded-lg border border-border">
+		<div class="space-y-3 md:hidden">
+			{#each files as file}
+				<article
+					class="rounded-lg border border-border bg-card p-3 {selectedIds.has(file.id) ? 'bg-primary/5' : ''}"
+					onclick={() => toggleSelect(file.id)}
+					role="button"
+					tabindex="0"
+					onkeydown={(e) => e.key === 'Enter' && toggleSelect(file.id)}
+				>
+					<div class="mb-2 flex items-start gap-3">
+						<input
+							type="checkbox"
+							checked={selectedIds.has(file.id)}
+							onclick={(e) => e.stopPropagation()}
+							onchange={() => toggleSelect(file.id)}
+							class="mt-0.5 rounded"
+						/>
+						<div class="min-w-0 flex-1">
+							<div class="truncate text-sm font-medium text-foreground" title={file.file_path}>
+								{file.file_name}
+							</div>
+							<div class="mt-1 truncate text-xs text-muted-foreground" title={file.file_path}>
+								{file.file_path}
+							</div>
+						</div>
+						<span class="shrink-0 rounded-full bg-blue-500/10 px-2 py-0.5 text-xs text-blue-600">
+							{file.status}
+						</span>
+					</div>
+					<div class="space-y-2 text-xs">
+						<div class="flex items-center justify-between gap-3">
+							<span class="text-muted-foreground">그룹</span>
+							<span class="text-foreground">{file.file_group}</span>
+						</div>
+						<div>
+							<div class="text-muted-foreground">분류 카테고리</div>
+							<div class="mt-0.5 break-words text-foreground">
+								{file.rule_category_path ?? file.rule_category_id ?? '-'}
+							</div>
+						</div>
+					</div>
+				</article>
+			{/each}
+		</div>
+
+		<div class="hidden overflow-x-auto rounded-lg border border-border md:block">
 			<table class="w-full text-sm">
 				<thead class="bg-muted/50">
 					<tr>
