@@ -5,7 +5,7 @@ param(
 
 $ErrorActionPreference = "Stop"
 
-$allowedArtifactRoots = @(".tmp/codex-browser-artifacts/", "logs/")
+$allowedArtifactRoots = @(".tmp/codex/", ".tmp/codex-browser-artifacts/", "logs/")
 
 function ConvertTo-RelativeGitPath {
     param([string]$PathValue)
@@ -24,6 +24,14 @@ function Get-UntrackedFiles {
     $raw = git ls-files --others --exclude-standard 2>$null
     if ($LASTEXITCODE -ne 0) {
         throw "git_untracked_scan_failed"
+    }
+    return @($raw -split "`r?`n" | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | ForEach-Object { ConvertTo-RelativeGitPath $_ })
+}
+
+function Get-UntrackedPathsWithDirectories {
+    $raw = git ls-files --others --exclude-standard --directory 2>$null
+    if ($LASTEXITCODE -ne 0) {
+        throw "git_untracked_dir_scan_failed"
     }
     return @($raw -split "`r?`n" | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | ForEach-Object { ConvertTo-RelativeGitPath $_ })
 }
@@ -56,10 +64,25 @@ function Get-ArtifactClassification {
     return $null
 }
 
+$artifactDirNames = @("tmp", "temp", "screenshots", "captures", "playwright-report", "test-results")
+function Get-RootDirArtifactClassification {
+    param([string]$PathValue)
+    $trimmed = $PathValue.TrimEnd('/')
+    $name = [System.IO.Path]::GetFileName($trimmed)
+    if ($artifactDirNames -contains $name) {
+        return "root-untracked-dir-artifact"
+    }
+    return $null
+}
+
 $repoRoot = Get-RepoRoot
 $untracked = Get-UntrackedFiles
+$untrackedWithDirs = Get-UntrackedPathsWithDirectories
 $rootFiles = @($untracked | Where-Object {
     $_ -notmatch "/" -and (Test-Path -LiteralPath (Join-Path $repoRoot $_) -PathType Leaf)
+})
+$rootDirs = @($untrackedWithDirs | Where-Object {
+    ($_.TrimEnd('/') -notmatch "/") -and (Test-Path -LiteralPath (Join-Path $repoRoot $_) -PathType Container)
 })
 
 $artifacts = @()
@@ -74,7 +97,22 @@ foreach ($path in $rootFiles) {
     $artifacts += [pscustomobject]@{
         path = $path
         classification = $classification
-        recommendation = "Delete if disposable, or move intentional evidence under .tmp/codex-browser-artifacts/ or logs/."
+        recommendation = "Delete if disposable, or move intentional evidence under .tmp/codex/<plan-slug>/<timestamp>/ (preferred), or .tmp/codex-browser-artifacts/ (compat), or logs/."
+    }
+}
+
+$unrelatedRootDirs = @()
+foreach ($path in $rootDirs) {
+    $classification = Get-RootDirArtifactClassification $path
+    if ([string]::IsNullOrWhiteSpace($classification)) {
+        $unrelatedRootDirs += $path
+        continue
+    }
+
+    $artifacts += [pscustomobject]@{
+        path = $path
+        classification = $classification
+        recommendation = "Delete if disposable, or move intentional evidence under .tmp/codex/<plan-slug>/<timestamp>/ (preferred), or .tmp/codex-browser-artifacts/ (compat), or logs/."
     }
 }
 
@@ -82,16 +120,18 @@ $result = [pscustomobject]@{
     repoRoot = $repoRoot
     allowedArtifactRoots = $allowedArtifactRoots
     untrackedRootFileCount = $rootFiles.Count
+    untrackedRootDirCount = $rootDirs.Count
     artifactCount = $artifacts.Count
     artifacts = $artifacts
     unrelatedRootFiles = $unrelatedRootFiles
+    unrelatedRootDirs = $unrelatedRootDirs
 }
 
 if ($Json) {
     $result | ConvertTo-Json -Depth 5
 } elseif ($artifacts.Count -gt 0) {
     [Console]::Error.WriteLine("codex_browser_artifact_root_dirty_detected: root-level untracked browser/Codex artifact candidates were found.")
-    [Console]::Error.WriteLine("allowed evidence paths: .tmp/codex-browser-artifacts/ or logs/")
+    [Console]::Error.WriteLine("allowed evidence paths: .tmp/codex/<plan-slug>/<timestamp>/ (preferred), .tmp/codex-browser-artifacts/ (compat), or logs/")
     [Console]::Error.WriteLine("affected files:")
     foreach ($artifact in $artifacts) {
         [Console]::Error.WriteLine("  - $($artifact.path) [$($artifact.classification)]")
