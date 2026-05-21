@@ -33,6 +33,8 @@ from app.shared.redis import RedisClient
 from app.shared.process.memory_pressure import get_recommended_action, read_memory_pressure_state
 from app.shared.process.orphan_detector import OrphanDetector
 from app.shared.process.registry import ProcessRegistry
+from app.services.failure_alert_delivery import report_failure_alert
+from app.services.failure_alert_policy import FailureEvent
 
 if TYPE_CHECKING:
     pass
@@ -354,8 +356,14 @@ class WorkerOrchestrator:
         Args:
             name: 실패한 워커 이름
         """
-        # Permanent worker failures are surfaced through logs; notification fan-out
-        # is handled outside the core supervisor.
+        await report_failure_alert(
+            FailureEvent(
+                source="worker_orchestrator",
+                entity_id=name,
+                failure_kind="worker_permanent_failure",
+                error_summary=f"Worker {name} exceeded restart limit",
+            )
+        )
         logger.warning(
             f"[Orchestrator] 워커 {name} 영구 실패 알림"
         )
