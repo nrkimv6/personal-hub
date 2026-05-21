@@ -128,7 +128,53 @@
 	{:else if previews.length === 0}
 		<div class="py-8 text-center text-sm text-muted-foreground">이동할 파일이 없습니다 (승인된 파일 필요)</div>
 	{:else}
-		<div class="overflow-x-auto rounded-lg border border-border">
+		<div class="space-y-3 md:hidden">
+			{#each previews as item}
+				<article
+					class="rounded-lg border border-border bg-card p-3 {selectedIds.has(item.file_id) ? 'bg-primary/5' : ''}"
+					onclick={() => toggleSelect(item.file_id)}
+					role="button"
+					tabindex="0"
+					onkeydown={(e) => e.key === 'Enter' && toggleSelect(item.file_id)}
+				>
+					<div class="mb-2 flex items-start gap-3">
+						<input
+							type="checkbox"
+							checked={selectedIds.has(item.file_id)}
+							onclick={(e) => e.stopPropagation()}
+							onchange={() => toggleSelect(item.file_id)}
+							class="mt-0.5"
+						/>
+						<div class="min-w-0 flex-1">
+							<div class="truncate text-sm font-medium text-foreground" title={item.source}>
+								{item.source?.split(/[/\\]/).pop() ?? '-'}
+							</div>
+							<div class="mt-1 truncate text-xs text-muted-foreground" title={item.source}>
+								{item.source}
+							</div>
+						</div>
+					</div>
+					<div class="space-y-2 text-xs">
+						<div class="flex items-center justify-between gap-3">
+							<span class="text-muted-foreground">카테고리</span>
+							<span class="truncate text-foreground">{item.category}</span>
+						</div>
+						<div>
+							<div class="text-muted-foreground">목적지</div>
+							<div class="mt-0.5 break-all text-foreground">{item.destination}</div>
+						</div>
+						<div class="flex justify-end">
+							<button
+								onclick={(e) => { e.stopPropagation(); executeMove([item.file_id]); }}
+								class="rounded-md border border-border px-3 py-1 text-xs text-primary hover:bg-accent"
+							>이동</button>
+						</div>
+					</div>
+				</article>
+			{/each}
+		</div>
+
+		<div class="hidden overflow-x-auto rounded-lg border border-border md:block">
 			<table class="w-full text-sm">
 				<thead class="bg-muted/50">
 					<tr>

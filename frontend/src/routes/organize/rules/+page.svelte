@@ -164,7 +164,50 @@
 	{#if isLoading}
 		<div class="py-8 text-center text-sm text-muted-foreground">로딩 중...</div>
 	{:else}
-		<div class="overflow-x-auto rounded-lg border border-border">
+		<div class="space-y-3 md:hidden">
+			{#each rules as rule}
+				<article class="rounded-lg border border-border bg-card p-3">
+					<div class="mb-2 flex items-start justify-between gap-3">
+						<div class="min-w-0">
+							<div class="text-sm font-medium text-foreground">{rule.rule_type}</div>
+							<div class="mt-1 break-all font-mono text-xs text-muted-foreground">
+								{JSON.stringify(rule.rule_content)}
+							</div>
+						</div>
+						<button
+							onclick={() => toggleRule(rule)}
+							class="shrink-0 rounded-full px-2 py-0.5 text-xs font-medium {rule.is_active ? 'bg-green-500/15 text-green-600' : 'bg-muted text-muted-foreground'}"
+						>
+							{rule.is_active ? '활성' : '비활성'}
+						</button>
+					</div>
+					<div class="space-y-2 text-xs">
+						<div>
+							<div class="text-muted-foreground">카테고리</div>
+							<div class="mt-0.5 break-words text-foreground">{rule.category_path ?? rule.category_id}</div>
+						</div>
+						<div class="grid grid-cols-2 gap-2">
+							<div>
+								<div class="text-muted-foreground">우선순위</div>
+								<div class="mt-0.5 text-foreground">{rule.priority}</div>
+							</div>
+							<div class="text-right">
+								<div class="text-muted-foreground">적중수</div>
+								<div class="mt-0.5 text-foreground">{rule.hit_count}</div>
+							</div>
+						</div>
+						<div class="flex justify-end">
+							<button
+								onclick={() => deleteRule(rule.id)}
+								class="rounded-md border border-border px-3 py-1 text-xs text-red-500 hover:bg-accent hover:text-red-600"
+							>삭제</button>
+						</div>
+					</div>
+				</article>
+			{/each}
+		</div>
+
+		<div class="hidden overflow-x-auto rounded-lg border border-border md:block">
 			<table class="w-full text-sm">
 				<thead class="bg-muted/50">
 					<tr>
