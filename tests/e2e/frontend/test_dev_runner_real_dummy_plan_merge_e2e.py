@@ -94,6 +94,15 @@ def _render_dummy_plan_text(*, retry_evidence: dict | None = None) -> str:
         "Do not edit the absolute plan path outside the current working tree.",
         "Mark the TODO checkboxes complete only in that relative plan file after the marker file exists.",
         "Commit the marker file and the relative plan file together on the runner branch.",
+        "End the final response with the exact plan-runner result block below.",
+        "Use the real marker commit hash in COMMITS.",
+        "",
+        "===AUTO-IMPL-RESULT===",
+        "PROJECT: real-runner-repo",
+        "TASK: create dummy plan marker",
+        "STATUS: SUCCESS",
+        "COMMITS: <marker commit hash>",
+        "===END===",
         "",
     ]
     if retry_evidence:

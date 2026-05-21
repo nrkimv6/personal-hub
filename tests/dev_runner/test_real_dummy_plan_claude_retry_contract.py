@@ -58,6 +58,9 @@ def test_render_dummy_plan_has_explicit_marker_commit_contract():
     assert "relative path `docs/plan/2026-05-21_test-real-dummy-plan.md`" in text
     assert "Do not edit the absolute plan path" in text
     assert "Report the marker path and commit hash" in text
+    assert "===AUTO-IMPL-RESULT===" in text
+    assert "STATUS: SUCCESS" in text
+    assert "COMMITS: <marker commit hash>" in text
 
 
 def test_retry_plan_includes_previous_failure_evidence():
