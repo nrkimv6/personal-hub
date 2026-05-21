@@ -245,6 +245,7 @@
 		display_secondary?: string | null;
 		hide_stale_branch_badge?: boolean;
 		gate_evidence_summary?: Record<string, unknown> | null;
+		auto_retry_blocked?: boolean;
 		pid_kind?: 'parent' | 'child_engine' | 'none';
 		confidence?: 'high' | 'medium' | 'low';
 		reattach_mode?: 'full' | 'log_only_child' | 'log_only';
@@ -290,6 +291,7 @@
 		display_secondary?: string | null;
 		hide_stale_branch_badge?: boolean;
 		gate_evidence_summary?: Record<string, unknown> | null;
+		auto_retry_blocked?: boolean;
 		pid_kind?: 'parent' | 'child_engine' | 'none';
 		confidence?: 'high' | 'medium' | 'low';
 		reattach_mode?: 'full' | 'log_only_child' | 'log_only';
@@ -333,6 +335,7 @@
 			display_secondary: runner.display_secondary ?? null,
 			hide_stale_branch_badge: runner.hide_stale_branch_badge ?? false,
 			gate_evidence_summary: runner.gate_evidence_summary ?? null,
+			auto_retry_blocked: runner.auto_retry_blocked ?? false,
 			pid_kind: runner.pid_kind,
 			confidence: runner.confidence,
 			reattach_mode: runner.reattach_mode,
@@ -464,6 +467,7 @@
 			display_secondary: runner.display_secondary ?? tab.display_secondary ?? null,
 			hide_stale_branch_badge: runner.hide_stale_branch_badge ?? tab.hide_stale_branch_badge ?? false,
 			gate_evidence_summary: runner.gate_evidence_summary ?? tab.gate_evidence_summary ?? null,
+			auto_retry_blocked: runner.auto_retry_blocked ?? tab.auto_retry_blocked ?? false,
 			pid_kind: runner.pid_kind ?? tab.pid_kind,
 			confidence: runner.confidence ?? tab.confidence,
 			reattach_mode: runner.reattach_mode ?? tab.reattach_mode,
