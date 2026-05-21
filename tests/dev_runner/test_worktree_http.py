@@ -66,18 +66,24 @@ class TestWorktreeHTTP:
         fake_sync.set("plan-runner:runners:testrunner:status", "running")
         fake_sync.set("plan-runner:runners:testrunner:worktree_path", "/tmp/wt/testrunner")
         fake_sync.set("plan-runner:runners:testrunner:merge_status", "merged")
+        fake_sync.set("plan-runner:runners:testrunner:runtime_source_root", "C:/tools/plan-runner")
+        fake_sync.set("plan-runner:runners:testrunner:runtime_source_commit", "abc1234")
 
         response = client.get("/api/v1/dev-runner/runners")
         assert response.status_code == 200
         data = response.json()
         assert isinstance(data, list)
         assert len(data) >= 1
-        item = data[0]
+        item = next(runner for runner in data if runner["runner_id"] == "testrunner")
         assert "worktree_path" in item
         assert "branch" in item
         assert "merge_status" in item
+        assert "runtime_source_root" in item
+        assert "runtime_source_commit" in item
         assert item["worktree_path"] == "/tmp/wt/testrunner"
         assert item["merge_status"] == "merged"
+        assert item["runtime_source_root"] == "C:/tools/plan-runner"
+        assert item["runtime_source_commit"] == "abc1234"
 
     def test_http_3_retry_merge_sends_command(self, api_client):
         """HTTP-3: POST /runners/{runner_id}/retry-merge → 200"""

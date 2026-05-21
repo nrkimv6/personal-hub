@@ -92,6 +92,8 @@ class RunStatusResponse(BaseModel):
     display_secondary: Optional[str] = None
     hide_stale_branch_badge: bool = False
     gate_evidence_summary: Optional[dict[str, Any]] = None
+    runtime_source_root: Optional[str] = None
+    runtime_source_commit: Optional[str] = None
 
 
 class RunnerListItem(BaseModel):
@@ -130,6 +132,8 @@ class RunnerListItem(BaseModel):
     display_secondary: Optional[str] = None
     hide_stale_branch_badge: bool = False
     gate_evidence_summary: Optional[dict[str, Any]] = None
+    runtime_source_root: Optional[str] = None
+    runtime_source_commit: Optional[str] = None
 
 
 class OrphanRunnerCandidate(BaseModel):

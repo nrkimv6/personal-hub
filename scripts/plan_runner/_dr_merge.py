@@ -102,6 +102,24 @@ def _decode_redis_value(val) -> str:
     return "" if val is None else str(val)
 
 
+def _plan_runner_source_commit() -> str:
+    try:
+        result = subprocess.run(
+            ["git", "rev-parse", "--short", "HEAD"],
+            cwd=str(PLAN_RUNNER_MODULE_PATH),
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=10,
+        )
+        if result.returncode == 0 and result.stdout.strip():
+            return result.stdout.strip()
+    except Exception:
+        pass
+    return "unknown"
+
+
 def _preserve_terminal_inline_merge_state(
     runner_id: str,
     redis_client: redis.Redis,
@@ -1321,6 +1339,13 @@ def _execute_merge_with_lock(runner_id: str, redis_client: redis.Redis, action_n
         except Exception:
             pass
         _pub("merge lock 획득 완료 — plan-runner post-merge 실행 중...")
+        source_commit = _plan_runner_source_commit()
+        _pub(f"plan-runner source: path={PLAN_RUNNER_MODULE_PATH}, expected_commit={source_commit}")
+        try:
+            redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:runtime_source_root", str(PLAN_RUNNER_MODULE_PATH))
+            redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:runtime_source_commit", source_commit)
+        except Exception:
+            pass
 
         # 3. subprocess로 plan-runner post-merge 호출
         proc = subprocess.run(

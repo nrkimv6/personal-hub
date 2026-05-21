@@ -71,6 +71,18 @@ def test_make_redis_mock_unknown_key_defaults_none_B():
     assert value is None
 
 
+def test_plan_runner_source_commit_returns_git_short_sha_R():
+    """R: _dr_merge records the plan-runner source commit before post-merge subprocess."""
+    mod = _load_dr_merge()
+    proc = MagicMock(returncode=0, stdout="abc1234\n", stderr="")
+
+    with patch.object(mod.subprocess, "run", return_value=proc) as mock_run:
+        assert mod._plan_runner_source_commit() == "abc1234"
+
+    mock_run.assert_called_once()
+    assert mock_run.call_args.kwargs["cwd"] == str(mod.PLAN_RUNNER_MODULE_PATH)
+
+
 # ── detect_merged_but_not_done ────────────────────────────────────────────────
 
 

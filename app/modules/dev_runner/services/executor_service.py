@@ -864,7 +864,7 @@ class ExecutorService:
             runner_id,
             "status", "plan_file", "start_time", "engine", "execution_count",
             "worktree_path", "branch", "merge_status", "merge_reason", "merge_message",
-            "trigger", "exit_reason", "error",
+            "trigger", "exit_reason", "error", "runtime_source_root", "runtime_source_commit",
         )
         try:
             await self._force_cleanup_state(runner_id)
@@ -882,6 +882,8 @@ class ExecutorService:
             "merge_status": data.get("merge_status"),
             "merge_reason": data.get("merge_reason"),
             "merge_message": data.get("merge_message"),
+            "runtime_source_root": data.get("runtime_source_root"),
+            "runtime_source_commit": data.get("runtime_source_commit"),
             "error": data.get("error"),
         }
         self._best_effort_upsert_runner_state(
@@ -1348,7 +1350,7 @@ class ExecutorService:
             "exit_reason", "error",
             "worktree_path", "branch", "merge_status",
             "worktree_exists", "branch_exists", "branch_merged_to_main", "metadata_checked_at",
-            "gate_evidence_summary"
+            "gate_evidence_summary", "runtime_source_root", "runtime_source_commit"
         )
         status = data["status"] or getattr(db_row, "status", None)
         pid_str = data["pid"]
@@ -1367,6 +1369,8 @@ class ExecutorService:
         branch_merged_to_main = _coerce_runner_metadata_state(data["branch_merged_to_main"])
         metadata_checked_at = _coerce_runner_metadata_checked_at(data["metadata_checked_at"])
         gate_evidence_summary = _coerce_gate_evidence_summary(data["gate_evidence_summary"])
+        runtime_source_root = data["runtime_source_root"] or db_meta.get("runtime_source_root")
+        runtime_source_commit = data["runtime_source_commit"] or db_meta.get("runtime_source_commit")
         running = status == "running"
 
         running, pid_str = await self._correct_pid_state(runner_id, status, pid_str, caller="get_runner_status")
@@ -1422,6 +1426,8 @@ class ExecutorService:
             display_secondary=display.secondary,
             hide_stale_branch_badge=display.hide_stale_branch_badge,
             gate_evidence_summary=gate_evidence_summary,
+            runtime_source_root=runtime_source_root,
+            runtime_source_commit=runtime_source_commit,
         )
 
     async def get_all_runners(self) -> list:
@@ -1473,7 +1479,7 @@ class ExecutorService:
                                                       "branch", "trigger", "test_source", "exit_reason", "stop_stage", "error",
                                                       "worktree_exists", "branch_exists",
                                                       "branch_merged_to_main", "metadata_checked_at",
-                                                      "gate_evidence_summary")
+                                                      "gate_evidence_summary", "runtime_source_root", "runtime_source_commit")
                     if db_row is None and rid in redis_registry_ids:
                         self._best_effort_backfill_runner_state_from_redis(rid, d)
                     status = d["status"] or getattr(db_row, "status", None)
@@ -1487,6 +1493,8 @@ class ExecutorService:
                     merge_status = d["merge_status"] or db_meta.get("merge_status") or ("queued" if getattr(db_row, "merge_requested", False) else None)
                     merge_reason = d["merge_reason"] or db_meta.get("merge_reason")
                     merge_message = d["merge_message"] or db_meta.get("merge_message")
+                    runtime_source_root = d["runtime_source_root"] or db_meta.get("runtime_source_root")
+                    runtime_source_commit = d["runtime_source_commit"] or db_meta.get("runtime_source_commit")
                     branch = d["branch"] or getattr(db_row, "branch", None)
                     trigger = d["trigger"] or db_meta.get("trigger")
                     recent_meta: dict = {}
@@ -1671,6 +1679,8 @@ class ExecutorService:
                         display_secondary=display.secondary,
                         hide_stale_branch_badge=display.hide_stale_branch_badge,
                         gate_evidence_summary=gate_evidence_summary,
+                        runtime_source_root=runtime_source_root,
+                        runtime_source_commit=runtime_source_commit,
                     ))
                 return result
             finally:
