@@ -37,3 +37,20 @@ class TestRunRequestSessionId:
         """R: fused_session=True → True 저장"""
         req = RunRequest(fused_session=True)
         assert req.fused_session is True
+
+
+class TestRunRequestTestRepoRoot:
+    def test_test_repo_root_R_default_none(self):
+        """R: test_repo_root 미지정 시 None"""
+        req = RunRequest()
+        assert req.test_repo_root is None
+
+    def test_test_repo_root_B_blank_normalized_to_none(self):
+        """B: 공백 test_repo_root는 None으로 정규화"""
+        req = RunRequest(test_repo_root="  ")
+        assert req.test_repo_root is None
+
+    def test_test_repo_root_R_serializes_when_set(self):
+        """R: test_repo_root 값은 직렬화 payload에 보존"""
+        req = RunRequest(test_source="real_dummy_plan_playwright", test_repo_root="D:/tmp/isolated")
+        assert req.model_dump()["test_repo_root"] == "D:/tmp/isolated"
