@@ -168,7 +168,7 @@ def test_real_dummy_plan_runner_merges_isolated_repo_from_admin_ui(page: Page, f
         """async (payload) => {
             const res = await fetch('/api/v1/dev-runner/run', {
                 method: 'POST',
-                headers: {'Content-Type': 'application/json'},
+                headers: {'Content-Type': 'application/json', 'x-api-gate-bypass': '1'},
                 body: JSON.stringify(payload),
             });
             const text = await res.text();
