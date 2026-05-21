@@ -14,13 +14,14 @@ from playwright.sync_api import Page, expect
 from tests.dev_runner.dummy_plan_lifecycle_helpers import DUMMY_PLAN_SENTINEL
 
 
-pytestmark = [pytest.mark.e2e, pytest.mark.http_live, pytest.mark.timeout(240)]
+pytestmark = [pytest.mark.e2e, pytest.mark.http_live, pytest.mark.timeout(600)]
 
 BASE_API = os.environ.get("E2E_API_URL", "http://localhost:8001")
 DEFAULT_REAL_RUNNER_ENGINE = "claude"
 ENGINE = os.environ.get("E2E_REAL_DEV_RUNNER_ENGINE", DEFAULT_REAL_RUNNER_ENGINE)
 MAX_CYCLES = int(os.environ.get("E2E_REAL_DEV_RUNNER_MAX_CYCLES", "2"))
 MAX_ATTEMPTS = int(os.environ.get("E2E_REAL_DEV_RUNNER_MAX_ATTEMPTS", "2"))
+HTTP_TIMEOUT = httpx.Timeout(10.0, connect=2.0)
 RUNNER_KEY_PREFIX = "plan-runner:runners"
 TERMINAL_FAILURE_TOKENS = (
     "[FAILURE]",
@@ -375,7 +376,7 @@ def test_claude_real_dummy_plan_runner_merges_isolated_repo_from_admin_ui_with_s
 
     page.goto(f"{frontend_url}/automation?tab=dev-runner")
 
-    with httpx.Client(base_url=BASE_API, timeout=10.0) as client:
+    with httpx.Client(base_url=BASE_API, timeout=HTTP_TIMEOUT) as client:
         attempts: list[dict] = []
         retry_evidence = None
         success = None

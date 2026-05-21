@@ -40,3 +40,10 @@ def test_poll_attempt_result_treats_log_timeouts_as_poll_miss(monkeypatch):
     assert result["success"] is False
     assert result["reason"] == "sentinel_timeout"
     assert result["runner_id"] == "runner-timeout"
+
+
+def test_live_http_timeout_has_short_connect_budget():
+    mod = _load_e2e_module()
+
+    assert mod.HTTP_TIMEOUT.connect == 2.0
+    assert mod.HTTP_TIMEOUT.read == 10.0
