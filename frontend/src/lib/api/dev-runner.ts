@@ -407,6 +407,8 @@ export const devRunnerRunnerApi = {
 
 	runners: () => devRunnerRequest<RunnerListItem[]>('/runners'),
 
+	runnersWithHidden: () => devRunnerRequest<RunnerListItem[]>('/runners?include_hidden=true'),
+
 	discoverOrphanRunners: () => devRunnerRequest<OrphanRunnerCandidate[]>('/runners/orphans'),
 
 	reattachRunner: (runnerId: string, payload?: { force?: boolean; expected_plan_file?: string | null; expected_log_file?: string | null }) =>

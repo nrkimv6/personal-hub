@@ -1,6 +1,7 @@
 """DiagnosticsService 단위 테스트 (RIGHT-BICEP)"""
 import pytest
 from unittest.mock import MagicMock
+from types import SimpleNamespace
 
 from app.modules.dev_runner.services.diagnostics_service import DiagnosticsService
 
@@ -100,3 +101,37 @@ def test_run_diagnostics_boundary_high_connections():
     conn_step = next(s for s in steps if s["name"] == "Redis 연결 수")
     assert conn_step["ok"] is False
     assert "좀비" in conn_step["detail"]
+
+
+def test_run_diagnostics_reports_hidden_db_row_reason(tmp_path, monkeypatch):
+    from unittest.mock import patch as _patch
+    from app.modules.dev_runner.services import visibility
+
+    monkeypatch.setattr(visibility, "_project_root", lambda: tmp_path)
+    row = SimpleNamespace(
+        runner_id="db-hidden-001",
+        plan_file="docs/plan/test.md",
+        worktree_path=None,
+        branch=None,
+        status="stopped",
+        metadata_json={"trigger": "user"},
+    )
+    svc = _make_svc()
+    svc.redis_client.smembers = MagicMock(return_value=set())
+    svc.redis_client.get = MagicMock(side_effect=lambda key: {
+        "plan-runner:listener:heartbeat": "1",
+    }.get(key))
+
+    with _patch(
+        "app.modules.dev_runner.services.event_service.get_pmsg_count_last5min",
+        return_value=0,
+    ), _patch("app.database.SessionLocal") as session_local, _patch(
+        "app.modules.dev_runner.services.dev_runner_state_repository.list_runner_states",
+        return_value=[row],
+    ):
+        session_local.return_value.close = MagicMock()
+        result = svc.run_diagnostics()
+
+    drift = next(step for step in result["steps"] if step["step"] == 9)
+    assert "hidden_db_rows=1" in drift["detail"]
+    assert "db-hidden-001:synthetic-evidence" in drift["detail"]

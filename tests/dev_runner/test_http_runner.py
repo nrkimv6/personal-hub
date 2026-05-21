@@ -223,6 +223,34 @@ class TestDismissRunnerTabContract:
         cleanup_mock.assert_awaited_once()
 
 
+class TestRunnerListVisibilityContract:
+    pytestmark = pytest.mark.http
+
+    def test_runners_default_calls_visible_only_contract(self, client):
+        with patch(
+            "app.modules.dev_runner.routes.runner.executor_service.get_all_runners",
+            new_callable=AsyncMock,
+            return_value=[],
+        ) as list_mock:
+            response = client.get(f"{BASE_URL}/runners")
+
+        assert response.status_code == 200
+        list_mock.assert_awaited_once_with(include_hidden=False)
+
+    def test_runners_include_hidden_is_explicit_diagnostics_path(self, client):
+        hidden = [{"runner_id": "hidden-01", "running": False, "visible": False}]
+        with patch(
+            "app.modules.dev_runner.routes.runner.executor_service.get_all_runners",
+            new_callable=AsyncMock,
+            return_value=hidden,
+        ) as list_mock:
+            response = client.get(f"{BASE_URL}/runners?include_hidden=true")
+
+        assert response.status_code == 200
+        assert response.json()[0]["runner_id"] == "hidden-01"
+        list_mock.assert_awaited_once_with(include_hidden=True)
+
+
 # ──────────────────────────────────────────────
 # T5: visible_only + stopped user 보존 계약 (Phase T5)
 # ──────────────────────────────────────────────

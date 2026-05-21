@@ -6,7 +6,7 @@ from datetime import datetime
 from typing import Optional
 import redis
 import redis.asyncio as aioredis
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Query
 
 from app.modules.dev_runner.schemas import (
     DirectMergeRequest,
@@ -27,10 +27,10 @@ router = APIRouter()
 
 
 @router.get("/runners", response_model=list[RunnerListItem])
-async def list_runners():
-    """모든 active runner 목록 조회"""
+async def list_runners(include_hidden: bool = Query(False, description="diagnostics only: include hidden/test runner rows")):
+    """사용자-facing runner 목록 조회. 기본값은 visible runner만 반환한다."""
     try:
-        return await executor_service.get_all_runners()
+        return await executor_service.get_all_runners(include_hidden=include_hidden)
     except (redis.ConnectionError, aioredis.ConnectionError):
         raise HTTPException(status_code=503, detail="Redis 연결 실패")
 
@@ -83,7 +83,7 @@ async def stop_run():
     except Exception:
         raise HTTPException(status_code=503, detail="Redis unavailable")
     try:
-        runners = await executor_service.get_all_runners()
+        runners = await executor_service.get_all_runners(visible_only=False, include_hidden=True)
     except (redis.ConnectionError, aioredis.ConnectionError):
         raise HTTPException(status_code=503, detail="Redis 연결 실패")
     if not runners:
