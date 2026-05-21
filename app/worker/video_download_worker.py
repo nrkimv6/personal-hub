@@ -15,6 +15,7 @@ import asyncio
 import logging
 import re
 import signal
+from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
@@ -27,6 +28,7 @@ if DOWNLOADER_PROJECT_PATH not in sys.path:
 from app.shared.worker.base_worker import BaseWorker
 from app.database import SessionLocal
 from app.models import VideoDownload
+from app.services.failure_alert_delivery import report_video_failure_alert
 from app.services.video_download_service import VideoDownloadService
 from app.config import settings
 
@@ -34,6 +36,22 @@ logger = logging.getLogger(__name__)
 
 # 기본 다운로드 경로
 DEFAULT_OUTPUT_DIR = r"D:\Videos\contents\download"
+
+
+@dataclass
+class LiveDownloadResult:
+    """Structured result for YouTube Live recording diagnostics."""
+
+    success: bool
+    output_path: Optional[str] = None
+    file_size: Optional[int] = None
+    title: Optional[str] = None
+    returncode: Optional[int] = None
+    stdout_tail: str = ""
+    stderr_tail: str = ""
+    artifacts: list[str] = field(default_factory=list)
+    error_kind: Optional[str] = None
+    error_message: Optional[str] = None
 
 
 class VideoDownloadWorker(BaseWorker):
@@ -179,13 +197,15 @@ class VideoDownloadWorker(BaseWorker):
                     f"path={result.get('output_path')}"
                 )
             else:
+                error_message = result.get("error", "알 수 없는 오류")
                 service.fail_request(
                     request_id,
-                    error_message=result.get("error", "알 수 없는 오류")
+                    error_message=error_message,
                 )
+                await self._report_download_failure_alert(request, result, error_message)
                 logger.warning(
                     f"[{self.name}] 다운로드 실패: id={request_id}, "
-                    f"error={result.get('error')}"
+                    f"error={error_message}"
                 )
 
         except Exception as e:
@@ -264,27 +284,24 @@ class VideoDownloadWorker(BaseWorker):
             결과 딕셔너리 {success, output_path, file_size, title, error}
         """
         try:
-            from download import download_live_stream
-            from convert import convert_and_rename
-
             current_datetime = datetime.now().strftime("%Y%m%d_%H%M%S")
             output_base = os.path.join(self.output_dir, f'ts_{current_datetime}')
+            cmd = self._build_youtube_stream_command(request, output_base)
+            live_result = await self._run_youtube_stream_command(cmd, output_base)
 
-            # 동기 함수를 비동기로 실행
-            downloaded_file = await asyncio.to_thread(
-                download_live_stream,
-                request.url,
-                output_base,
-                "1"  # bv*+ba 옵션
-            )
-
-            if not downloaded_file or not os.path.exists(downloaded_file):
-                return {"success": False, "error": "다운로드된 파일을 찾을 수 없음"}
+            if not live_result.success:
+                return {
+                    "success": False,
+                    "error": self._format_youtube_stream_result_error(live_result),
+                    "error_kind": live_result.error_kind,
+                }
 
             # 변환 실행
+            from convert import convert_and_rename
+
             await asyncio.to_thread(
                 convert_and_rename,
-                downloaded_file,
+                live_result.output_path,
                 f'video_{current_datetime}',
                 remove_ts_after_conversion=True,
                 naming_option='id_title_if_av'
@@ -302,11 +319,234 @@ class VideoDownloadWorker(BaseWorker):
                     "title": title
                 }
 
-            return {"success": True, "output_path": downloaded_file}
+            return {
+                "success": True,
+                "output_path": live_result.output_path,
+                "file_size": live_result.file_size,
+                "title": live_result.title,
+            }
 
         except Exception as e:
             logger.error(f"[{self.name}] YouTube Stream 다운로드 오류: {e}", exc_info=True)
             return {"success": False, "error": str(e)}
+
+    def _build_youtube_stream_command(self, request: VideoDownload, output_base: str) -> list[str]:
+        """Build yt-dlp argv for YouTube Live without shell interpolation."""
+        return [
+            'yt-dlp',
+            '--newline',
+            '--progress',
+            '--write-info-json',
+            '--print',
+            'after_move:filepath',
+            '--merge-output-format',
+            'mp4',
+            '-f',
+            self._quality_to_youtube_stream_format(getattr(request, "quality", "best")),
+            '-o',
+            f'{output_base}.%(ext)s',
+            request.url,
+        ]
+
+    def _quality_to_youtube_stream_format(self, quality: str) -> str:
+        """Map UI quality values to yt-dlp format selectors for live streams."""
+        normalized = (quality or "best").strip().lower()
+        if normalized == "worst":
+            return "worst"
+        if normalized in {"1080", "720", "480"}:
+            return f"bv*[height<={normalized}]+ba/b[height<={normalized}]/best[height<={normalized}]"
+        return "bv*+ba/best"
+
+    async def _run_youtube_stream_command(self, cmd: list[str], output_base: str) -> LiveDownloadResult:
+        """Run yt-dlp and preserve stderr/stdout/artifact diagnostics."""
+        logger.info(f"[{self.name}] YouTube Live yt-dlp 시작: url={cmd[-1][:60]}...")
+        process = await asyncio.create_subprocess_exec(
+            *cmd,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE
+        )
+        self._current_process = process
+        try:
+            stdout_bytes, stderr_bytes = await process.communicate()
+        finally:
+            if self._current_process is process:
+                self._current_process = None
+
+        stdout_text = stdout_bytes.decode('utf-8', errors='ignore') if stdout_bytes else ""
+        stderr_text = stderr_bytes.decode('utf-8', errors='ignore') if stderr_bytes else ""
+        stdout_tail = self._tail_process_output(stdout_text)
+        stderr_tail = self._tail_process_output(stderr_text)
+        artifacts = self._scan_youtube_stream_artifacts(output_base)
+
+        if process.returncode != 0:
+            error_kind, error_message = self._classify_youtube_stream_error(
+                stderr_text,
+                process.returncode,
+            )
+            return LiveDownloadResult(
+                success=False,
+                returncode=process.returncode,
+                stdout_tail=stdout_tail,
+                stderr_tail=stderr_tail,
+                artifacts=artifacts,
+                error_kind=error_kind,
+                error_message=error_message,
+            )
+
+        output_path = self._resolve_youtube_stream_output_path(stdout_text, artifacts)
+        if not output_path:
+            error_kind, error_message = self._classify_youtube_stream_error("", process.returncode)
+            return LiveDownloadResult(
+                success=False,
+                returncode=process.returncode,
+                stdout_tail=stdout_tail,
+                stderr_tail=stderr_tail,
+                artifacts=artifacts,
+                error_kind=error_kind,
+                error_message=error_message,
+            )
+
+        file_size = os.path.getsize(output_path)
+        title = self._extract_title_from_filename(output_path)
+        logger.info(f"[{self.name}] YouTube Live 다운로드 완료: {file_size / 1024 / 1024:.1f}MB")
+        return LiveDownloadResult(
+            success=True,
+            output_path=output_path,
+            file_size=file_size,
+            title=title,
+            returncode=process.returncode,
+            stdout_tail=stdout_tail,
+            stderr_tail=stderr_tail,
+            artifacts=artifacts,
+        )
+
+    def _resolve_youtube_stream_output_path(self, stdout_text: str, artifacts: list[str]) -> Optional[str]:
+        """Resolve final media path from yt-dlp stdout or scanned artifacts."""
+        for line in reversed((stdout_text or "").splitlines()):
+            candidate = line.strip().strip('"')
+            if candidate and os.path.exists(candidate) and self._is_media_artifact(candidate):
+                return candidate
+
+        for candidate in artifacts:
+            if os.path.exists(candidate) and self._is_media_artifact(candidate):
+                return candidate
+        return None
+
+    def _scan_youtube_stream_artifacts(self, output_base: str) -> list[str]:
+        """Collect media and sidecar artifacts produced by a live yt-dlp run."""
+        base_path = Path(output_base)
+        if not base_path.parent.exists():
+            return []
+
+        candidates = []
+        for path in base_path.parent.glob(f"{base_path.name}*"):
+            if self._is_youtube_stream_artifact(path):
+                candidates.append(str(path))
+        return sorted(candidates)
+
+    def _is_youtube_stream_artifact(self, path: Path) -> bool:
+        name = path.name.lower()
+        artifact_suffixes = (
+            ".info.json",
+            ".part",
+            ".ytdl",
+            ".mp4",
+            ".webm",
+            ".mkv",
+            ".ts",
+        )
+        return any(name.endswith(suffix) for suffix in artifact_suffixes)
+
+    def _is_media_artifact(self, filepath: str) -> bool:
+        return Path(filepath).suffix.lower() in {".mp4", ".webm", ".mkv", ".ts"}
+
+    def _tail_process_output(self, text: str, limit: int = 4000) -> str:
+        """Return a bounded tail of subprocess output for DB-safe diagnostics."""
+        normalized = (text or "").strip()
+        if len(normalized) <= limit:
+            return normalized
+        return normalized[-limit:]
+
+    def _classify_youtube_stream_error(
+        self,
+        stderr_text: str,
+        returncode: Optional[int],
+    ) -> tuple[str, str]:
+        """Classify YouTube Live yt-dlp/ffmpeg stderr without losing root cause."""
+        stderr_text = (stderr_text or "").strip()
+        lowered = stderr_text.lower()
+
+        ffmpeg_match = re.search(r"ffmpeg exited with code\s+(-?\d+)", stderr_text, re.IGNORECASE)
+        if ffmpeg_match:
+            detail = f"ffmpeg exited with code {ffmpeg_match.group(1)}"
+            return (
+                "youtube_live_ffmpeg_failed",
+                f"YouTube Live 녹화/병합 실패: {detail}",
+            )
+
+        access_markers = ("private video", "sign in", "cookies", "login")
+        if any(marker in lowered for marker in access_markers):
+            detail = self._tail_process_output(stderr_text, limit=200)
+            return (
+                "youtube_live_access_restricted",
+                f"YouTube Live 접근 권한 또는 로그인 필요: {detail or '비공개 또는 인증 필요'}",
+            )
+
+        if stderr_text:
+            detail = self._tail_process_output(stderr_text, limit=200)
+            return (
+                "youtube_live_yt_dlp_failed",
+                f"YouTube Live 다운로드 실패: {detail}",
+            )
+
+        if returncode not in (None, 0):
+            return (
+                "youtube_live_yt_dlp_failed",
+                f"YouTube Live 다운로드 실패: yt-dlp exited with code {returncode}",
+            )
+
+        return (
+            "youtube_live_output_missing",
+            "다운로드된 파일을 찾을 수 없음",
+        )
+
+    def _format_youtube_stream_result_error(self, result: LiveDownloadResult) -> str:
+        """Format structured live failure diagnostics for VideoDownload.error_message."""
+        message = result.error_message or "YouTube Live 다운로드 실패"
+        details = []
+        if result.error_kind:
+            details.append(f"kind={result.error_kind}")
+        if result.returncode is not None:
+            details.append(f"returncode={result.returncode}")
+        if result.stderr_tail:
+            details.append(f"stderr={result.stderr_tail}")
+        if result.artifacts:
+            artifact_names = ", ".join(Path(path).name for path in result.artifacts)
+            details.append(f"artifacts={artifact_names}")
+
+        if not details:
+            return message
+        return f"{message} ({'; '.join(details)})"
+
+    async def _report_download_failure_alert(
+        self,
+        request: VideoDownload,
+        result: dict,
+        error_message: str,
+    ) -> None:
+        """Report actionable live download failures through the failure alert policy."""
+        if request.download_type != VideoDownload.TYPE_YOUTUBE_STREAM:
+            return
+        failure_kind = result.get("error_kind")
+        if not failure_kind:
+            return
+        await report_video_failure_alert(
+            request_id=request.id,
+            failure_kind=failure_kind,
+            error_summary=error_message,
+            url=request.url,
+            attempt=getattr(request, "retry_count", None),
+        )
 
     async def _download_vimeo(self, request: VideoDownload) -> dict:
         """Vimeo 다운로드 (yt-dlp 직접 호출, 진행률 로깅).

@@ -2,12 +2,32 @@
 
 import pytest
 from fastapi.testclient import TestClient
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
+from sqlalchemy.pool import StaticPool
 
 from app.database import get_db
 from app.main import app
 from app.models import VideoDownload
 
 pytestmark = pytest.mark.http
+
+
+@pytest.fixture
+def test_db_session():
+    engine = create_engine(
+        "sqlite:///:memory:",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    VideoDownload.__table__.create(bind=engine)
+    Session = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+    session = Session()
+    try:
+        yield session
+    finally:
+        session.close()
+        engine.dispose()
 
 
 @pytest.fixture
@@ -88,3 +108,41 @@ def test_batch_mixed_urls_accepts_instagram_with_existing_types(client):
     assert body["success"] is True
     assert body["created_count"] == 3
     assert body["skipped_count"] == 0
+
+
+def test_get_youtube_stream_failed_request_preserves_error_message(client, test_db_session):
+    error_message = "YouTube Live 녹화/병합 실패: ffmpeg exited with code 3199971767"
+    row = VideoDownload(
+        url="https://www.youtube.com/live/PHEGRsZckhI",
+        download_type=VideoDownload.TYPE_YOUTUBE_STREAM,
+        status=VideoDownload.STATUS_FAILED,
+        quality="best",
+        error_message=error_message,
+    )
+    test_db_session.add(row)
+    test_db_session.commit()
+
+    response = client.get(f"/api/v1/video-downloads/{row.id}")
+
+    assert response.status_code == 200
+    assert response.json()["error_message"] == error_message
+
+
+def test_list_youtube_stream_failed_request_preserves_error_message(client, test_db_session):
+    error_message = "YouTube Live 접근 권한 또는 로그인 필요: Private video. Sign in."
+    row = VideoDownload(
+        url="https://www.youtube.com/live/PHEGRsZckhI",
+        download_type=VideoDownload.TYPE_YOUTUBE_STREAM,
+        status=VideoDownload.STATUS_FAILED,
+        quality="best",
+        error_message=error_message,
+    )
+    test_db_session.add(row)
+    test_db_session.commit()
+
+    response = client.get("/api/v1/video-downloads?download_type=youtube_stream&page=1&page_size=10")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["total"] == 1
+    assert body["items"][0]["error_message"] == error_message
