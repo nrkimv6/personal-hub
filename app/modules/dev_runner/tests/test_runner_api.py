@@ -901,6 +901,7 @@ class TestListRunners:
             assert rows[0]["plan_file"] == "docs/plan/db-only.md"
             assert rows[0]["branch"] == "impl/db-only"
             assert rows[0]["trigger"] == "user"
+            assert rows[0]["visible"] is False
         finally:
             runner_state_db.query(DevRunnerMergeRequest).filter_by(runner_id=rid).delete()
             runner_state_db.query(DevRunnerState).filter_by(runner_id=rid).delete()
