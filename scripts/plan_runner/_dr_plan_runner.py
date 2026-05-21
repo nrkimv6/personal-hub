@@ -525,6 +525,54 @@ def _stream_output(
         _update_workflow_and_execute_cleanup(ctx, merge_requested)
 
 
+def _resolve_subprocess_plan_file(
+    plan_file: str | None,
+    worktree_path: Path,
+    project_root: Path,
+    *,
+    use_worktree_plan: bool,
+) -> str | None:
+    """Return the plan path the child plan-runner should read."""
+    if not plan_file or not use_worktree_plan:
+        return plan_file
+
+    try:
+        rel_plan = Path(plan_file).resolve(strict=False).relative_to(project_root.resolve(strict=False))
+    except ValueError:
+        return plan_file
+
+    candidate = worktree_path / rel_plan
+    if candidate.exists():
+        return str(candidate)
+    return plan_file
+
+
+def _ensure_test_repo_plan_materialized(plan_file: str | None, worktree_path: Path) -> None:
+    if not plan_file:
+        return
+    try:
+        result = subprocess.run(
+            ["git", "sparse-checkout", "disable"],
+            cwd=str(worktree_path),
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            timeout=30,
+        )
+        if result.returncode != 0:
+            logger.warning(
+                "test_repo_root sparse-checkout disable failed: worktree=%s stderr=%s",
+                worktree_path,
+                (result.stderr or "").strip()[:500],
+            )
+    except Exception as exc:
+        logger.warning(
+            "test_repo_root sparse-checkout materialize failed: worktree=%s error=%s",
+            worktree_path,
+            exc,
+        )
+
+
 def _do_start_plan_runner(command: Dict, redis_client: redis.Redis):
     """plan-runner CLI 실행 (백그라운드 스레드에서 호출 — worktree 생성 포함)"""
     from worktree_manager import WorktreeManager, WorktreeError, ensure_main_branch
@@ -727,12 +775,28 @@ def _do_start_plan_runner(command: Dict, redis_client: redis.Redis):
         command.setdefault("started_at", datetime.now().isoformat())
         command.setdefault("execution_count", "unknown")
 
+    if command.get("test_repo_root"):
+        _ensure_test_repo_plan_materialized(plan_file, worktree_path)
+
+    subprocess_plan_file = _resolve_subprocess_plan_file(
+        plan_file,
+        worktree_path,
+        plan_project_root,
+        use_worktree_plan=bool(command.get("test_repo_root")),
+    )
+    if subprocess_plan_file != plan_file:
+        logger.info(
+            "test_repo_root subprocess plan remapped: original=%s effective=%s",
+            plan_file,
+            subprocess_plan_file,
+        )
+
     result = _launch_plan_runner_process(
         command,
         redis_client,
         runner_id,
         worktree_path,
-        plan_file,
+        subprocess_plan_file,
         engine,
         fix_engine=fix_engine,
         branch=branch,

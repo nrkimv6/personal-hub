@@ -13,6 +13,7 @@ if str(PLAN_RUNNER_DIR) not in sys.path:
     sys.path.insert(0, str(PLAN_RUNNER_DIR))
 
 from worktree_manager import WorktreeManager  # noqa: E402
+from _dr_plan_runner import _ensure_test_repo_plan_materialized, _resolve_subprocess_plan_file  # noqa: E402
 
 
 def _run(cmd: list[str], cwd: Path) -> subprocess.CompletedProcess[str]:
@@ -58,3 +59,49 @@ def test_worktree_manager_merges_only_isolated_repo(tmp_path):
     assert merge_result.success, merge_result.message
     assert (repo / marker).read_text(encoding="utf-8") == "merged in isolated repo\n"
     assert not root_marker.exists()
+
+
+def test_test_repo_root_runner_uses_worktree_plan_for_subprocess(tmp_path):
+    repo = tmp_path / "isolated-repo"
+    _init_repo(repo)
+    plan = repo / "docs" / "plan" / "dummy.md"
+    plan.parent.mkdir(parents=True)
+    plan.write_text("# dummy\n", encoding="utf-8")
+    _run(["git", "add", "docs/plan/dummy.md"], repo)
+    _run(["git", "commit", "-m", "test: add dummy plan"], repo)
+
+    worktree_path, _branch = WorktreeManager.create(
+        "t-real_dummy_plan-5678",
+        repo / ".worktrees",
+        plan_file=str(plan),
+        use_runner_identity=True,
+    )
+    _ensure_test_repo_plan_materialized(str(plan), worktree_path)
+
+    effective = _resolve_subprocess_plan_file(
+        str(plan),
+        worktree_path,
+        repo,
+        use_worktree_plan=True,
+    )
+
+    assert effective == str(worktree_path / "docs" / "plan" / "dummy.md")
+
+
+def test_normal_runner_keeps_canonical_plan_for_subprocess(tmp_path):
+    repo = tmp_path / "repo"
+    _init_repo(repo)
+    plan = repo / "docs" / "plan" / "dummy.md"
+    plan.parent.mkdir(parents=True)
+    plan.write_text("# dummy\n", encoding="utf-8")
+    worktree_path = repo / ".worktrees" / "runner"
+    worktree_path.mkdir(parents=True)
+
+    effective = _resolve_subprocess_plan_file(
+        str(plan),
+        worktree_path,
+        repo,
+        use_worktree_plan=False,
+    )
+
+    assert effective == str(plan)
