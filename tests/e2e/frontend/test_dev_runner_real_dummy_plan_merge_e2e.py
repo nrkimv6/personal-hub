@@ -89,7 +89,10 @@ def _render_dummy_plan_text(*, retry_evidence: dict | None = None) -> str:
         "Create exactly one repository-root file named `dummy-plan-playwright-marker.txt`.",
         f"The file content must contain `{DUMMY_PLAN_SENTINEL}`.",
         "Commit the marker file on the runner branch with a normal git commit.",
-        "Mark the TODO checkboxes complete only after the file exists and is committed.",
+        "Update this plan file only through the runner worktree relative path `docs/plan/2026-05-21_test-real-dummy-plan.md`.",
+        "Do not edit the absolute plan path outside the current working tree.",
+        "Mark the TODO checkboxes complete only in that relative plan file after the marker file exists.",
+        "Commit the marker file and the relative plan file together on the runner branch.",
         "",
     ]
     if retry_evidence:
@@ -100,6 +103,7 @@ def _render_dummy_plan_text(*, retry_evidence: dict | None = None) -> str:
                 "The previous real runner attempt did not reach the required sentinel/merge evidence.",
                 "Before making changes, inspect this failure evidence and correct the missing step.",
                 "Do not stop after analysis; create the marker file, commit it, and complete the checklist.",
+                "If a previous attempt edited the absolute plan path, ignore that path and use the relative plan path in the runner worktree.",
                 "",
                 "```json",
                 json.dumps(_compact_evidence_for_plan(retry_evidence), ensure_ascii=False, indent=2)[:4000],

@@ -55,6 +55,8 @@ def test_render_dummy_plan_has_explicit_marker_commit_contract():
     assert "dummy-plan-playwright-marker.txt" in text
     assert DUMMY_PLAN_SENTINEL in text
     assert "Commit the marker file" in text
+    assert "relative path `docs/plan/2026-05-21_test-real-dummy-plan.md`" in text
+    assert "Do not edit the absolute plan path" in text
     assert "Report the marker path and commit hash" in text
 
 
@@ -78,3 +80,4 @@ def test_retry_plan_includes_previous_failure_evidence():
     assert "sentinel_timeout" in text
     assert "completed_with_remaining_tasks" in text
     assert "Do not stop after analysis" in text
+    assert "use the relative plan path in the runner worktree" in text
