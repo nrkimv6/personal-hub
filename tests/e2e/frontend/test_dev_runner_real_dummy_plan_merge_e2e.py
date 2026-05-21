@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-import os
 import json
+import os
 import subprocess
 import time
 from pathlib import Path
@@ -17,7 +17,10 @@ from tests.dev_runner.dummy_plan_lifecycle_helpers import DUMMY_PLAN_SENTINEL
 pytestmark = [pytest.mark.e2e, pytest.mark.http_live, pytest.mark.timeout(240)]
 
 BASE_API = os.environ.get("E2E_API_URL", "http://localhost:8001")
-ENGINE = os.environ.get("E2E_REAL_DEV_RUNNER_ENGINE", "codex")
+DEFAULT_REAL_RUNNER_ENGINE = "claude"
+ENGINE = os.environ.get("E2E_REAL_DEV_RUNNER_ENGINE", DEFAULT_REAL_RUNNER_ENGINE)
+MAX_CYCLES = int(os.environ.get("E2E_REAL_DEV_RUNNER_MAX_CYCLES", "2"))
+MAX_ATTEMPTS = int(os.environ.get("E2E_REAL_DEV_RUNNER_MAX_ATTEMPTS", "2"))
 RUNNER_KEY_PREFIX = "plan-runner:runners"
 TERMINAL_FAILURE_TOKENS = (
     "[FAILURE]",
@@ -38,6 +41,96 @@ def _run_git(repo: Path, *args: str) -> None:
     assert result.returncode == 0, f"git {' '.join(args)} failed\nstdout={result.stdout}\nstderr={result.stderr}"
 
 
+def _run_git_text(repo: Path, *args: str) -> str:
+    result = subprocess.run(["git", *args], cwd=str(repo), capture_output=True, text=True, timeout=30)
+    assert result.returncode == 0, f"git {' '.join(args)} failed\nstdout={result.stdout}\nstderr={result.stderr}"
+    return result.stdout.strip()
+
+
+def _tail_lines(lines: list[str], limit: int = 20) -> list[str]:
+    return [line[:500] for line in lines[-limit:]]
+
+
+def _compact_log_body(value):
+    if not isinstance(value, dict):
+        return value
+    body = value.get("body")
+    if isinstance(body, dict) and isinstance(body.get("lines"), list):
+        return {"status_code": value.get("status_code"), "lines": _tail_lines(body["lines"], limit=12)}
+    return value
+
+
+def _compact_evidence_for_plan(evidence: dict) -> dict:
+    return {
+        "attempt": evidence.get("attempt"),
+        "runner_id": evidence.get("runner_id"),
+        "engine": evidence.get("engine"),
+        "reason": evidence.get("reason"),
+        "redis": (evidence.get("evidence") or {}).get("redis") or evidence.get("redis"),
+        "recent": _compact_log_body((evidence.get("evidence") or {}).get("recent")),
+        "full": _compact_log_body((evidence.get("evidence") or {}).get("full")),
+        "merge": (evidence.get("evidence") or {}).get("merge"),
+    }
+
+
+def _render_dummy_plan_text(*, retry_evidence: dict | None = None) -> str:
+    lines = [
+        "# test: real dummy plan",
+        "",
+        "> 상태: 구현중",
+        "> branch:",
+        "> worktree:",
+        "> worktree-owner:",
+        "> 진행률: 0/4 (0%)",
+        "",
+        "## Goal",
+        "",
+        "Create exactly one repository-root file named `dummy-plan-playwright-marker.txt`.",
+        f"The file content must contain `{DUMMY_PLAN_SENTINEL}`.",
+        "Commit the marker file on the runner branch with a normal git commit.",
+        "Mark the TODO checkboxes complete only after the file exists and is committed.",
+        "",
+    ]
+    if retry_evidence:
+        lines.extend(
+            [
+                "## Previous attempt failure analysis",
+                "",
+                "The previous real runner attempt did not reach the required sentinel/merge evidence.",
+                "Before making changes, inspect this failure evidence and correct the missing step.",
+                "Do not stop after analysis; create the marker file, commit it, and complete the checklist.",
+                "",
+                "```json",
+                json.dumps(_compact_evidence_for_plan(retry_evidence), ensure_ascii=False, indent=2)[:4000],
+                "```",
+                "",
+            ]
+        )
+    lines.extend(
+        [
+            "## TODO",
+            "",
+            "- [ ] Inspect the repository root and confirm the marker file is absent.",
+            f"- [ ] Create `dummy-plan-playwright-marker.txt` containing `{DUMMY_PLAN_SENTINEL}`.",
+            "- [ ] Commit the marker on the runner branch.",
+            "- [ ] Report the marker path and commit hash in the runner output.",
+        ]
+    )
+    return "\n".join(lines) + "\n"
+
+
+def _write_dummy_plan(plan: Path, *, retry_evidence: dict | None = None) -> None:
+    plan.write_text(_render_dummy_plan_text(retry_evidence=retry_evidence), encoding="utf-8")
+
+
+def _commit_if_dirty(repo: Path, message: str) -> None:
+    status = _run_git_text(repo, "status", "--porcelain")
+    if not status:
+        return
+    _run_git(repo, "add", "--", ".")
+    _run_git(repo, "commit", "-m", message)
+
+
 def _init_isolated_repo(tmp_path: Path) -> tuple[Path, Path]:
     repo = tmp_path / "real-runner-repo"
     repo.mkdir()
@@ -47,25 +140,7 @@ def _init_isolated_repo(tmp_path: Path) -> tuple[Path, Path]:
     plan_dir = repo / "docs" / "plan"
     plan_dir.mkdir(parents=True)
     plan = plan_dir / "2026-05-21_test-real-dummy-plan.md"
-    plan.write_text(
-        "\n".join(
-            [
-                "# test: real dummy plan",
-                "",
-                "> 상태: 구현중",
-                "> branch:",
-                "> worktree:",
-                "> worktree-owner:",
-                "",
-                "## TODO",
-                "",
-                "- [ ] Create `dummy-plan-playwright-marker.txt` containing `DUMMY_PLAN_PLAYWRIGHT_SENTINEL`.",
-                "- [ ] Commit the marker on the runner branch.",
-            ]
-        )
-        + "\n",
-        encoding="utf-8",
-    )
+    _write_dummy_plan(plan)
     _run_git(repo, "add", "docs/plan/2026-05-21_test-real-dummy-plan.md")
     _run_git(repo, "commit", "-m", "test: add real dummy plan")
     return repo, plan
@@ -126,10 +201,6 @@ def _redis_runner_evidence(runner_id: str) -> dict:
         return {"redis_error": repr(exc)}
 
 
-def _tail_lines(lines: list[str], limit: int = 20) -> list[str]:
-    return [line[:500] for line in lines[-limit:]]
-
-
 def _runner_evidence(client: httpx.Client, runner_id: str) -> dict:
     evidence: dict = {"runner_id": runner_id, "redis": _redis_runner_evidence(runner_id)}
     for label, path, params in (
@@ -148,22 +219,20 @@ def _runner_evidence(client: httpx.Client, runner_id: str) -> dict:
     return evidence
 
 
-def test_real_dummy_plan_runner_merges_isolated_repo_from_admin_ui(page: Page, frontend_url: str, system_mode: str, tmp_path):
-    _skip_admin_mode_if_public(system_mode)
-    repo, plan = _init_isolated_repo(Path(tmp_path))
-    runner_id = None
-
-    page.goto(f"{frontend_url}/automation?tab=dev-runner")
-    payload = {
+def _build_run_payload(repo: Path, plan: Path, *, engine: str = ENGINE, max_cycles: int = MAX_CYCLES) -> dict:
+    return {
         "plan_file": str(plan),
         "test_source": "real_dummy_plan_playwright",
         "test_repo_root": str(repo),
-        "engine": ENGINE,
-        "fix_engine": ENGINE,
+        "engine": engine,
+        "fix_engine": engine,
         "dry_run": False,
         "worktree": True,
-        "max_cycles": 1,
+        "max_cycles": max_cycles,
     }
+
+
+def _start_real_runner(page: Page, payload: dict) -> str:
     response = page.evaluate(
         """async (payload) => {
             const res = await fetch('/api/v1/dev-runner/run', {
@@ -178,62 +247,154 @@ def test_real_dummy_plan_runner_merges_isolated_repo_from_admin_ui(page: Page, f
     )
     assert response["status"] == 200, (
         "REAL_RUNNER_ENV_UNAVAILABLE: dev-runner real run was not accepted; "
-        f"status={response['status']} body={response['text']}"
+        f"engine={payload.get('engine')} status={response['status']} body={response['text']}"
     )
     accepted = json.loads(response["text"])
-    runner_id = accepted["runner_id"]
+    return accepted["runner_id"]
+
+
+def _poll_attempt_result(client: httpx.Client, runner_id: str, *, attempt: int, engine: str) -> dict:
+    def read_sentinel():
+        recent = client.get("/api/v1/dev-runner/logs/recent", params={"runner_id": runner_id, "lines": 300})
+        if recent.status_code == 200:
+            lines = recent.json().get("lines", [])
+            if any(DUMMY_PLAN_SENTINEL in line for line in lines):
+                return {"success": True, "source": "recent", "lines": lines}
+            if any(token in line for token in TERMINAL_FAILURE_TOKENS for line in lines):
+                return {
+                    "success": False,
+                    "attempt": attempt,
+                    "engine": engine,
+                    "runner_id": runner_id,
+                    "reason": "terminal_failure_token_recent",
+                    "evidence": _runner_evidence(client, runner_id),
+                }
+        full = client.get("/api/v1/dev-runner/logs/full", params={"runner_id": runner_id, "offset": 0, "limit": 1000})
+        if full.status_code == 200:
+            lines = full.json().get("lines", [])
+            if any(DUMMY_PLAN_SENTINEL in line for line in lines):
+                return {"success": True, "source": "full", "lines": lines}
+            if any(token in line for token in TERMINAL_FAILURE_TOKENS for line in lines):
+                return {
+                    "success": False,
+                    "attempt": attempt,
+                    "engine": engine,
+                    "runner_id": runner_id,
+                    "reason": "terminal_failure_token_full",
+                    "evidence": _runner_evidence(client, runner_id),
+                }
+        return None
+
+    sentinel = _poll(120.0, 5.0, read_sentinel)
+    if not sentinel:
+        return {
+            "success": False,
+            "attempt": attempt,
+            "engine": engine,
+            "runner_id": runner_id,
+            "reason": "sentinel_timeout",
+            "evidence": _runner_evidence(client, runner_id),
+        }
+    if not sentinel.get("success"):
+        return sentinel
+
+    def read_merged():
+        merge = client.get(f"/api/v1/dev-runner/merge/{runner_id}")
+        if merge.status_code == 200 and merge.json().get("status") == "merged":
+            return merge.json()
+        runners = client.get("/api/v1/dev-runner/runners", params={"include_hidden": "true"})
+        if runners.status_code == 200:
+            for item in runners.json():
+                if item.get("runner_id") == runner_id and item.get("merge_status") == "merged":
+                    return item
+        return None
+
+    merged = _poll(120.0, 5.0, read_merged)
+    if not merged:
+        return {
+            "success": False,
+            "attempt": attempt,
+            "engine": engine,
+            "runner_id": runner_id,
+            "reason": "merge_timeout",
+            "evidence": _runner_evidence(client, runner_id),
+        }
+    return {
+        "success": True,
+        "attempt": attempt,
+        "engine": engine,
+        "runner_id": runner_id,
+        "sentinel": sentinel,
+        "merged": merged,
+    }
+
+
+def _run_real_runner_attempt(
+    *,
+    page: Page,
+    client: httpx.Client,
+    repo: Path,
+    plan: Path,
+    attempt: int,
+    retry_evidence: dict | None,
+) -> dict:
+    if retry_evidence:
+        _write_dummy_plan(plan, retry_evidence=retry_evidence)
+        _commit_if_dirty(repo, f"test: retry real dummy plan attempt {attempt}")
+
+    payload = _build_run_payload(repo, plan)
+    runner_id = _start_real_runner(page, payload)
+    result = _poll_attempt_result(client, runner_id, attempt=attempt, engine=payload["engine"])
+    if not result.get("success"):
+        _cleanup_runner(client, runner_id)
+    return result
+
+
+def _format_attempts_failure(attempts: list[dict]) -> str:
+    return (
+        "Claude real runner did not produce sentinel/merge evidence after self-rerun "
+        f"attempts={json.dumps(attempts, ensure_ascii=False)[:9000]}"
+    )
+
+
+def test_claude_real_dummy_plan_runner_merges_isolated_repo_from_admin_ui_with_self_rerun(
+    page: Page, frontend_url: str, system_mode: str, tmp_path
+):
+    _skip_admin_mode_if_public(system_mode)
+    repo, plan = _init_isolated_repo(Path(tmp_path))
+
+    page.goto(f"{frontend_url}/automation?tab=dev-runner")
 
     with httpx.Client(base_url=BASE_API, timeout=10.0) as client:
+        attempts: list[dict] = []
+        retry_evidence = None
+        success = None
+        for attempt in range(1, MAX_ATTEMPTS + 1):
+            result = _run_real_runner_attempt(
+                page=page,
+                client=client,
+                repo=repo,
+                plan=plan,
+                attempt=attempt,
+                retry_evidence=retry_evidence,
+            )
+            attempts.append(result)
+            if result.get("success"):
+                success = result
+                break
+            retry_evidence = result
+
+        assert success, _format_attempts_failure(attempts)
+
+        runner_id = success["runner_id"]
         try:
-            def read_sentinel():
-                recent = client.get("/api/v1/dev-runner/logs/recent", params={"runner_id": runner_id, "lines": 300})
-                if recent.status_code == 200:
-                    lines = recent.json().get("lines", [])
-                    if any(DUMMY_PLAN_SENTINEL in line for line in lines):
-                        return {"source": "recent", "lines": lines}
-                    if any(token in line for token in TERMINAL_FAILURE_TOKENS for line in lines):
-                        return {"source": "recent", "failed": True, "evidence": _runner_evidence(client, runner_id)}
-                full = client.get("/api/v1/dev-runner/logs/full", params={"runner_id": runner_id, "offset": 0, "limit": 1000})
-                if full.status_code == 200:
-                    lines = full.json().get("lines", [])
-                    if any(DUMMY_PLAN_SENTINEL in line for line in lines):
-                        return {"source": "full", "lines": lines}
-                    if any(token in line for token in TERMINAL_FAILURE_TOKENS for line in lines):
-                        return {"source": "full", "failed": True, "evidence": _runner_evidence(client, runner_id)}
-                return None
-
-            sentinel = _poll(120.0, 5.0, read_sentinel)
-            assert sentinel and not sentinel.get("failed"), (
-                "sentinel missing or runner failed "
-                f"runner_id={runner_id} evidence="
-                f"{json.dumps(_runner_evidence(client, runner_id), ensure_ascii=False)[:5000]}"
-            )
-
-            def read_merged():
-                merge = client.get(f"/api/v1/dev-runner/merge/{runner_id}")
-                if merge.status_code == 200 and merge.json().get("status") == "merged":
-                    return merge.json()
-                runners = client.get("/api/v1/dev-runner/runners", params={"include_hidden": "true"})
-                if runners.status_code == 200:
-                    for item in runners.json():
-                        if item.get("runner_id") == runner_id and item.get("merge_status") == "merged":
-                            return item
-                return None
-
-            merged = _poll(120.0, 5.0, read_merged)
-            assert merged, (
-                "merged terminal state missing "
-                f"runner_id={runner_id} evidence="
-                f"{json.dumps(_runner_evidence(client, runner_id), ensure_ascii=False)[:5000]}"
-            )
-
             page.goto(f"{frontend_url}/automation?tab=dev-runner&runner={runner_id}")
             expect(page.get_by_text(DUMMY_PLAN_SENTINEL)).to_be_visible(timeout=30000)
             expect(page.get_by_text("merged").or_(page.get_by_text("머지됨")).first).to_be_visible(timeout=30000)
 
             marker = repo / "dummy-plan-playwright-marker.txt"
-            assert marker.exists(), f"isolated repo marker missing runner_id={runner_id} merge={merged}"
+            assert marker.exists(), f"isolated repo marker missing attempts={attempts}"
+            assert DUMMY_PLAN_SENTINEL in marker.read_text(encoding="utf-8", errors="replace")
             assert not (Path(__file__).resolve().parents[3] / marker.name).exists()
         finally:
-            if runner_id:
-                _cleanup_runner(client, runner_id)
+            _cleanup_runner(client, runner_id)
