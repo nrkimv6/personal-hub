@@ -9,7 +9,17 @@ import json
 
 from app.config import logger
 from app.database import SessionLocal
-from app.schemas.notification import NotificationSettings, NotificationSettingsUpdate
+from app.schemas.notification import (
+    AlertRuleOverrideResponse,
+    AlertRuleOverrideUpdate,
+    AlertRuleSettingsResponse,
+    NotificationSettings,
+    NotificationSettingsUpdate,
+)
+from app.services.alert_rule_settings_service import (
+    get_effective_alert_rules,
+    update_alert_rule_override,
+)
 from sqlalchemy import text
 
 router = APIRouter(
@@ -150,3 +160,41 @@ async def update_notification_settings(settings: NotificationSettingsUpdate):
     except Exception as e:
         logger.error(f"알림 설정 업데이트 중 오류: {str(e)}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"알림 설정 업데이트 오류: {str(e)}")
+
+
+@router.get("/alert-rules", response_model=list[AlertRuleSettingsResponse])
+async def get_alert_rules():
+    """
+    실패 알림 rule별 effective 설정을 조회합니다.
+
+    Registry에 없는 stale override는 stale=true로 표시하며 자동 삭제하지 않습니다.
+    """
+    db = SessionLocal()
+    try:
+        return get_effective_alert_rules(db)
+    except Exception as e:
+        logger.error(f"알림 rule 설정 조회 중 오류: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail={"code": "ALERT_RULE_SETTINGS_READ_FAILED", "message": str(e)})
+    finally:
+        db.close()
+
+
+@router.put("/alert-rules/{rule_id}", response_model=AlertRuleOverrideResponse)
+async def update_alert_rule(rule_id: str, payload: AlertRuleOverrideUpdate):
+    """
+    실패 알림 rule override를 저장합니다.
+    """
+    db = SessionLocal()
+    try:
+        rule = update_alert_rule_override(db, rule_id, payload)
+        return AlertRuleOverrideResponse(rule=rule)
+    except ValueError as e:
+        code = str(e)
+        status_code = 409 if code == "ALERT_RULE_STALE_WRITE" else 400
+        raise HTTPException(status_code=status_code, detail={"code": code})
+    except Exception as e:
+        db.rollback()
+        logger.error(f"알림 rule 설정 업데이트 중 오류: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail={"code": "ALERT_RULE_SETTINGS_UPDATE_FAILED", "message": str(e)})
+    finally:
+        db.close()

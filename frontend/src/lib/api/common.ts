@@ -24,6 +24,8 @@ import type {
   MonitorScheduleCreate,
   BulkScheduleCreate,
   NotificationSettings,
+  AlertRuleOverrideUpdate,
+  AlertRuleSettings,
   EntitySource,
   EntitySourceCreate,
   EntitySourceUpdate,
@@ -336,6 +338,18 @@ export const notificationApi = {
     request<NotificationSettings>('/notification/settings', {
       method: 'PUT',
       body: JSON.stringify(settings)
+    }),
+
+  getAlertRules: (): Promise<AlertRuleSettings[]> =>
+    request<AlertRuleSettings[]>('/notification/alert-rules'),
+
+  updateAlertRule: (
+    ruleId: string,
+    payload: AlertRuleOverrideUpdate
+  ): Promise<{ rule: AlertRuleSettings }> =>
+    request<{ rule: AlertRuleSettings }>(`/notification/alert-rules/${encodeURIComponent(ruleId)}`, {
+      method: 'PUT',
+      body: JSON.stringify(payload)
     })
 };
 
