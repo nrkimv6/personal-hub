@@ -80,6 +80,32 @@ def is_visible_runner_evidence(
     return has_plan_evidence
 
 
+def runner_hidden_reason(
+    *,
+    runner_id: str,
+    trigger: str | None,
+    plan_file: str | None = None,
+    worktree_path: str | None = None,
+    branch: str | None = None,
+    test_source: str | None = None,
+    log_file: str | None = None,
+) -> str:
+    """Return a stable diagnostic reason when a runner is not UI-visible."""
+    if runner_id.startswith("tc-pytest-"):
+        return "test-runner-id"
+    if not trigger or trigger not in _USER_VISIBLE_TRIGGERS:
+        return "non-user-trigger"
+    if test_source:
+        return "test-source"
+    if _has_synthetic_negative_evidence(plan_file, worktree_path, branch):
+        return "synthetic-evidence"
+    if not _has_real_plan_evidence(plan_file):
+        return "missing-plan-evidence"
+    if _has_synthetic_negative_evidence(log_file):
+        return "synthetic-log-evidence"
+    return "visible"
+
+
 def _has_synthetic_negative_evidence(*values: str | None) -> bool:
     for value in values:
         if not value:

@@ -62,14 +62,14 @@ async def test_reproduce_visible_leak_missing_test_source():
     with patch("app.database.SessionLocal", return_value=mock_db):
         runners = await svc.get_all_runners()
 
-    assert len(runners) == 1
-    runner = runners[0]
-    assert runner.runner_id == runner_id
-    assert runner.trigger == "api"
-    assert runner.visible is False, (
-        f"trigger='api' runner가 visible=True! "
-        f"화이트리스트 전환이 제대로 적용되지 않았습니다. visible={runner.visible!r}"
-    )
+    assert [runner.runner_id for runner in runners] == []
+
+    with patch("app.database.SessionLocal", return_value=mock_db):
+        diagnostic_runners = await svc.get_all_runners(include_hidden=True)
+    assert len(diagnostic_runners) == 1
+    assert diagnostic_runners[0].runner_id == runner_id
+    assert diagnostic_runners[0].trigger == "api"
+    assert diagnostic_runners[0].visible is False
 
 
 @pytest.mark.asyncio
@@ -90,14 +90,14 @@ async def test_reproduce_visible_leak_trigger_none():
     with patch("app.database.SessionLocal", return_value=mock_db):
         runners = await svc.get_all_runners()
 
-    assert len(runners) == 1
-    runner = runners[0]
-    assert runner.runner_id == runner_id
-    assert runner.trigger is None
-    assert runner.visible is False, (
-        f"trigger=None runner가 visible=True! "
-        f"화이트리스트 전환이 제대로 적용되지 않았습니다. visible={runner.visible!r}"
-    )
+    assert [runner.runner_id for runner in runners] == []
+
+    with patch("app.database.SessionLocal", return_value=mock_db):
+        diagnostic_runners = await svc.get_all_runners(include_hidden=True)
+    assert len(diagnostic_runners) == 1
+    assert diagnostic_runners[0].runner_id == runner_id
+    assert diagnostic_runners[0].trigger is None
+    assert diagnostic_runners[0].visible is False
 
 
 @pytest.mark.asyncio
@@ -143,14 +143,13 @@ async def test_reproduce_5th_visible_leak():
     with patch("app.database.SessionLocal", return_value=mock_db):
         runners = await svc.get_all_runners()
 
-    # tc-pytest- runner가 목록에 존재해야 함
+    # 기본 목록에서는 hidden/test runner가 아예 제외되어야 함.
     tc_runners = [item for item in runners if item.runner_id == runner_id]
-    assert len(tc_runners) == 1, (
-        f"tc-pytest- runner가 get_all_runners() 결과에 없음: "
-        f"{[item.runner_id for item in runners]}"
-    )
+    assert tc_runners == []
 
-    tc_runner = tc_runners[0]
+    with patch("app.database.SessionLocal", return_value=mock_db):
+        diagnostic_runners = await svc.get_all_runners(include_hidden=True)
+    tc_runner = next(item for item in diagnostic_runners if item.runner_id == runner_id)
     assert tc_runner.trigger == "user", (
         f"trigger 값이 예상과 다름: {tc_runner.trigger!r} (expected 'user')"
     )
@@ -200,8 +199,12 @@ async def test_user_trigger_synthetic_plan_hidden_integration():
     with patch("app.database.SessionLocal", return_value=mock_db):
         runners = await svc.get_all_runners()
 
-    assert len(runners) == 1
-    assert runners[0].visible is False
+    assert [item.runner_id for item in runners] == []
+
+    with patch("app.database.SessionLocal", return_value=mock_db):
+        diagnostic_runners = await svc.get_all_runners(include_hidden=True)
+    assert len(diagnostic_runners) == 1
+    assert diagnostic_runners[0].visible is False
 
 
 @pytest.mark.asyncio
@@ -218,8 +221,7 @@ async def test_user_trigger_synthetic_plan_skips_db_backfill(monkeypatch):
     with patch("app.database.SessionLocal", return_value=mock_db):
         runners = await svc.get_all_runners()
 
-    assert [item.runner_id for item in runners] == [runner_id]
-    assert runners[0].visible is False
+    assert [item.runner_id for item in runners] == []
     upsert.assert_not_called()
 
 
@@ -239,7 +241,7 @@ async def test_db_only_user_trigger_synthetic_plan_hidden_integration(monkeypatc
         merge_requested=False,
         metadata_json={"trigger": "user"},
     )
-    monkeypatch.setattr(svc, "_load_db_runner_states", lambda limit=200: {runner_id: row})
+    monkeypatch.setattr(svc, "_load_db_runner_states", lambda limit=200, visible_only=False: {runner_id: row})
 
     mock_db = MagicMock()
     mock_db.query.return_value.filter.return_value.first.return_value = None
@@ -247,5 +249,4 @@ async def test_db_only_user_trigger_synthetic_plan_hidden_integration(monkeypatc
         runners = await svc.get_all_runners()
 
     matching = [item for item in runners if item.runner_id == runner_id]
-    assert len(matching) == 1
-    assert matching[0].visible is False
+    assert matching == []

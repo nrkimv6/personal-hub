@@ -6,7 +6,7 @@ import redis
 
 from app.modules.dev_runner.config import config
 from app.modules.dev_runner.services.log_file_resolver import LogFileResolver
-from app.modules.dev_runner.services.visibility import is_visible_runner_evidence
+from app.modules.dev_runner.services.visibility import is_visible_runner_evidence, runner_hidden_reason
 from app.modules.dev_runner.services.redis_connection import RECENT_RUNNERS_TTL
 from app.shared.redis.client import RedisClient
 
@@ -241,6 +241,7 @@ class DiagnosticsService:
             redis_only = sorted(redis_ids - db_ids)
             db_only = sorted(db_ids - redis_ids)
             hidden_db_rows = []
+            hidden_db_reasons = {}
             for row in rows:
                 meta = getattr(row, "metadata_json", None) or {}
                 if meta.get("trigger") in {"user", "user:all"} and not is_visible_runner_evidence(
@@ -254,12 +255,24 @@ class DiagnosticsService:
                     test_source=meta.get("test_source"),
                 ):
                     hidden_db_rows.append(row.runner_id)
+                    hidden_db_reasons[row.runner_id] = runner_hidden_reason(
+                        runner_id=row.runner_id,
+                        trigger=meta.get("trigger"),
+                        plan_file=getattr(row, "plan_file", None),
+                        worktree_path=getattr(row, "worktree_path", None),
+                        branch=getattr(row, "branch", None),
+                        test_source=meta.get("test_source"),
+                    )
             ok = not redis_only and not db_only
+            hidden_samples = [
+                f"{runner_id}:{hidden_db_reasons.get(runner_id, 'unknown')}"
+                for runner_id in hidden_db_rows[:5]
+            ]
             detail = (
                 f"redis_only={len(redis_only)}, db_only={len(db_only)}"
                 f", hidden_db_rows={len(hidden_db_rows)}"
                 + (f" sample={','.join((redis_only + db_only)[:5])}" if (redis_only or db_only) else "")
-                + (f" hidden_sample={','.join(hidden_db_rows[:5])}" if hidden_db_rows else "")
+                + (f" hidden_sample={','.join(hidden_samples)}" if hidden_samples else "")
             )
             steps.append({"step": 9, "name": "runner DB mirror drift", "ok": ok, "detail": detail})
         except Exception as e:

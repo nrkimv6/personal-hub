@@ -447,14 +447,21 @@ class ExecutorService:
         except Exception as exc:
             logger.debug("[dev-runner] runner state DB mirror skipped: %s", exc)
 
-    def _load_db_runner_states(self, limit: int = 200) -> dict[str, object]:
+    def _load_db_runner_states(self, limit: int = 200, *, visible_only: bool = False) -> dict[str, object]:
         try:
             from app.database import SessionLocal
-            from app.modules.dev_runner.services.dev_runner_state_repository import list_runner_states
+            from app.modules.dev_runner.services.dev_runner_state_repository import (
+                list_runner_states,
+                list_visible_candidate_runner_states,
+            )
 
             db = SessionLocal()
             try:
-                return {row.runner_id: row for row in list_runner_states(db, limit=limit)}
+                if visible_only:
+                    rows = list_visible_candidate_runner_states(db, limit=limit)
+                else:
+                    rows = list_runner_states(db, limit=limit)
+                return {row.runner_id: row for row in rows}
             finally:
                 db.close()
         except Exception as exc:
@@ -1440,9 +1447,14 @@ class ExecutorService:
             auto_retry_blocked=auto_retry_blocked,
         )
 
-    async def get_all_runners(self) -> list:
-        """활성 runner + 최근 종료 runner 목록 조회 (탭 복원 지원)"""
+    async def get_all_runners(self, *, visible_only: bool = True, include_hidden: bool = False) -> list:
+        """활성 runner + 최근 종료 runner 목록 조회.
+
+        The default user-facing contract is visible-only. Diagnostics callers
+        must pass include_hidden=True to pay the full read-model cost.
+        """
         from app.modules.dev_runner.schemas import RunnerListItem
+        visible_only = visible_only and not include_hidden
         try:
             # TTL 만료 recent runner 정리: trigger=user/user:all는 dismiss 전까지 보존
             cutoff_ts = time.time() - RECENT_RUNNERS_TTL
@@ -1471,7 +1483,7 @@ class ExecutorService:
             heartbeat_ids = await self._scan_runner_ids_with_suffix("subprocess_heartbeat")
             redis_registry_ids = set(all_ids)
             all_ids |= heartbeat_ids
-            db_runner_states = self._load_db_runner_states()
+            db_runner_states = self._load_db_runner_states(visible_only=visible_only)
             all_ids |= set(db_runner_states)
 
             # orphan 판별을 위한 DB 세션
@@ -1520,6 +1532,26 @@ class ExecutorService:
                     # trigger 미존재 시 recent-meta fallback (cleanup 후 타이밍 이슈 방어)
                     if trigger is None:
                         trigger = recent_meta.get("trigger")
+                    if not plan_file:
+                        plan_file = recent_meta.get("plan_file")
+                    if not worktree_path:
+                        worktree_path = recent_meta.get("worktree_path")
+                    if not branch:
+                        branch = recent_meta.get("branch")
+                    test_source = d["test_source"] or db_meta.get("test_source") or recent_meta.get("test_source")
+                    redis_missing = rid not in redis_registry_ids
+                    if visible_only and not is_visible_runner_evidence(
+                        runner_id=rid,
+                        trigger=trigger,
+                        plan_file=plan_file,
+                        worktree_path=worktree_path,
+                        branch=branch,
+                        redis_missing=redis_missing,
+                        status=status,
+                        test_source=test_source,
+                        log_file=recent_meta.get("stream_log_path") or recent_meta.get("log_file_path"),
+                    ):
+                        continue
                     exit_reason = d["exit_reason"] or recent_meta.get("exit_reason")
                     if exit_reason is None:
                         exit_reason = getattr(db_row, "exit_reason", None)
@@ -1576,7 +1608,6 @@ class ExecutorService:
                             execution_count = int(execution_count_raw)
                         except (TypeError, ValueError):
                             execution_count = None
-                    redis_missing = rid not in redis_registry_ids
                     filesystem_log = self._filesystem_log_for_runner(rid) if redis_missing else None
                     log_file_found = bool(filesystem_log and filesystem_log.exists())
                     trigger, plan_file, engine, start_time, execution_count, display_plan_name_from_log = self._apply_log_meta_fallbacks(
@@ -1603,7 +1634,6 @@ class ExecutorService:
 
                     # orphan: runner가 실행 중이 아닌데 DB에 running/merge_pending 워크플로우가 있는 경우
                     is_orphan = self._fix_orphan_workflows(db, rid, running, status)
-                    test_source = d["test_source"] or db_meta.get("test_source")
                     # visibility.py 단일 함수로 판별 (화이트리스트 + evidence gate)
                     is_user = is_visible_runner_evidence(
                         runner_id=rid,
@@ -1616,6 +1646,8 @@ class ExecutorService:
                         test_source=test_source,
                         log_file=str(filesystem_log) if filesystem_log else None,
                     )
+                    if visible_only and not is_user:
+                        continue
                     # plan_file 소실 시 recent-meta/log header/worktree_path/branch 순으로 fallback 이름 추출
                     display_plan_name: str | None = None
                     if not plan_file:
@@ -1869,7 +1901,7 @@ class ExecutorService:
         """모든 active runner 일괄 중지 - asyncio.gather 병렬 호출"""
         import asyncio
 
-        runners = await self.get_all_runners()
+        runners = await self.get_all_runners(visible_only=False, include_hidden=True)
         runner_ids = [r.runner_id for r in runners if r.running]
 
         if not runner_ids:

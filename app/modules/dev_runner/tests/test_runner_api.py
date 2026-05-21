@@ -802,7 +802,7 @@ class TestListRunners:
         assert response.status_code == 200
         assert response.json() == []
 
-    async def test_list_runners_corrects_stale_branch_exists_for_approval_required(self, client, mock_executor_redis, tmp_path):
+    async def test_list_runners_corrects_stale_branch_exists_for_approval_required(self, client, mock_executor_redis, tmp_path, monkeypatch):
         """display: approval_required runner corrects stale branch_exists=false before API display."""
         fake_async = mock_executor_redis["async"]
         rid = "approval-list-001"
@@ -810,8 +810,7 @@ class TestListRunners:
         await fake_async.sadd("plan-runner:active_runners", rid)
         await fake_async.set(f"{prefix}:status", "stopped")
         await fake_async.set(f"{prefix}:trigger", "user")
-        await fake_async.set(f"{prefix}:plan_file", "docs/plan/test.md")
-        await fake_async.set(f"{prefix}:worktree_path", str(tmp_path))
+        await fake_async.set(f"{prefix}:plan_file", _real_plan_evidence(tmp_path, monkeypatch, "2026-05-21_approval-list.md"))
         await fake_async.set(f"{prefix}:branch", "impl/test")
         await fake_async.set(f"{prefix}:merge_status", "approval_required")
         await fake_async.set(f"{prefix}:branch_exists", "false")
@@ -874,14 +873,15 @@ class TestListRunners:
         assert data[0]["display_label"] == "후처리 차단"
         assert data[0]["display_secondary"] == "stale_merge_blocked"
 
-    async def test_get_all_runners_R_runner_state_db_row_survives_redis_metadata_loss(self, client, mock_executor_redis, runner_state_db):
+    async def test_get_all_runners_R_runner_state_db_row_survives_redis_metadata_loss(self, client, mock_executor_redis, runner_state_db, tmp_path, monkeypatch):
         rid = "db-only-runner-001"
+        plan_file = _real_plan_evidence(tmp_path, monkeypatch, "2026-05-21_db-only.md")
         try:
             upsert_runner_state(
                 runner_state_db,
                 {
                     "runner_id": rid,
-                    "plan_file": "docs/plan/db-only.md",
+                    "plan_file": plan_file,
                     "project": "monitor-page",
                     "status": "stopped",
                     "branch": "impl/db-only",
@@ -899,10 +899,10 @@ class TestListRunners:
             rows = [row for row in response.json() if row["runner_id"] == rid]
             assert len(rows) == 1
             assert rows[0]["redis_missing"] is True
-            assert rows[0]["plan_file"] == "docs/plan/db-only.md"
+            assert rows[0]["plan_file"] == plan_file
             assert rows[0]["branch"] == "impl/db-only"
             assert rows[0]["trigger"] == "user"
-            assert rows[0]["visible"] is False
+            assert rows[0]["visible"] is True
         finally:
             runner_state_db.query(DevRunnerMergeRequest).filter_by(runner_id=rid).delete()
             runner_state_db.query(DevRunnerState).filter_by(runner_id=rid).delete()
@@ -961,7 +961,7 @@ class TestGetRunnerStatus:
         assert data["hide_stale_branch_badge"] is True
         assert data["gate_evidence_summary"]["reason"] == "service_lock"
 
-    async def test_runner_list_and_sse_payload_display_fields_match(self, client, mock_executor_redis):
+    async def test_runner_list_and_sse_payload_display_fields_match(self, client, mock_executor_redis, tmp_path, monkeypatch):
         """R: list API와 SSE status payload는 같은 backend display policy를 공유한다."""
         fake_async = mock_executor_redis["async"]
         fake_sync = mock_executor_redis["sync"]
@@ -970,7 +970,7 @@ class TestGetRunnerStatus:
         fields = {
             "status": "stopped",
             "trigger": "user",
-            "plan_file": "docs/plan/test.md",
+            "plan_file": _real_plan_evidence(tmp_path, monkeypatch, "2026-05-21_display-match.md"),
             "merge_status": "approval_required",
             "branch_exists": "false",
         }
@@ -1073,7 +1073,7 @@ class TestMergeApprovalPayload:
         assert "MERGE_PRECHECK_FAILED[service_lock]" in data["message"]
         assert data["gate_evidence_summary"]["reason"] == "service_lock"
 
-    async def test_runner_list_includes_gate_evidence_changed_running_fields(self, client, mock_executor_redis):
+    async def test_runner_list_includes_gate_evidence_changed_running_fields(self, client, mock_executor_redis, tmp_path, monkeypatch):
         """display: runner list API preserves gate_evidence_summary changed/running fields for service_lock."""
         fake_async = mock_executor_redis["async"]
         rid = "gate-evidence-fields-001"
@@ -1081,7 +1081,7 @@ class TestMergeApprovalPayload:
         await fake_async.sadd("plan-runner:active_runners", rid)
         await fake_async.set(f"{prefix}:status", "stopped")
         await fake_async.set(f"{prefix}:trigger", "user")
-        await fake_async.set(f"{prefix}:plan_file", "docs/plan/test.md")
+        await fake_async.set(f"{prefix}:plan_file", _real_plan_evidence(tmp_path, monkeypatch, "2026-05-21_gate-evidence-list.md"))
         await fake_async.set(f"{prefix}:merge_status", "approval_required")
         await fake_async.set(f"{prefix}:merge_reason", "service_lock")
         await fake_async.set(
@@ -1246,7 +1246,7 @@ class TestApprovalRequiredDivergeEvidence:
         assert summary.get("diverged_commits") == 1080, f"diverged_commits 불일치: {summary}"
         assert summary.get("already_in_main_commits") == 2, f"already_in_main_commits 불일치: {summary}"
 
-    async def test_list_runner_gate_evidence_preserved(self, client, mock_executor_redis):
+    async def test_list_runner_gate_evidence_preserved(self, client, mock_executor_redis, tmp_path, monkeypatch):
         """runner list 응답에서도 gate_evidence_summary diverge evidence가 보존된다."""
         fake_async = mock_executor_redis["async"]
         fake_sync = mock_executor_redis["sync"]
@@ -1260,13 +1260,16 @@ class TestApprovalRequiredDivergeEvidence:
 
         fake_sync.sadd("plan-runner:active_runners", rid)
         fake_sync.set(f"{prefix}:status", "stopped")
-        fake_sync.set(f"{prefix}:plan_file", "docs/plan/list-diverge.md")
+        plan_file = _real_plan_evidence(tmp_path, monkeypatch, "2026-05-21_list-diverge.md")
+        fake_sync.set(f"{prefix}:trigger", "user")
+        fake_sync.set(f"{prefix}:plan_file", plan_file)
         fake_sync.set(f"{prefix}:merge_status", "approval_required")
         fake_sync.set(f"{prefix}:gate_evidence_summary", gate_evidence)
         fake_sync.set(f"{prefix}:visible", "1")
         await fake_async.sadd("plan-runner:active_runners", rid)
         await fake_async.set(f"{prefix}:status", "stopped")
-        await fake_async.set(f"{prefix}:plan_file", "docs/plan/list-diverge.md")
+        await fake_async.set(f"{prefix}:trigger", "user")
+        await fake_async.set(f"{prefix}:plan_file", plan_file)
         await fake_async.set(f"{prefix}:merge_status", "approval_required")
         await fake_async.set(f"{prefix}:gate_evidence_summary", gate_evidence)
         await fake_async.set(f"{prefix}:visible", "1")

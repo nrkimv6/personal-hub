@@ -9,6 +9,7 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.models.dev_runner_state import DevRunnerMergeRequest, DevRunnerState
+from app.modules.dev_runner.services.visibility import is_visible_runner_evidence
 
 MERGE_REQUEST_ACTIVE_STATES = ("pending", "claimed")
 MERGE_REQUEST_HISTORY_STATES = ("completed", "failed", "error", "done", "merged", "test_failed")
@@ -80,6 +81,36 @@ def list_runner_states(
         .limit(limit)
         .all()
     )
+
+
+def list_visible_candidate_runner_states(
+    session: Session,
+    limit: int = 200,
+) -> list[DevRunnerState]:
+    """Return DB mirror rows that can appear on the user-facing runner list."""
+
+    rows = (
+        session.query(DevRunnerState)
+        .filter(DevRunnerState.plan_file.isnot(None))
+        .filter(DevRunnerState.plan_file != "__ALL_PLANS__")
+        .order_by(DevRunnerState.updated_at.desc(), DevRunnerState.started_at.desc())
+        .limit(limit)
+        .all()
+    )
+    return [
+        row
+        for row in rows
+        if is_visible_runner_evidence(
+            runner_id=row.runner_id,
+            trigger=(getattr(row, "metadata_json", None) or {}).get("trigger"),
+            plan_file=getattr(row, "plan_file", None),
+            worktree_path=getattr(row, "worktree_path", None),
+            branch=getattr(row, "branch", None),
+            redis_missing=True,
+            status=getattr(row, "status", None),
+            test_source=(getattr(row, "metadata_json", None) or {}).get("test_source"),
+        )
+    ]
 
 
 def create_merge_request(session: Session, payload: dict[str, Any]) -> DevRunnerMergeRequest:
