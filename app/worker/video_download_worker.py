@@ -28,6 +28,7 @@ if DOWNLOADER_PROJECT_PATH not in sys.path:
 from app.shared.worker.base_worker import BaseWorker
 from app.database import SessionLocal
 from app.models import VideoDownload
+from app.services.failure_alert_delivery import report_video_failure_alert
 from app.services.video_download_service import VideoDownloadService
 from app.config import settings
 
@@ -196,13 +197,15 @@ class VideoDownloadWorker(BaseWorker):
                     f"path={result.get('output_path')}"
                 )
             else:
+                error_message = result.get("error", "알 수 없는 오류")
                 service.fail_request(
                     request_id,
-                    error_message=result.get("error", "알 수 없는 오류")
+                    error_message=error_message,
                 )
+                await self._report_download_failure_alert(request, result, error_message)
                 logger.warning(
                     f"[{self.name}] 다운로드 실패: id={request_id}, "
-                    f"error={result.get('error')}"
+                    f"error={error_message}"
                 )
 
         except Exception as e:
@@ -290,6 +293,7 @@ class VideoDownloadWorker(BaseWorker):
                 return {
                     "success": False,
                     "error": self._format_youtube_stream_result_error(live_result),
+                    "error_kind": live_result.error_kind,
                 }
 
             # 변환 실행
@@ -523,6 +527,26 @@ class VideoDownloadWorker(BaseWorker):
         if not details:
             return message
         return f"{message} ({'; '.join(details)})"
+
+    async def _report_download_failure_alert(
+        self,
+        request: VideoDownload,
+        result: dict,
+        error_message: str,
+    ) -> None:
+        """Report actionable live download failures through the failure alert policy."""
+        if request.download_type != VideoDownload.TYPE_YOUTUBE_STREAM:
+            return
+        failure_kind = result.get("error_kind")
+        if not failure_kind:
+            return
+        await report_video_failure_alert(
+            request_id=request.id,
+            failure_kind=failure_kind,
+            error_summary=error_message,
+            url=request.url,
+            attempt=getattr(request, "retry_count", None),
+        )
 
     async def _download_vimeo(self, request: VideoDownload) -> dict:
         """Vimeo 다운로드 (yt-dlp 직접 호출, 진행률 로깅).

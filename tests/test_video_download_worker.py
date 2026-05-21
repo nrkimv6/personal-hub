@@ -1,10 +1,12 @@
 """Video download worker tests."""
 
 from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 import pytest
 
 from app.models import VideoDownload
+from app.worker import video_download_worker as worker_module
 from app.worker.video_download_worker import VideoDownloadWorker
 
 
@@ -143,3 +145,30 @@ def test_scan_youtube_stream_artifacts_cardinality_sidecars_and_partials(tmp_pat
 
     artifact_names = {path.rsplit("\\", 1)[-1].rsplit("/", 1)[-1] for path in artifacts}
     assert artifact_names == {path.name for path in expected}
+
+
+@pytest.mark.asyncio
+async def test_report_download_failure_alert_reference_youtube_stream_error_kind(monkeypatch, tmp_path):
+    worker = VideoDownloadWorker(output_dir=str(tmp_path))
+    report = AsyncMock()
+    monkeypatch.setattr(worker_module, "report_video_failure_alert", report)
+    request = SimpleNamespace(
+        id=17,
+        download_type=VideoDownload.TYPE_YOUTUBE_STREAM,
+        url="https://www.youtube.com/live/example",
+        retry_count=2,
+    )
+
+    await worker._report_download_failure_alert(
+        request,
+        {"error_kind": "youtube_live_ffmpeg_failed"},
+        "YouTube Live 녹화/병합 실패",
+    )
+
+    report.assert_awaited_once_with(
+        request_id=17,
+        failure_kind="youtube_live_ffmpeg_failed",
+        error_summary="YouTube Live 녹화/병합 실패",
+        url="https://www.youtube.com/live/example",
+        attempt=2,
+    )
