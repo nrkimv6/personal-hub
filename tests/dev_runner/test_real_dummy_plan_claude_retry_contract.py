@@ -81,3 +81,32 @@ def test_retry_plan_includes_previous_failure_evidence():
     assert "completed_with_remaining_tasks" in text
     assert "Do not stop after analysis" in text
     assert "use the relative plan path in the runner worktree" in text
+
+
+def test_test_source_queued_claim_conflict_is_releasable():
+    mod = _load_e2e_module()
+    body = {
+        "detail": {
+            "message": "plan already claimed",
+            "claim_id": "claim-1",
+            "claim_state": "queued",
+            "stale": False,
+        }
+    }
+    payload = {
+        "test_source": "real_dummy_plan_playwright",
+        "plan_file": "C:/tmp/repo/docs/plan/dummy.md",
+    }
+
+    assert mod._is_releasable_test_claim_conflict(409, mod.json.dumps(body), payload) is True
+
+
+def test_non_test_claim_conflict_is_not_released():
+    mod = _load_e2e_module()
+    body = {"detail": {"claim_state": "queued"}}
+
+    assert mod._is_releasable_test_claim_conflict(
+        409,
+        mod.json.dumps(body),
+        {"plan_file": "docs/plan/real.md"},
+    ) is False

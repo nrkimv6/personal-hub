@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import base64
 import subprocess
 import time
 from pathlib import Path
@@ -237,19 +238,44 @@ def _build_run_payload(repo: Path, plan: Path, *, engine: str = ENGINE, max_cycl
     }
 
 
-def _start_real_runner(page: Page, payload: dict) -> str:
-    response = page.evaluate(
-        """async (payload) => {
-            const res = await fetch('/api/v1/dev-runner/run', {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json', 'x-api-gate-bypass': '1'},
-                body: JSON.stringify(payload),
-            });
-            const text = await res.text();
-            return {status: res.status, text};
-        }""",
-        payload,
-    )
+def _encoded_plan_path(plan_file: str) -> str:
+    return base64.urlsafe_b64encode(plan_file.encode("utf-8")).decode("ascii").rstrip("=")
+
+
+def _is_releasable_test_claim_conflict(status: int, body_text: str, payload: dict) -> bool:
+    if status != 409 or not payload.get("test_source") or not payload.get("plan_file"):
+        return False
+    try:
+        detail = json.loads(body_text).get("detail", {})
+    except json.JSONDecodeError:
+        return False
+    return isinstance(detail, dict) and detail.get("claim_state") == "queued"
+
+
+def _release_test_claim(client: httpx.Client, plan_file: str) -> None:
+    client.delete(f"/api/v1/dev-runner/plans/{_encoded_plan_path(plan_file)}/claim")
+
+
+def _start_real_runner(page: Page, client: httpx.Client, payload: dict) -> str:
+    response = None
+    for attempt in range(1, 4):
+        response = page.evaluate(
+            """async (payload) => {
+                const res = await fetch('/api/v1/dev-runner/run', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json', 'x-api-gate-bypass': '1'},
+                    body: JSON.stringify(payload),
+                });
+                const text = await res.text();
+                return {status: res.status, text};
+            }""",
+            payload,
+        )
+        if not _is_releasable_test_claim_conflict(response["status"], response["text"], payload):
+            break
+        _release_test_claim(client, payload["plan_file"])
+        time.sleep(float(attempt))
+    assert response is not None
     assert response["status"] == 200, (
         "REAL_RUNNER_ENV_UNAVAILABLE: dev-runner real run was not accepted; "
         f"engine={payload.get('engine')} status={response['status']} body={response['text']}"
@@ -358,7 +384,7 @@ def _run_real_runner_attempt(
         _commit_if_dirty(repo, f"test: retry real dummy plan attempt {attempt}")
 
     payload = _build_run_payload(repo, plan)
-    runner_id = _start_real_runner(page, payload)
+    runner_id = _start_real_runner(page, client, payload)
     result = _poll_attempt_result(client, runner_id, attempt=attempt, engine=payload["engine"])
     if not result.get("success"):
         _cleanup_runner(client, runner_id)
