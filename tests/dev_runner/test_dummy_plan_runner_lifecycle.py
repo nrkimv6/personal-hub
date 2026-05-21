@@ -149,6 +149,10 @@ def test_start_dummy_plan_R_enqueues_command_with_plan_file_and_test_source(api_
     )
     response = client.get(f"{BASE_URL}/runners")
     assert response.status_code == 200
+    assert all(item["runner_id"] != runner_id for item in response.json())
+
+    response = client.get(f"{BASE_URL}/runners", params={"include_hidden": "true"})
+    assert response.status_code == 200
     runner = next(item for item in response.json() if item["runner_id"] == runner_id)
     assert runner["plan_file"] == str(plan_file)
     assert normalize_path(runner["display_plan_name"] or runner["plan_file"]).endswith(DUMMY_PLAN_FIXTURE)
