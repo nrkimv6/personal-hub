@@ -16,6 +16,7 @@ TC 목록:
 """
 import pytest
 import fakeredis
+import fakeredis.aioredis
 
 
 class TestRedisIsolationGuard:
@@ -59,3 +60,30 @@ class TestRedisIsolationGuard:
         # block_trigger_user_direct_write fixture 없음 → 차단 없음
         r.set(f"plan-runner:runners:{runner_id}:trigger", "user")
         assert r.get(f"plan-runner:runners:{runner_id}:trigger") == "user"
+
+    @pytest.mark.asyncio
+    async def test_async_fakeredis_trigger_user_write_blocked(self, block_trigger_user_direct_write):
+        """E: 가드 활성화 시 async fakeredis :trigger='user' 기록도 pytest.fail"""
+        r = fakeredis.aioredis.FakeRedis(decode_responses=True)
+        runner_id = "test-async-guard-check"
+
+        with pytest.raises(pytest.fail.Exception) as exc_info:
+            await r.set(f"plan-runner:runners:{runner_id}:trigger", "user")
+
+        assert "trigger" in str(exc_info.value).lower()
+
+    @pytest.mark.asyncio
+    async def test_async_fakeredis_non_user_trigger_allowed(self, block_trigger_user_direct_write):
+        """R: 가드 활성화 시 async fakeredis :trigger='tc:test' 기록은 허용"""
+        r = fakeredis.aioredis.FakeRedis(decode_responses=True)
+        runner_id = "test-async-guard-tc"
+        await r.set(f"plan-runner:runners:{runner_id}:trigger", "tc:pytest-guard")
+        assert await r.get(f"plan-runner:runners:{runner_id}:trigger") == "tc:pytest-guard"
+
+    @pytest.mark.asyncio
+    async def test_async_fakeredis_trigger_user_without_guard(self):
+        """R: async 가드 미사용 시 trigger='user' 기록 허용 (guard는 opt-in)"""
+        r = fakeredis.aioredis.FakeRedis(decode_responses=True)
+        runner_id = "test-async-no-guard"
+        await r.set(f"plan-runner:runners:{runner_id}:trigger", "user")
+        assert await r.get(f"plan-runner:runners:{runner_id}:trigger") == "user"
