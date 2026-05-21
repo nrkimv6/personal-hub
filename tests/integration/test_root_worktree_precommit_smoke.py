@@ -31,6 +31,10 @@ def _copy_hook_scripts(src_root: Path, dst_root: Path) -> None:
         src_root / "scripts" / "git-hooks" / "root-branch-guard.ps1",
         dst_hooks / "root-branch-guard.ps1",
     )
+    shutil.copy2(
+        src_root / "scripts" / "git-hooks" / "post-checkout-root-branch-guard.ps1",
+        dst_hooks / "post-checkout-root-branch-guard.ps1",
+    )
 
 
 def _init_repo(tmp_path: Path) -> Path:
@@ -87,6 +91,29 @@ def _run_root_guard(repo_cwd: Path, mode: str, env: dict[str, str] | None = None
         text=True,
         encoding="utf-8",
         errors="replace",
+    )
+
+
+def _root_guard_dry_run_env(repo: Path, branch: str, transient: str | None = None) -> dict[str, str]:
+    env = {
+        "ROOT_GUARD_DRY_RUN": "1",
+        "ROOT_GUARD_REPO_ROOT": str(repo),
+        "ROOT_GUARD_PROJECT_ROOT": str(repo),
+        "ROOT_GUARD_COMMON_GIT_DIR": ".git",
+        "ROOT_GUARD_BRANCH": branch,
+        "ROOT_GUARD_SENTINEL": str(repo / ".git" / "root-branch-guard.violation"),
+    }
+    if transient is not None:
+        env["ROOT_GUARD_TRANSIENT_DETACHED"] = transient
+    return env
+
+
+def _install_post_checkout_hook(repo: Path) -> None:
+    hook = repo / ".git" / "hooks" / "post-checkout"
+    guard = repo / "scripts" / "git-hooks" / "post-checkout-root-branch-guard.ps1"
+    hook.write_text(
+        f'#!/bin/sh\npowershell.exe -NoProfile -ExecutionPolicy Bypass -File "{guard.as_posix()}" "$1" "$2" "$3"\n',
+        encoding="utf-8",
     )
 
 
@@ -444,6 +471,98 @@ def test_root_non_main_blocks_any_commit(tmp_path):
 
     assert result.returncode != 0
     assert "root_branch_guard_blocked" in (result.stdout + result.stderr)
+
+
+def test_root_guard_allows_rebase_transient_detached_head_without_sentinel(tmp_path):
+    repo = _init_repo(tmp_path)
+    sentinel = repo / ".git" / "root-branch-guard.violation"
+
+    result = _run_root_guard(repo, "PostCheckout", _root_guard_dry_run_env(repo, "HEAD", "1"))
+
+    output = result.stdout + result.stderr
+    assert result.returncode == 0
+    assert "root_branch_guard_transient_detached_allowed" in output
+    assert not sentinel.exists()
+
+
+def test_root_guard_blocks_plain_detached_head_without_transient_evidence(tmp_path):
+    repo = _init_repo(tmp_path)
+    sentinel = repo / ".git" / "root-branch-guard.violation"
+
+    result = _run_root_guard(repo, "PostCheckout", _root_guard_dry_run_env(repo, "HEAD", "0"))
+
+    output = result.stdout + result.stderr
+    assert result.returncode != 0
+    assert "root_branch_guard_violation" in output
+    assert sentinel.exists()
+    assert "branch=HEAD" in sentinel.read_text(encoding="utf-8")
+
+
+def test_root_guard_blocks_named_branch_even_with_transient_evidence(tmp_path):
+    repo = _init_repo(tmp_path)
+    sentinel = repo / ".git" / "root-branch-guard.violation"
+
+    result = _run_root_guard(repo, "PostCheckout", _root_guard_dry_run_env(repo, "impl/foo", "1"))
+
+    output = result.stdout + result.stderr
+    assert result.returncode != 0
+    assert "root_branch_guard_violation" in output
+    assert sentinel.exists()
+    assert "branch=impl/foo" in sentinel.read_text(encoding="utf-8")
+
+
+def test_root_guard_real_rebase_transient_detached_head_without_sentinel(tmp_path):
+    repo = _init_repo(tmp_path)
+    origin = tmp_path / "origin.git"
+    upstream = tmp_path / "upstream"
+    _run(["git", "init", "--bare", str(origin)], tmp_path)
+    _run(["git", "remote", "add", "origin", str(origin)], repo)
+    _run(["git", "push", "-u", "origin", "main"], repo)
+    _run(["git", "clone", "-b", "main", str(origin), str(upstream)], tmp_path)
+    _run(["git", "config", "user.name", "root-worktree-smoke"], upstream)
+    _run(["git", "config", "user.email", "root-worktree-smoke@example.com"], upstream)
+
+    (upstream / "remote.txt").write_text("remote\n", encoding="utf-8")
+    _run(["git", "add", "remote.txt"], upstream)
+    _run(["git", "commit", "-m", "remote change"], upstream)
+    _run(["git", "push", "origin", "main"], upstream)
+
+    (repo / "local.txt").write_text("local\n", encoding="utf-8")
+    _run(["git", "add", "local.txt"], repo)
+    _run(["git", "commit", "-m", "local change"], repo)
+    _install_post_checkout_hook(repo)
+
+    rebase = subprocess.run(
+        ["git", "pull", "--rebase", "origin", "main"],
+        cwd=str(repo),
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+    )
+
+    assert rebase.returncode == 0, rebase.stdout + rebase.stderr
+    assert not (repo / ".git" / "root-branch-guard.violation").exists()
+
+
+def test_root_guard_real_root_branch_switch_still_writes_sentinel(tmp_path):
+    repo = _init_repo(tmp_path)
+    _install_post_checkout_hook(repo)
+
+    result = subprocess.run(
+        ["git", "switch", "-c", "impl/accidental-root"],
+        cwd=str(repo),
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+    )
+
+    output = result.stdout + result.stderr
+    assert "root_branch_guard_violation" in output
+    sentinel = repo / ".git" / "root-branch-guard.violation"
+    assert sentinel.exists()
+    assert "branch=impl/accidental-root" in sentinel.read_text(encoding="utf-8")
 
 
 def test_plans_worktree_docs_stage_passes_without_conflict(tmp_path):

@@ -140,6 +140,50 @@ function Get-RepoContext {
     }
 }
 
+function Get-GitPath {
+    param([string]$Name)
+
+    $raw = git rev-parse --git-path $Name 2>$null
+    if ([string]::IsNullOrWhiteSpace($raw)) {
+        return $null
+    }
+    return $raw.Trim()
+}
+
+function Test-TransientDetachedGitOperation {
+    param([object]$Context)
+
+    if ($Context.Branch -ne "HEAD") {
+        return $false
+    }
+
+    if ($env:ROOT_GUARD_DRY_RUN -eq "1") {
+        $override = Get-Item -Path "Env:ROOT_GUARD_TRANSIENT_DETACHED" -ErrorAction SilentlyContinue
+        if ($null -ne $override) {
+            return $override.Value -in @("1", "true", "True", "TRUE", "yes", "Yes", "YES")
+        }
+    }
+
+    $operationPaths = @(
+        "rebase-merge",
+        "rebase-apply",
+        "CHERRY_PICK_HEAD",
+        "REVERT_HEAD",
+        "MERGE_HEAD",
+        "BISECT_LOG",
+        "sequencer"
+    )
+
+    foreach ($name in $operationPaths) {
+        $path = Get-GitPath $name
+        if (-not [string]::IsNullOrWhiteSpace($path) -and (Test-Path -LiteralPath $path)) {
+            return $true
+        }
+    }
+
+    return $false
+}
+
 function Write-Context {
     param([object]$Context)
     Write-Output "mode=$Mode"
@@ -200,6 +244,10 @@ if (-not $context.IsRootCheckout) {
 
 if ($Mode -eq "PostCheckout") {
     if ($context.Branch -ne "main") {
+        if (Test-TransientDetachedGitOperation $context) {
+            Write-Output "root_branch_guard_transient_detached_allowed: branch=HEAD with active git operation evidence"
+            exit 0
+        }
         if (-not [string]::IsNullOrWhiteSpace($context.Sentinel)) {
             $parent = Split-Path -Parent $context.Sentinel
             if (-not (Test-Path -LiteralPath $parent)) {
