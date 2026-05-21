@@ -255,34 +255,41 @@ def _start_real_runner(page: Page, payload: dict) -> str:
 
 def _poll_attempt_result(client: httpx.Client, runner_id: str, *, attempt: int, engine: str) -> dict:
     def read_sentinel():
-        recent = client.get("/api/v1/dev-runner/logs/recent", params={"runner_id": runner_id, "lines": 300})
-        if recent.status_code == 200:
-            lines = recent.json().get("lines", [])
-            if any(DUMMY_PLAN_SENTINEL in line for line in lines):
-                return {"success": True, "source": "recent", "lines": lines}
-            if any(token in line for token in TERMINAL_FAILURE_TOKENS for line in lines):
-                return {
-                    "success": False,
-                    "attempt": attempt,
-                    "engine": engine,
-                    "runner_id": runner_id,
-                    "reason": "terminal_failure_token_recent",
-                    "evidence": _runner_evidence(client, runner_id),
-                }
-        full = client.get("/api/v1/dev-runner/logs/full", params={"runner_id": runner_id, "offset": 0, "limit": 1000})
-        if full.status_code == 200:
-            lines = full.json().get("lines", [])
-            if any(DUMMY_PLAN_SENTINEL in line for line in lines):
-                return {"success": True, "source": "full", "lines": lines}
-            if any(token in line for token in TERMINAL_FAILURE_TOKENS for line in lines):
-                return {
-                    "success": False,
-                    "attempt": attempt,
-                    "engine": engine,
-                    "runner_id": runner_id,
-                    "reason": "terminal_failure_token_full",
-                    "evidence": _runner_evidence(client, runner_id),
-                }
+        try:
+            recent = client.get("/api/v1/dev-runner/logs/recent", params={"runner_id": runner_id, "lines": 300})
+            if recent.status_code == 200:
+                lines = recent.json().get("lines", [])
+                if any(DUMMY_PLAN_SENTINEL in line for line in lines):
+                    return {"success": True, "source": "recent", "lines": lines}
+                if any(token in line for token in TERMINAL_FAILURE_TOKENS for line in lines):
+                    return {
+                        "success": False,
+                        "attempt": attempt,
+                        "engine": engine,
+                        "runner_id": runner_id,
+                        "reason": "terminal_failure_token_recent",
+                        "evidence": _runner_evidence(client, runner_id),
+                    }
+        except httpx.TimeoutException:
+            return None
+
+        try:
+            full = client.get("/api/v1/dev-runner/logs/full", params={"runner_id": runner_id, "offset": 0, "limit": 1000})
+            if full.status_code == 200:
+                lines = full.json().get("lines", [])
+                if any(DUMMY_PLAN_SENTINEL in line for line in lines):
+                    return {"success": True, "source": "full", "lines": lines}
+                if any(token in line for token in TERMINAL_FAILURE_TOKENS for line in lines):
+                    return {
+                        "success": False,
+                        "attempt": attempt,
+                        "engine": engine,
+                        "runner_id": runner_id,
+                        "reason": "terminal_failure_token_full",
+                        "evidence": _runner_evidence(client, runner_id),
+                    }
+        except httpx.TimeoutException:
+            return None
         return None
 
     sentinel = _poll(120.0, 5.0, read_sentinel)
@@ -299,14 +306,17 @@ def _poll_attempt_result(client: httpx.Client, runner_id: str, *, attempt: int, 
         return sentinel
 
     def read_merged():
-        merge = client.get(f"/api/v1/dev-runner/merge/{runner_id}")
-        if merge.status_code == 200 and merge.json().get("status") == "merged":
-            return merge.json()
-        runners = client.get("/api/v1/dev-runner/runners", params={"include_hidden": "true"})
-        if runners.status_code == 200:
-            for item in runners.json():
-                if item.get("runner_id") == runner_id and item.get("merge_status") == "merged":
-                    return item
+        try:
+            merge = client.get(f"/api/v1/dev-runner/merge/{runner_id}")
+            if merge.status_code == 200 and merge.json().get("status") == "merged":
+                return merge.json()
+            runners = client.get("/api/v1/dev-runner/runners", params={"include_hidden": "true"})
+            if runners.status_code == 200:
+                for item in runners.json():
+                    if item.get("runner_id") == runner_id and item.get("merge_status") == "merged":
+                        return item
+        except httpx.TimeoutException:
+            return None
         return None
 
     merged = _poll(120.0, 5.0, read_merged)
