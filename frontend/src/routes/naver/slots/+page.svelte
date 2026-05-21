@@ -224,50 +224,50 @@
 				<p class="text-muted-foreground">조회 기간 내 슬롯이 없습니다.</p>
 			</div>
 		{:else}
-			<div class="space-y-2">
+			<div class="md:hidden space-y-3">
 				{#each result.slots_by_date as dateSlots (dateSlots.date)}
-					<div class="bg-white rounded-lg border border-border overflow-hidden">
+					<article class="bg-white rounded-lg border border-border overflow-hidden">
 						<!-- 날짜 헤더 -->
 						<button
 							onclick={() => toggleDate(dateSlots.date)}
-							class="w-full px-4 py-3 flex items-center justify-between hover:bg-muted transition-colors"
+							class="w-full px-3 py-3 flex items-start justify-between gap-3 hover:bg-muted transition-colors"
 						>
-							<div class="flex items-center gap-2">
+							<div class="flex items-start gap-2 text-left">
 								<ChevronRight
-									class="w-4 h-4 text-muted-foreground transition-transform {expandedDates.has(dateSlots.date) ? 'rotate-90' : ''}"
+									class="w-4 h-4 mt-0.5 text-muted-foreground transition-transform {expandedDates.has(dateSlots.date) ? 'rotate-90' : ''}"
 								/>
-								<span class="font-medium text-foreground text-sm">
-									{dateSlots.date} ({dateSlots.day_of_week})
-								</span>
-								{#if result.summary.available_dates.includes(dateSlots.date)}
-									<span class="px-2 py-0.5 text-xs font-medium bg-success-light text-success rounded-full">
-										예약가능
+								<div>
+									<span class="font-medium text-foreground text-sm">
+										{dateSlots.date} ({dateSlots.day_of_week})
 									</span>
-								{/if}
-							</div>
-							<div class="flex items-center gap-3">
-								<span class="{getDateStatusColor(dateSlots)} font-medium text-sm">
-									남음 {dateSlots.summary.total_remaining}/{dateSlots.summary.total_capacity}
-								</span>
-								<div class="w-20 h-2 bg-secondary rounded-full overflow-hidden">
-									<div
-										class="{getProgressColor(
-											dateSlots.summary.total_booked,
-											dateSlots.summary.total_capacity
-										)} h-full transition-all"
-										style="width: {getProgress(
-											dateSlots.summary.total_booked,
-											dateSlots.summary.total_capacity
-										)}%"
-									></div>
+									{#if result.summary.available_dates.includes(dateSlots.date)}
+										<span class="ml-1 px-2 py-0.5 text-xs font-medium bg-success-light text-success rounded-full">
+											예약가능
+										</span>
+									{/if}
+									<p class="{getDateStatusColor(dateSlots)} font-medium text-sm mt-1">
+										남음 {dateSlots.summary.total_remaining}/{dateSlots.summary.total_capacity}
+									</p>
 								</div>
+							</div>
+							<div class="w-16 h-2 bg-secondary rounded-full overflow-hidden mt-2 shrink-0">
+								<div
+									class="{getProgressColor(
+										dateSlots.summary.total_booked,
+										dateSlots.summary.total_capacity
+									)} h-full transition-all"
+									style="width: {getProgress(
+										dateSlots.summary.total_booked,
+										dateSlots.summary.total_capacity
+									)}%"
+								></div>
 							</div>
 						</button>
 
 						<!-- 슬롯 목록 -->
 						{#if expandedDates.has(dateSlots.date)}
 							<div class="border-t border-border p-4">
-								<div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-2">
+								<div class="grid grid-cols-1 gap-2">
 									{#each dateSlots.slots as slot (slot.time)}
 										<div
 											class="px-3 py-2 rounded-lg border {getSlotBgColor(slot)} {getSlotBorderColor(slot)}"
@@ -296,8 +296,108 @@
 								</div>
 							</div>
 						{/if}
-					</div>
+					</article>
 				{/each}
+			</div>
+
+			<div class="hidden md:block overflow-x-auto rounded-lg border border-border bg-white">
+				<table class="w-full text-sm">
+					<thead class="bg-background">
+						<tr>
+							<th class="px-4 py-2 text-left font-medium text-muted-foreground">날짜</th>
+							<th class="px-4 py-2 text-left font-medium text-muted-foreground">상태</th>
+							<th class="px-4 py-2 text-left font-medium text-muted-foreground">잔여/정원</th>
+							<th class="px-4 py-2 text-left font-medium text-muted-foreground">진행률</th>
+							<th class="px-4 py-2 text-left font-medium text-muted-foreground">슬롯</th>
+							<th class="px-4 py-2 text-left font-medium text-muted-foreground">작업</th>
+						</tr>
+					</thead>
+					<tbody class="divide-y divide-border">
+						{#each result.slots_by_date as dateSlots (dateSlots.date)}
+							<tr class="hover:bg-muted">
+								<td class="px-4 py-3">
+									<div class="font-medium text-foreground">
+										{dateSlots.date} ({dateSlots.day_of_week})
+									</div>
+								</td>
+								<td class="px-4 py-3">
+									{#if result.summary.available_dates.includes(dateSlots.date)}
+										<span class="px-2 py-0.5 text-xs font-medium bg-success-light text-success rounded-full">
+											예약가능
+										</span>
+									{:else}
+										<span class="px-2 py-0.5 text-xs font-medium bg-secondary text-muted-foreground rounded-full">
+											마감
+										</span>
+									{/if}
+								</td>
+								<td class="px-4 py-3">
+									<span class="{getDateStatusColor(dateSlots)} font-medium">
+										{dateSlots.summary.total_remaining}/{dateSlots.summary.total_capacity}
+									</span>
+								</td>
+								<td class="px-4 py-3">
+									<div class="w-24 h-2 bg-secondary rounded-full overflow-hidden">
+										<div
+											class="{getProgressColor(
+												dateSlots.summary.total_booked,
+												dateSlots.summary.total_capacity
+											)} h-full transition-all"
+											style="width: {getProgress(
+												dateSlots.summary.total_booked,
+												dateSlots.summary.total_capacity
+											)}%"
+										></div>
+									</div>
+								</td>
+								<td class="px-4 py-3 text-muted-foreground">
+									{dateSlots.slots.length}개
+								</td>
+								<td class="px-4 py-3">
+									<button
+										onclick={() => toggleDate(dateSlots.date)}
+										class="btn btn-secondary btn-xs"
+									>
+										{expandedDates.has(dateSlots.date) ? '접기' : '보기'}
+									</button>
+								</td>
+							</tr>
+							{#if expandedDates.has(dateSlots.date)}
+								<tr class="bg-background">
+									<td colspan="6" class="px-4 py-3">
+										<div class="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-2">
+											{#each dateSlots.slots as slot (slot.time)}
+												<div
+													class="px-3 py-2 rounded-lg border {getSlotBgColor(slot)} {getSlotBorderColor(slot)}"
+												>
+													<div class="flex items-center justify-between mb-1">
+														<span class="font-medium text-foreground text-sm">{slot.time}</span>
+														<span class="{getSlotTextColor(slot)} text-sm font-semibold">
+															{#if slot.is_available}
+																{slot.remaining}석
+															{:else}
+																마감
+															{/if}
+														</span>
+													</div>
+													<div class="w-full h-1.5 bg-secondary rounded-full overflow-hidden">
+														<div
+															class="{getProgressColor(slot.booked, slot.capacity)} h-full transition-all"
+															style="width: {getProgress(slot.booked, slot.capacity)}%"
+														></div>
+													</div>
+													<div class="text-xs text-muted-foreground mt-1">
+														{slot.booked}/{slot.capacity}
+													</div>
+												</div>
+											{/each}
+										</div>
+									</td>
+								</tr>
+							{/if}
+						{/each}
+					</tbody>
+				</table>
 			</div>
 		{/if}
 	{/if}

@@ -334,7 +334,47 @@
 					<span class="ml-auto text-xs text-muted-foreground">총 {notes.total}개</span>
 				</div>
 
-				<div class="overflow-x-auto">
+				<div class="space-y-3 md:hidden">
+					{#each notes.items as note}
+						<article class="rounded-lg border border-border bg-card p-3">
+							<div class="mb-2 flex items-start justify-between gap-3">
+								<div class="min-w-0">
+									<div class="truncate text-sm font-medium text-foreground" title={note.file_path}>
+										{note.file_name}
+									</div>
+									<div class="mt-1 truncate text-xs text-muted-foreground" title={note.file_path}>
+										{note.file_path}
+									</div>
+								</div>
+								<span class="shrink-0 rounded-full bg-muted px-2 py-0.5 text-xs text-muted-foreground">
+									{note.status}
+								</span>
+							</div>
+							<div class="grid grid-cols-3 gap-2 text-xs">
+								<div>
+									<div class="text-muted-foreground">글자수</div>
+									<div class="mt-0.5 text-foreground">{note.content_length?.toLocaleString() ?? '-'}</div>
+								</div>
+								<div>
+									<div class="text-muted-foreground">유형</div>
+									<div class="mt-0.5">
+										{#if note.note_type}
+											<span class="rounded-full bg-primary/15 px-1.5 py-0.5 text-primary">{note.note_type}</span>
+										{:else}
+											<span class="text-muted-foreground">-</span>
+										{/if}
+									</div>
+								</div>
+								<div class="text-right">
+									<div class="text-muted-foreground">일일</div>
+									<div class="mt-0.5 text-foreground">{note.is_daily_note ? 'Y' : '-'}</div>
+								</div>
+							</div>
+						</article>
+					{/each}
+				</div>
+
+				<div class="hidden overflow-x-auto md:block">
 					<table class="w-full text-xs">
 						<thead>
 							<tr class="border-b border-border text-muted-foreground">
@@ -430,7 +470,52 @@
 					{/if}
 				</div>
 
-				<div class="overflow-x-auto">
+				<div class="space-y-3 md:hidden">
+					{#each classifyNotes.items as note}
+						<article
+							class="rounded-lg border border-border bg-card p-3 {selectedNoteIds.includes(note.id) ? 'bg-primary/5' : ''}"
+							onclick={() => toggleSelect(note.id)}
+							role="button"
+							tabindex="0"
+							onkeydown={(e) => e.key === 'Enter' && toggleSelect(note.id)}
+						>
+							<div class="mb-2 flex items-start gap-3">
+								<input
+									type="checkbox"
+									checked={selectedNoteIds.includes(note.id)}
+									onclick={(e) => e.stopPropagation()}
+									onchange={() => toggleSelect(note.id)}
+									class="mt-0.5 size-3.5"
+								/>
+								<div class="min-w-0 flex-1">
+									<div class="truncate text-sm font-medium text-foreground">{note.file_name}</div>
+									<div class="mt-1 flex flex-wrap gap-1.5">
+										{#if note.note_type}
+											<span class="rounded-full bg-primary/15 px-1.5 py-0.5 text-xs text-primary">{note.note_type}</span>
+										{:else}
+											<span class="rounded-full bg-muted px-1.5 py-0.5 text-xs text-muted-foreground">미분류</span>
+										{/if}
+										<span class="rounded-full bg-muted px-1.5 py-0.5 text-xs text-muted-foreground">
+											{note.status}
+										</span>
+									</div>
+								</div>
+							</div>
+							<div class="grid grid-cols-2 gap-2 text-xs">
+								<div>
+									<div class="text-muted-foreground">일일</div>
+									<div class="mt-0.5 text-foreground">{note.is_daily_note ? 'Y' : '-'}</div>
+								</div>
+								<div class="text-right">
+									<div class="text-muted-foreground">Frontmatter</div>
+									<div class="mt-0.5 text-foreground">{note.has_frontmatter ? 'Y' : '-'}</div>
+								</div>
+							</div>
+						</article>
+					{/each}
+				</div>
+
+				<div class="hidden overflow-x-auto md:block">
 					<table class="w-full text-xs">
 						<thead>
 							<tr class="border-b border-border text-muted-foreground">

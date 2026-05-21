@@ -988,7 +988,133 @@
           </div>
         {/if}
       </div>
-      <div class="overflow-x-auto">
+      <div class="md:hidden space-y-3">
+        {#each schedules as schedule (schedule.id)}
+          {@const status = getStatusBadge(schedule.run_status, schedule.is_enabled)}
+          {@const dateInfo = formatDate(schedule.date)}
+          <article class="rounded-lg border border-border bg-white p-3 {!schedule.is_enabled ? 'opacity-60' : ''} {schedule.error_count > 0 ? 'border-red-200 bg-error-light' : ''} {selection.has(schedule.id) ? 'border-blue-200 bg-primary-light' : ''}">
+            <div class="flex items-start justify-between gap-3">
+              <div class="min-w-0 flex-1">
+                <div class="flex items-center gap-2">
+                  <input
+                    type="checkbox"
+                    class="w-4 h-4 cursor-pointer"
+                    checked={selection.has(schedule.id)}
+                    onchange={() => selection.toggle(schedule.id)}
+                    aria-label="일정 선택"
+                  />
+                  <button
+                    class="text-left"
+                    onclick={() => handleToggleSchedule(schedule)}
+                    title={schedule.is_enabled ? '클릭하여 비활성화' : '클릭하여 활성화'}
+                  >
+                    <span class="badge {status.class}">{status.text}</span>
+                  </button>
+                  {#if schedule.error_count > 0}
+                    <span class="badge badge-error text-xs" title={schedule.last_error || ''}>
+                      오류 {schedule.error_count}
+                    </span>
+                  {/if}
+                </div>
+                <div class="mt-2 min-w-0">
+                  <p class="font-medium text-foreground break-words">
+                    {schedule.business_name}
+                    {#if !schedule.business_is_enabled}
+                      <Badge variant="secondary" class="text-xs">OFF</Badge>
+                    {/if}
+                  </p>
+                  <p class="text-xs text-muted-foreground break-words">
+                    {schedule.item_name}
+                    {#if !schedule.item_is_enabled}
+                      <Badge variant="secondary" class="text-xs">OFF</Badge>
+                    {/if}
+                  </p>
+                </div>
+              </div>
+              <button
+                onclick={() => copyToClipboard(buildBookingUrl(schedule), schedule.id)}
+                class="btn btn-secondary btn-xs shrink-0"
+                title="예약 링크 복사"
+              >
+                {copiedId === schedule.id ? '복사됨' : '링크'}
+              </button>
+            </div>
+
+            <div class="mt-3 grid grid-cols-2 gap-2 text-sm">
+              <div>
+                <p class="text-xs text-muted-foreground">일정</p>
+                <p class="font-medium text-foreground">
+                  {dateInfo.date}
+                  {#if dateInfo.badge}
+                    <Badge
+                      variant={dateInfo.badge === '지남' ? 'secondary' : dateInfo.badge === '오늘' ? 'warning' : 'info'}
+                      class="text-xs"
+                    >
+                      {dateInfo.badge}
+                    </Badge>
+                  {/if}
+                </p>
+                <p class="text-xs text-muted-foreground">
+                  {#if schedule.times && schedule.times.length > 0}
+                    {schedule.times.join(', ')}
+                  {:else if schedule.time_range}
+                    {schedule.time_range}
+                  {:else}
+                    전체 시간
+                  {/if}
+                </p>
+              </div>
+              <div>
+                <p class="text-xs text-muted-foreground">체크</p>
+                <p class="text-foreground">최근: {formatTime(schedule.last_check_time)}</p>
+                <p>
+                  {#if schedule.run_status === 'running'}
+                    <span class="text-success font-medium">실행 중</span>
+                  {:else if schedule.run_status === 'queued'}
+                    <span class="text-primary">다음: {getRemainingTime(schedule.next_run_time)}</span>
+                  {:else}
+                    <span class="text-muted-foreground">-</span>
+                  {/if}
+                </p>
+              </div>
+              <div>
+                <p class="text-xs text-muted-foreground">간격</p>
+                <p class="{schedule.custom_interval ? 'text-primary' : 'text-foreground'}">{formatInterval(schedule.interval)}</p>
+              </div>
+              <div>
+                <p class="text-xs text-muted-foreground">계정</p>
+                {#if schedule.account_name}
+                  <Badge variant="info" class="text-xs">{schedule.account_name}</Badge>
+                {:else}
+                  <span class="text-muted-foreground text-sm">기본</span>
+                {/if}
+              </div>
+            </div>
+
+            <div class="mt-3 flex flex-wrap items-center justify-between gap-2 border-t border-border pt-3">
+              <div class="flex items-center gap-2">
+                <button
+                  class="btn btn-xs {schedule.auto_booking_enabled ? 'btn-success' : 'btn-secondary'}"
+                  onclick={() => handleToggleAutoBooking(schedule)}
+                  title={schedule.auto_booking_enabled ? '자동예약 해제' : '자동예약 등록'}
+                >
+                  자동예약 {schedule.auto_booking_enabled ? 'ON' : 'OFF'}
+                </button>
+                {#if schedule.booking_count > 0}
+                  <span class="text-success font-medium text-xs">예약 {schedule.booking_count}</span>
+                {/if}
+              </div>
+              <div class="flex gap-1">
+                <button class="btn btn-secondary btn-xs" onclick={() => openEditModal(schedule)}>수정</button>
+                <button class="btn btn-secondary btn-xs" onclick={() => openDuplicateModal(schedule)}>복제</button>
+                <button class="btn btn-danger btn-xs" onclick={() => handleDeleteSchedule(schedule)}>삭제</button>
+              </div>
+            </div>
+          </article>
+        {/each}
+      </div>
+
+      <div class="hidden md:block overflow-x-auto">
         <table class="table">
           <thead>
             <tr>
@@ -1223,7 +1349,66 @@
         <div class="mb-4 text-sm text-muted-foreground">
           총 {recurringRules.length}개의 반복 규칙
         </div>
-        <div class="overflow-x-auto">
+        <div class="md:hidden space-y-3">
+          {#each recurringRules as rule (rule.id)}
+            <article class="rounded-lg border border-border bg-white p-3 {!rule.is_enabled ? 'opacity-60 bg-background' : ''}">
+              <div class="flex items-start justify-between gap-3">
+                <div class="min-w-0">
+                  <button
+                    class="text-left"
+                    onclick={() => handleToggleRecurringRule(rule)}
+                    title={rule.is_enabled ? '클릭하여 비활성화' : '클릭하여 활성화'}
+                  >
+                    <Badge variant={rule.is_enabled ? 'success' : 'secondary'}>
+                      {rule.is_enabled ? '활성' : '비활성'}
+                    </Badge>
+                  </button>
+                  {#if rule.auto_booking_enabled}
+                    <span class="ml-1 text-xs text-success">자동예약</span>
+                  {/if}
+                  <p class="mt-2 font-medium text-foreground break-words">{rule.name}</p>
+                  <p class="text-xs text-muted-foreground break-words">
+                    {rule.business_name} / {rule.item_name}
+                  </p>
+                </div>
+                <div class="flex gap-1 shrink-0">
+                  <button class="btn btn-secondary btn-xs" onclick={() => openRecurringEditModal(rule)}>수정</button>
+                  <button class="btn btn-info btn-xs" onclick={() => handleTriggerRecurringRule(rule)}>실행</button>
+                  <button class="btn btn-danger btn-xs" onclick={() => handleDeleteRecurringRule(rule)}>삭제</button>
+                </div>
+              </div>
+
+              <div class="mt-3 grid grid-cols-2 gap-2 text-sm">
+                <div>
+                  <p class="text-xs text-muted-foreground">트리거</p>
+                  <p class="font-medium text-foreground">{WEEKDAY_NAMES[rule.recurrence_day]}요일 {rule.trigger_time}</p>
+                </div>
+                <div>
+                  <p class="text-xs text-muted-foreground">다음 실행</p>
+                  {#if rule.is_enabled && rule.next_trigger_at}
+                    <p class="font-medium text-primary">{formatNextTrigger(rule.next_trigger_at)}</p>
+                  {:else}
+                    <p class="text-muted-foreground">-</p>
+                  {/if}
+                </div>
+                <div>
+                  <p class="text-xs text-muted-foreground">최근 실행</p>
+                  {#if rule.last_triggered_at}
+                    <p class="text-foreground">{new Date(rule.last_triggered_at).toLocaleDateString('ko-KR')}</p>
+                  {:else}
+                    <p class="text-muted-foreground">-</p>
+                  {/if}
+                </div>
+                <div>
+                  <p class="text-xs text-muted-foreground">대상 패턴</p>
+                  <p class="text-foreground break-words">{formatTargetPatterns(rule.target_patterns)}</p>
+                </div>
+              </div>
+            </article>
+          {/each}
+        </div>
+
+        <div class="hidden md:block overflow-x-auto">
           <table class="table">
             <thead>
               <tr>
