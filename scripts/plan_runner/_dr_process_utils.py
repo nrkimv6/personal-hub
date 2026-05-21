@@ -29,6 +29,7 @@ from _dr_constants import (
 from _dr_plan_paths import classify_plan_stage, read_plan_status
 from _dr_merge_persistence import MergePersistence
 from _dr_merge_state import ERROR, RESIDUE_BLOCKED, RetryAction
+from _dr_test_repo_root import read_runner_test_repo_root
 from _dr_state import (
     get_running_processes, get_running_log_files, get_stream_threads,
     get_cleanup_done, get_dead_process_first_seen, get_wf_manager,
@@ -578,7 +579,9 @@ def _cleanup_process_state(runner_id: str, redis_client: redis.Redis, reason: st
         from plan_worktree_helpers import is_plan_in_progress as _is_plan_in_progress
         from plan_worktree_helpers import has_unmerged_commits as _has_unmerged_commits
 
-        _cleanup_worktree_base = (get_target_project_root(plan_file_val) / ".worktrees") if plan_file_val else WORKTREE_BASE_DIR
+        test_repo_root = read_runner_test_repo_root(redis_client, runner_id, project_root=PROJECT_ROOT)
+        _target_root = test_repo_root or (get_target_project_root(plan_file_val) if plan_file_val else WORKTREE_BASE_DIR.parent)
+        _cleanup_worktree_base = _target_root / ".worktrees"
 
         if force_test_cleanup:
             _force_cleanup_test_runner_worktree(runner_id, redis_client)
@@ -600,7 +603,7 @@ def _cleanup_process_state(runner_id: str, redis_client: redis.Redis, reason: st
                     )
                 else:
                     _branch = f"runner/{runner_id}"
-                if _has_unmerged_commits(_branch, get_target_project_root(plan_file_val) if plan_file_val else WORKTREE_BASE_DIR.parent):
+                if _has_unmerged_commits(_branch, _target_root):
                     _preserve_worktree = True
                     logger.warning(
                         f"[cleanup] preserving worktree (unmerged commits exist): runner={runner_id}, branch={_branch}"

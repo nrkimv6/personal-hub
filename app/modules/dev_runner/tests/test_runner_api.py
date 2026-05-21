@@ -283,6 +283,55 @@ class TestStartRun:
         data = response.json()
         assert data["plan_file"] == "docs/plan/2026-02-27_test.md"
 
+    async def test_start_run_test_repo_root_without_test_source_returns_400(self, client, mock_executor_redis, tmp_path):
+        """E: test_source 없는 repo root override는 거부"""
+        fake_async = mock_executor_redis["async"]
+        await fake_async.set("plan-runner:listener:heartbeat", datetime.now().isoformat())
+
+        response = await client.post("/api/v1/dev-runner/run", json={
+            "plan_file": "test-plan.md",
+            "test_repo_root": str(tmp_path),
+        })
+
+        assert response.status_code == 400
+        assert "test_source" in response.text
+
+    async def test_start_run_test_repo_root_without_env_gate_returns_400(self, client, mock_executor_redis, tmp_path, monkeypatch):
+        """E: env gate 없는 repo root override는 거부"""
+        fake_async = mock_executor_redis["async"]
+        await fake_async.set("plan-runner:listener:heartbeat", datetime.now().isoformat())
+        monkeypatch.delenv("DEV_RUNNER_ALLOW_TEST_REPO_ROOT", raising=False)
+
+        response = await client.post("/api/v1/dev-runner/run", json={
+            "plan_file": "test-plan.md",
+            "test_source": "real_dummy_plan_playwright",
+            "test_repo_root": str(tmp_path),
+        })
+
+        assert response.status_code == 400
+        assert "DEV_RUNNER_ALLOW_TEST_REPO_ROOT" in response.text
+
+    async def test_start_run_test_repo_root_stored_in_command(self, client, mock_executor_redis, tmp_path, monkeypatch):
+        """R: env gate + test_source가 있으면 command payload로 isolated repo root 전달"""
+        fake_async = mock_executor_redis["async"]
+        await fake_async.set("plan-runner:listener:heartbeat", datetime.now().isoformat())
+        repo = tmp_path / "isolated-repo"
+        repo.mkdir()
+        (repo / ".git").mkdir()
+        monkeypatch.setenv("DEV_RUNNER_ALLOW_TEST_REPO_ROOT", "1")
+
+        with patch.object(fake_async, "brpop", new=AsyncMock(return_value=None)):
+            response = await client.post("/api/v1/dev-runner/run", json={
+                "plan_file": str(repo / "docs/plan/test.md"),
+                "test_source": "real_dummy_plan_playwright",
+                "test_repo_root": str(repo),
+            })
+
+        assert response.status_code == 200
+        raw = await fake_async.lrange("plan-runner:commands", 0, -1)
+        command = json.loads(raw[0])
+        assert command["test_repo_root"] == str(repo.resolve())
+
     async def test_double_start_returns_429(self, client, mock_executor_redis):
         """max_concurrent_runners 초과 시 429 반환 — 동시 실행 제한 short-circuit 검증"""
         from app.modules.dev_runner.services.executor_service import ACTIVE_RUNNERS_KEY, RUNNER_KEY_PREFIX

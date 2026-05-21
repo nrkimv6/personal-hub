@@ -49,6 +49,7 @@ from _dr_merge_state import (
 from _dr_plan_paths import classify_plan_stage, read_plan_status
 from _dr_runtime_utils import _publish_with_retry
 from _dr_subprocess import _get_fix_engine, _launch_conflict_resolver_process, _launch_auto_impl_post_merge_process, _launch_general_merge_resolver_process, PROJECT_ROOT
+from _dr_test_repo_root import read_runner_test_repo_root
 
 logger = logging.getLogger(__name__)
 
@@ -1140,6 +1141,7 @@ def _check_stale_merge_gate(
     redis_client: redis.Redis,
     branch: str,
     pub_fn,
+    project_root: Path,
     action_name: str = "inline-merge",
 ) -> tuple[Optional[dict], Optional[str]]:
     if not branch:
@@ -1148,7 +1150,7 @@ def _check_stale_merge_gate(
 
     from plan_worktree_helpers import classify_merge_risk, get_branch_divergence
 
-    behind, ahead = get_branch_divergence(branch, PROJECT_ROOT)
+    behind, ahead = get_branch_divergence(branch, project_root)
     risk = classify_merge_risk(behind, ahead)
     message = (
         f"stale merge gate: risk={risk}, behind={behind}, ahead={ahead}, branch={branch}; "
@@ -1204,7 +1206,7 @@ def _check_stale_merge_gate(
         )
 
     try:
-        snapshot_path = _write_pre_merge_snapshot(runner_id, branch, PROJECT_ROOT, pub_fn)
+        snapshot_path = _write_pre_merge_snapshot(runner_id, branch, project_root, pub_fn)
         if snapshot_path:
             redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_snapshot_path", snapshot_path)
     except Exception as exc:
@@ -1284,6 +1286,11 @@ def _execute_merge_with_lock(runner_id: str, redis_client: redis.Redis, action_n
     result = {"success": False, "message": "unknown error", "merge_status": ERROR, "action": action_name}
 
     try:
+        target_project_root = read_runner_test_repo_root(
+            redis_client,
+            runner_id,
+            project_root=PROJECT_ROOT,
+        ) or PROJECT_ROOT
         try:
             branch_str = _decode_redis_value(redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:branch")).strip() or None
             plan_file = _decode_redis_value(redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:plan_file")).strip() or None
@@ -1316,7 +1323,7 @@ def _execute_merge_with_lock(runner_id: str, redis_client: redis.Redis, action_n
         _pub("merge lock 대기 중...")
 
         lock_timeout = _get_merge_lock_timeout_seconds()
-        lock_acquired = acquire_merge_turn(redis_client, runner_id, repo_id=_get_repo_id(PROJECT_ROOT), timeout=lock_timeout)
+        lock_acquired = acquire_merge_turn(redis_client, runner_id, repo_id=_get_repo_id(target_project_root), timeout=lock_timeout)
         if not lock_acquired:
             _pub(f"merge lock 획득 실패 (timeout={lock_timeout}s) — merge 중단")
             try:
@@ -1327,7 +1334,14 @@ def _execute_merge_with_lock(runner_id: str, redis_client: redis.Redis, action_n
             result["merge_status"] = ERROR
             return result
 
-        gate_result, snapshot_path = _check_stale_merge_gate(runner_id, redis_client, branch_str or "", _pub, action_name=action_name)
+        gate_result, snapshot_path = _check_stale_merge_gate(
+            runner_id,
+            redis_client,
+            branch_str or "",
+            _pub,
+            target_project_root,
+            action_name=action_name,
+        )
         if gate_result is not None:
             gate_result["action"] = action_name
             result = gate_result
@@ -1352,7 +1366,7 @@ def _execute_merge_with_lock(runner_id: str, redis_client: redis.Redis, action_n
             [str(PLAN_RUNNER_PYTHON), "-m", "plan_runner", "post-merge",
              "--runner-id", runner_id,
              "--redis-db", str(get_redis_db()),
-             "--project-dir", str(PROJECT_ROOT)],
+             "--project-dir", str(target_project_root)],
             cwd=str(PLAN_RUNNER_MODULE_PATH),
         )
         exit_code = proc.returncode
@@ -1393,7 +1407,7 @@ def _execute_merge_with_lock(runner_id: str, redis_client: redis.Redis, action_n
         _persist_merge_result_metadata(runner_id, redis_client, result)
         if lock_acquired:
             try:
-                release_merge_turn(redis_client, runner_id, repo_id=_get_repo_id(PROJECT_ROOT))
+                release_merge_turn(redis_client, runner_id, repo_id=_get_repo_id(target_project_root))
             except Exception:
                 pass
         # merge-results Redis list에 결과 push (merge history API 연동)

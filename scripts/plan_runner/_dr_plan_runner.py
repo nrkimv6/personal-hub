@@ -32,6 +32,7 @@ from _dr_log_framing import MultilineFrameBuffer
 from _dr_process_utils import _cleanup_process_state, _is_pid_alive, get_plan_git_root, get_target_project_root, _DummyProcess
 from _dr_runner_predicates import _get_process_identity, _hash_process_cmdline
 from _dr_runtime_utils import _normalize_exit_reason, _publish_with_retry
+from _dr_test_repo_root import resolve_test_repo_root
 from _dr_merge import _handle_post_merge_done, detect_merged_but_not_done, _pub_and_log
 from _dr_stream_cleanup import (
     _COMPLETED_EXIT_REASONS,
@@ -589,8 +590,18 @@ def _do_start_plan_runner(command: Dict, redis_client: redis.Redis):
             _set_error_status(f"archived plan은 실행할 수 없습니다: {plan_file}")
             return
 
+    try:
+        test_repo_root = resolve_test_repo_root(
+            command.get("test_repo_root"),
+            test_source=command.get("test_source"),
+            project_root=_PR,
+        )
+    except ValueError as exc:
+        _set_error_status(str(exc))
+        return
+
     # plan 파일의 git root 결정 (wtools 등 외부 레포 지원)
-    plan_project_root = get_target_project_root(plan_file) if plan_file else _PR
+    plan_project_root = test_repo_root or (get_target_project_root(plan_file) if plan_file else _PR)
     plan_worktree_base = plan_project_root / ".worktrees"
     if plan_project_root != _PR:
         logger.info(f"외부 레포 plan 감지: project_root={plan_project_root}")
@@ -943,6 +954,10 @@ def start_plan_runner(command: Dict, redis_client: redis.Redis) -> Dict:
         redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:accepted_source", "listener")
         _trigger_early = command.get("trigger", "unknown")
         redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:trigger", _trigger_early)
+        if command.get("test_source"):
+            redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:test_source", command["test_source"])
+        if command.get("test_repo_root"):
+            redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:test_repo_root", command["test_repo_root"])
     except Exception as _meta_err:
         logger.warning(f"[start_plan_runner] accepted 메타 저장 실패 (무시): {_meta_err}")
 
@@ -1225,6 +1240,10 @@ def _launch_plan_runner_process(
         redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:profile_config_dir", command.get("profile_config_dir") or "")
         import json as _json
         redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:profile_extra_env", _json.dumps(command.get("profile_extra_env") or {}))
+        if command.get("test_source"):
+            redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:test_source", command["test_source"])
+        if command.get("test_repo_root"):
+            redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:test_repo_root", command["test_repo_root"])
         redis_client.delete(f"{RUNNER_KEY_PREFIX}:{runner_id}:quota_stopped")
         redis_client.delete(f"{RUNNER_KEY_PREFIX}:{runner_id}:stop_stage")
         redis_client.sadd(ACTIVE_RUNNERS_KEY, runner_id)

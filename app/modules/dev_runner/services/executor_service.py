@@ -1,6 +1,7 @@
 """subprocess 실행 서비스 - Redis 기반 크로스 세션 실행"""
 
 import json
+import os
 import re
 import time
 import traceback
@@ -62,6 +63,33 @@ __all__ = [
 DISMISSED_RUNNERS_KEY = "plan-runner:dismissed_runners"
 ORPHAN_LOG_MAX_AGE_SECONDS = RECENT_RUNNERS_TTL
 ORPHAN_VISIBLE_TRIGGERS = {"user", "user:all"}
+ALLOW_TEST_REPO_ROOT_ENV = "DEV_RUNNER_ALLOW_TEST_REPO_ROOT"
+
+
+def _env_truthy(name: str) -> bool:
+    return (os.environ.get(name) or "").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _resolve_test_repo_root_override(request: RunRequest) -> str | None:
+    if not request.test_repo_root:
+        return None
+    if not request.test_source:
+        raise HTTPException(
+            status_code=400,
+            detail="test_repo_root는 test_source 요청에서만 사용할 수 있습니다",
+        )
+    if not _env_truthy(ALLOW_TEST_REPO_ROOT_ENV):
+        raise HTTPException(
+            status_code=400,
+            detail=f"test_repo_root 사용은 {ALLOW_TEST_REPO_ROOT_ENV}=1 환경에서만 허용됩니다",
+        )
+
+    root = Path(request.test_repo_root).expanduser().resolve()
+    if not root.is_dir() or not (root / ".git").exists():
+        raise HTTPException(status_code=400, detail="test_repo_root는 존재하는 git repo root여야 합니다")
+    if root == Path(PROJECT_ROOT).resolve():
+        raise HTTPException(status_code=400, detail="test_repo_root는 monitor-page root를 가리킬 수 없습니다")
+    return str(root)
 
 
 def _decode_runner_value(value: Any) -> Any:
@@ -593,6 +621,7 @@ class ExecutorService:
             )
 
         resolved_engine, resolved_fix_engine = self.resolve_run_engines(request, settings)
+        test_repo_root = _resolve_test_repo_root_override(request)
 
         # 새 runner_id 생성 (멀티 실행 지원 - 409 체크 없음)
         # test_source가 있으면 TC 추적용 접두사 포함 (t-{source}-{4hex})
@@ -691,6 +720,8 @@ class ExecutorService:
 
         if request.test_source:
             command["test_source"] = request.test_source
+        if test_repo_root:
+            command["test_repo_root"] = test_repo_root
 
         # fused 세션 ID 주입
         command["session_id"] = session_id
@@ -714,6 +745,7 @@ class ExecutorService:
                     "trigger": trigger,
                     "session_id": session_id,
                     "test_source": request.test_source,
+                    "test_repo_root": test_repo_root,
                 },
             }
         )

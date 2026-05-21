@@ -18,6 +18,10 @@ BASE_API = os.environ.get("E2E_API_URL", "http://localhost:8001")
 RUNNER_KEY_PREFIX = "plan-runner:runners"
 TERMINAL_MERGE_STATES = {"merged", "approval_required", "test_failed", "residue_blocked", "error", "conflict"}
 
+# This file intentionally preserves the deterministic dry_run/seed live API
+# contract. Real runner + real merge coverage is owned by the Playwright
+# http_live test_dev_runner_real_dummy_plan_merge_e2e.py path.
+
 
 def _poll_until(timeout_seconds: float, interval_seconds: float, fn):
     deadline = time.monotonic() + timeout_seconds

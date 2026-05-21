@@ -9,6 +9,9 @@ from tests.dev_runner.dummy_plan_lifecycle_helpers import DUMMY_PLAN_FIXTURE, DU
 
 pytestmark = pytest.mark.e2e
 
+# This file intentionally keeps the route-stub UI contract. The no-stub
+# real runner coverage lives in test_dev_runner_real_dummy_plan_merge_e2e.py.
+
 
 def _skip_admin_mode_if_public(system_mode: str) -> None:
     if system_mode != "admin":

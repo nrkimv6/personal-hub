@@ -194,6 +194,7 @@ class WorktreeManager:
 
         plan_file 吏???? branch='plan/{stem}', path=base_dir/{stem}
         誘몄????? branch='runner/{runner_id}', path=base_dir/{runner_id}
+        test_source callers may pass an isolated repo's direct .worktrees base.
         """
         if not runner_id:
             raise WorktreeError("runner_id cannot be empty")
@@ -326,6 +327,7 @@ class WorktreeManager:
 
         ?곗꽑?쒖쐞: branch ?뚮씪誘명꽣 > plan_file > runner_id 湲곕컲
         delete_branch=False: worktree ?붾젆?좊━留??쒓굅, branch??蹂댁〈 (merge ???ъ쟾 ?쒓굅 ???ъ슜)
+        test_source callers may pass an isolated repo's direct .worktrees base.
         """
         worktree_path, branch = _derive_worktree_identity(
             runner_id,
@@ -375,6 +377,7 @@ class WorktreeManager:
         ?곗꽑?쒖쐞: branch ?뚮씪誘명꽣 > plan_file > runner_id 湲곕컲
         dirty working tree??merge ??stash, 寃곌낵???곕씪 pop.
         ?덉쇅 諛쒖깮 ?쒖뿉??finally?먯꽌 main 釉뚮옖移?蹂듦? 蹂댁옣.
+        test_source callers pass the isolated repo root as project_root.
         """
         _, branch = _derive_worktree_identity(
             runner_id,
