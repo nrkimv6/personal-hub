@@ -65,7 +65,7 @@ def test_claim_run_starts_run_when_time_window_is_due():
     )
 
 
-def test_shared_time_window_scheduler_supports_exact_slots():
+def test_shared_time_window_scheduler_treats_exact_slots_as_zero_candidates():
     scheduler = build_time_window_scheduler(
         {
             "daily_runs": 2,
@@ -78,10 +78,7 @@ def test_shared_time_window_scheduler_supports_exact_slots():
 
     schedule = scheduler.generate_daily_schedule(datetime(2026, 5, 3).date())
 
-    assert schedule == [
-        datetime(2026, 5, 3, 9, 0),
-        datetime(2026, 5, 3, 18, 0),
-    ]
+    assert schedule == []
 
 
 def test_claim_run_prefers_pending_manual_run_over_due_check():
