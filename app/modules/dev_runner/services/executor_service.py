@@ -1348,7 +1348,7 @@ class ExecutorService:
         data = await self._get_runner_fields(
             runner_id, "status", "pid", "plan_file", "start_time", "engine", "execution_count",
             "exit_reason", "error",
-            "worktree_path", "branch", "merge_status",
+            "worktree_path", "branch", "merge_status", "merge_reason", "merge_message", "auto_retry_blocked",
             "worktree_exists", "branch_exists", "branch_merged_to_main", "metadata_checked_at",
             "gate_evidence_summary", "runtime_source_root", "runtime_source_commit"
         )
@@ -1364,6 +1364,9 @@ class ExecutorService:
         worktree_path = data["worktree_path"] or getattr(db_row, "worktree_path", None)
         branch = data["branch"] or getattr(db_row, "branch", None)
         merge_status = data["merge_status"] or db_meta.get("merge_status") or ("queued" if getattr(db_row, "merge_requested", False) else None)
+        merge_reason = data["merge_reason"] or db_meta.get("merge_reason")
+        merge_message = data["merge_message"] or db_meta.get("merge_message")
+        auto_retry_blocked = (data["auto_retry_blocked"] or db_meta.get("auto_retry_blocked") or "").strip().lower() in {"1", "true", "yes", "auto_retry_blocked"}
         worktree_exists = _coerce_runner_metadata_state(data["worktree_exists"])
         branch_exists = _coerce_runner_metadata_state(data["branch_exists"])
         branch_merged_to_main = _coerce_runner_metadata_state(data["branch_merged_to_main"])
@@ -1379,6 +1382,9 @@ class ExecutorService:
             runner_id=runner_id,
             running=running,
             merge_status=merge_status,
+            merge_reason=merge_reason,
+            merge_message=merge_message,
+            auto_retry_blocked=auto_retry_blocked,
             exit_reason=exit_reason,
             branch=branch,
             worktree_path=worktree_path,
@@ -1416,6 +1422,9 @@ class ExecutorService:
             session_id=session_id,
             exit_reason=exit_reason,
             error=error,
+            merge_status=merge_status,
+            merge_reason=merge_reason,
+            merge_message=merge_message,
             worktree_exists=worktree_exists,
             branch_exists=branch_exists,
             branch_merged_to_main=branch_merged_to_main,
@@ -1428,6 +1437,7 @@ class ExecutorService:
             gate_evidence_summary=gate_evidence_summary,
             runtime_source_root=runtime_source_root,
             runtime_source_commit=runtime_source_commit,
+            auto_retry_blocked=auto_retry_blocked,
         )
 
     async def get_all_runners(self) -> list:
@@ -1479,7 +1489,8 @@ class ExecutorService:
                                                       "branch", "trigger", "test_source", "exit_reason", "stop_stage", "error",
                                                       "worktree_exists", "branch_exists",
                                                       "branch_merged_to_main", "metadata_checked_at",
-                                                      "gate_evidence_summary", "runtime_source_root", "runtime_source_commit")
+                                                      "gate_evidence_summary", "runtime_source_root", "runtime_source_commit",
+                                                      "auto_retry_blocked")
                     if db_row is None and rid in redis_registry_ids:
                         self._best_effort_backfill_runner_state_from_redis(rid, d)
                     status = d["status"] or getattr(db_row, "status", None)
@@ -1495,6 +1506,7 @@ class ExecutorService:
                     merge_message = d["merge_message"] or db_meta.get("merge_message")
                     runtime_source_root = d["runtime_source_root"] or db_meta.get("runtime_source_root")
                     runtime_source_commit = d["runtime_source_commit"] or db_meta.get("runtime_source_commit")
+                    auto_retry_blocked = (d["auto_retry_blocked"] or db_meta.get("auto_retry_blocked") or "").strip().lower() in {"1", "true", "yes", "auto_retry_blocked"}
                     branch = d["branch"] or getattr(db_row, "branch", None)
                     trigger = d["trigger"] or db_meta.get("trigger")
                     recent_meta: dict = {}
@@ -1533,6 +1545,9 @@ class ExecutorService:
                         runner_id=rid,
                         running=status == "running",
                         merge_status=merge_status,
+                        merge_reason=merge_reason,
+                        merge_message=merge_message,
+                        auto_retry_blocked=auto_retry_blocked,
                         exit_reason=exit_reason,
                         branch=branch,
                         worktree_path=worktree_path,
@@ -1635,6 +1650,9 @@ class ExecutorService:
                         runner_id=rid,
                         running=running,
                         merge_status=merge_status,
+                        merge_reason=merge_reason,
+                        merge_message=merge_message,
+                        auto_retry_blocked=auto_retry_blocked,
                         exit_reason=exit_reason,
                         branch=branch,
                         worktree_path=worktree_path,
@@ -1681,6 +1699,7 @@ class ExecutorService:
                         gate_evidence_summary=gate_evidence_summary,
                         runtime_source_root=runtime_source_root,
                         runtime_source_commit=runtime_source_commit,
+                        auto_retry_blocked=auto_retry_blocked,
                     ))
                 return result
             finally:

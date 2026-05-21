@@ -30,6 +30,35 @@ def test_merge_error_wins_over_completed_exit_reason():
     assert display.severity == "error"
 
 
+def test_merge_error_with_remaining_post_merge_tasks_is_blocked_state():
+    display = build_display_state(
+        _model(
+            merge_status="error",
+            merge_reason="rebase_conflict",
+            exit_reason="completed",
+            remaining_post_merge_tasks=3,
+        )
+    )
+
+    assert display.state == "blocked_post_merge_error"
+    assert display.label == "후처리 차단"
+    assert display.secondary == "rebase_conflict"
+
+
+def test_auto_retry_blocked_wins_over_merge_pending():
+    display = build_display_state(
+        _model(
+            merge_status="merge_pending",
+            merge_reason="stale_too_diverged_blocked",
+            auto_retry_blocked=True,
+        )
+    )
+
+    assert display.state == "auto_retry_blocked"
+    assert display.label == "자동 재시도 차단"
+    assert display.secondary == "stale_too_diverged_blocked"
+
+
 def test_approval_required_hides_stale_branch_badge():
     display = build_display_state(
         _model(

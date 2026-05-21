@@ -43,6 +43,7 @@
 		displaySecondary?: string | null;
 		hideStaleBranchBadge?: boolean;
 		gateEvidenceSummary?: GateEvidenceSummary | null;
+		autoRetryBlocked?: boolean;
 		reattachMode?: 'full' | 'log_only_child' | 'log_only';
 		canReattach?: boolean;
 		canForceKill?: boolean;
@@ -56,7 +57,7 @@
 		logRef?: (ref: LogViewerRef) => void;
 	}
 
-	let { runnerId, planFile, running, engine, startTime, worktreePath = null, branch = null, mergeStatus = null, mergeReason = null, mergeMessage = null, trigger = null, orphan = false, orphanAlive = false, redisMissing = false, logFileFound = false, exitReason = null, error = null, displayPlanName = null, remainingPostMergeTasks = null, mergeEvidenceMissing = null, executionCount = null, worktreeExists = 'unknown', branchExists = 'unknown', branchMergedToMain = 'unknown', metadataCheckedAt = 'unknown', displayLabel = null, displaySecondary = null, hideStaleBranchBadge = false, gateEvidenceSummary = null, reattachMode = 'log_only', canReattach = false, canForceKill = false, orphanWarnings = [], onStop, onClose, onRestart, onReattach, onKillOrphan, onBatchPlansChange, logRef }: Props = $props();
+	let { runnerId, planFile, running, engine, startTime, worktreePath = null, branch = null, mergeStatus = null, mergeReason = null, mergeMessage = null, trigger = null, orphan = false, orphanAlive = false, redisMissing = false, logFileFound = false, exitReason = null, error = null, displayPlanName = null, remainingPostMergeTasks = null, mergeEvidenceMissing = null, executionCount = null, worktreeExists = 'unknown', branchExists = 'unknown', branchMergedToMain = 'unknown', metadataCheckedAt = 'unknown', displayLabel = null, displaySecondary = null, hideStaleBranchBadge = false, gateEvidenceSummary = null, autoRetryBlocked = false, reattachMode = 'log_only', canReattach = false, canForceKill = false, orphanWarnings = [], onStop, onClose, onRestart, onReattach, onKillOrphan, onBatchPlansChange, logRef }: Props = $props();
 
 	let logViewer:
 		| {
@@ -305,6 +306,7 @@
 			orphanWarnings.length > 0 ? `warnings: ${orphanWarnings.join(', ')}` : null,
 			`remaining_post_merge_tasks: ${remainingPostMergeTasks ?? 0}`,
 			`merge_evidence_missing: ${mergeEvidenceMissing ?? false}`,
+			`auto_retry_blocked: ${autoRetryBlocked}`,
 			gateEvidenceLabel() ? `gate_evidence_summary: ${gateEvidenceLabel()}` : null,
 			`metadata_checked_at: ${metadataCheckedAt ?? 'unknown'}`
 		];
@@ -353,6 +355,12 @@
 				<span class="shrink-0 px-1.5 py-0.5 rounded text-[10px] bg-yellow-100 text-yellow-700 animate-pulse">자동 수정 중</span>
 			{:else if mergeStatus === 'resolving'}
 				<span class="shrink-0 px-1.5 py-0.5 rounded text-[10px] bg-yellow-100 text-yellow-700">해결중</span>
+			{/if}
+
+			{#if autoRetryBlocked}
+				<span class="shrink-0 px-1.5 py-0.5 rounded text-[10px] bg-red-100 text-red-700" title={mergeMessage ?? mergeReason ?? metaTitle}>
+					자동 재시도 차단
+				</span>
 			{/if}
 
 			{#if staleBadgeLabel()}
@@ -427,6 +435,18 @@
 	{#if needsPostMergeFollowup}
 		<div class="px-3 py-1.5 text-xs text-amber-800 bg-amber-50 border-b border-amber-200">
 			후처리 필요: T4/T5 잔여 {remainingPostMergeTasks ?? 0}개가 남아 있습니다.
+		</div>
+	{/if}
+
+	{#if !running && mergeStatus === 'error' && (remainingPostMergeTasks ?? 0) > 0}
+		<div class="px-3 py-1.5 text-xs text-red-800 bg-red-50 border-b border-red-200">
+			후처리 차단: {mergeReason ?? 'unknown_merge_error'} · 잔여 {remainingPostMergeTasks ?? 0}개
+		</div>
+	{/if}
+
+	{#if autoRetryBlocked}
+		<div class="px-3 py-1.5 text-xs text-red-800 bg-red-50 border-b border-red-200">
+			같은 사유 반복으로 자동 재시도가 차단됐습니다. force retry 또는 clean branch 재구성이 필요합니다.
 		</div>
 	{/if}
 

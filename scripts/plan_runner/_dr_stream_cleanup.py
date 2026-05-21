@@ -754,6 +754,26 @@ def _get_merge_reason(redis_client, runner_id: str) -> str:
         return ""
 
 
+def _ensure_terminal_merge_reason(redis_client, runner_id: str, merge_status: str) -> str:
+    reason = _get_merge_reason(redis_client, runner_id)
+    if reason:
+        return reason
+    reason = "unknown_merge_error" if merge_status == ERROR else merge_status
+    try:
+        MergePersistence(redis_client, runner_id).transition(
+            merge_status,
+            reason=reason,
+            message=f"terminal merge_status={merge_status} without reason",
+            action="cleanup-terminal-reason-fill",
+        )
+    except Exception:
+        try:
+            redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_reason", reason)
+        except Exception:
+            pass
+    return reason
+
+
 def _preserve_terminal_merge_state_if_needed(ctx: _StreamCleanupCtx, *, flag_present: bool) -> bool:
     """Return True when cleanup must not re-enter inline merge.
 
@@ -764,7 +784,7 @@ def _preserve_terminal_merge_state_if_needed(ctx: _StreamCleanupCtx, *, flag_pre
     merge_status = _get_merge_status(ctx.redis_client, ctx.runner_id)
     if merge_status not in _INLINE_MERGE_PRESERVE_STATUSES:
         return False
-    merge_reason = _get_merge_reason(ctx.redis_client, ctx.runner_id)
+    merge_reason = _ensure_terminal_merge_reason(ctx.redis_client, ctx.runner_id, merge_status)
 
     if flag_present:
         try:
@@ -944,6 +964,7 @@ def _update_workflow_status(ctx: _StreamCleanupCtx, merge_requested: bool) -> bo
             wf = ctx.wf_manager.get_by_runner_id(ctx.runner_id)
             if wf:
                 merge_status = _get_merge_status(ctx.redis_client, ctx.runner_id)
+                terminal_merge_status = merge_status if merge_status in TERMINAL_STATUSES else ""
                 if merge_status == "approval_required":
                     if wf.get("status") != "merge_pending":
                         ctx.wf_manager.update_status(
@@ -973,15 +994,27 @@ def _update_workflow_status(ctx: _StreamCleanupCtx, merge_requested: bool) -> bo
                                 ctx.runner_id, ctx.redis_client
                             )
                             if residual_state == "post_merge_only":
-                                merge_requested = True
-                                _pub_and_log(
-                                    ctx.runner_id,
-                                    "[_stream_output] completed 직전 post-merge-only 잔여 감지 "
-                                    f"(plan={residual_plan}, remaining_post_merge={residual_summary['post_merge']}) → merge_pending",
-                                    ctx.redis_client,
-                                    "CLEANUP",
-                                )
-                                ctx.wf_manager.update_status(wf["id"], "merge_pending")
+                                if terminal_merge_status:
+                                    merge_reason = _ensure_terminal_merge_reason(ctx.redis_client, ctx.runner_id, terminal_merge_status)
+                                    message = (
+                                        "blocked_post_merge_error: "
+                                        f"terminal_merge_status={terminal_merge_status}, "
+                                        f"merge_reason={merge_reason}, "
+                                        f"remaining_post_merge={residual_summary['post_merge']}, "
+                                        f"plan={residual_plan}"
+                                    )
+                                    _pub_and_log(ctx.runner_id, f"[_stream_output] {message}", ctx.redis_client, "CLEANUP")
+                                    ctx.wf_manager.update_status(wf["id"], "failed", error_message=message)
+                                else:
+                                    merge_requested = True
+                                    _pub_and_log(
+                                        ctx.runner_id,
+                                        "[_stream_output] completed 직전 post-merge-only 잔여 감지 "
+                                        f"(plan={residual_plan}, remaining_post_merge={residual_summary['post_merge']}) → merge_pending",
+                                        ctx.redis_client,
+                                        "CLEANUP",
+                                    )
+                                    ctx.wf_manager.update_status(wf["id"], "merge_pending")
                             elif residual_state == "impl_remaining":
                                 message = (
                                     "completed_with_remaining_tasks: "

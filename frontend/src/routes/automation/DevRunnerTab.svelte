@@ -1325,6 +1325,7 @@
 										displaySecondary={tab.display_secondary}
 										hideStaleBranchBadge={tab.hide_stale_branch_badge}
 										gateEvidenceSummary={tab.gate_evidence_summary}
+										autoRetryBlocked={tab.auto_retry_blocked}
 										reattachMode={tab.reattach_mode}
 										canReattach={tab.can_reattach}
 										canForceKill={tab.can_force_kill}

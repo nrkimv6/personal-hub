@@ -27,8 +27,11 @@ class RunnerReadModel:
     running: bool
     merge_status: str | None
     exit_reason: str | None
+    merge_reason: str | None = None
+    merge_message: str | None = None
     remaining_post_merge_tasks: int = 0
     merge_evidence_missing: bool = False
+    auto_retry_blocked: bool = False
     git: RunnerGitMetadata | None = None
 
     @property
@@ -50,6 +53,9 @@ def build_runner_read_model(
     running: bool,
     merge_status: str | None,
     exit_reason: str | None,
+    merge_reason: str | None = None,
+    merge_message: str | None = None,
+    auto_retry_blocked: bool | None = None,
     branch: str | None = None,
     worktree_path: str | None = None,
     redis_branch_exists: object = "unknown",
@@ -71,8 +77,11 @@ def build_runner_read_model(
         runner_id=runner_id,
         running=running,
         merge_status=merge_status,
+        merge_reason=merge_reason,
+        merge_message=merge_message,
         exit_reason=exit_reason,
         remaining_post_merge_tasks=int(remaining_post_merge_tasks or 0),
         merge_evidence_missing=bool(merge_evidence_missing),
+        auto_retry_blocked=bool(auto_retry_blocked),
         git=git,
     )

@@ -304,3 +304,34 @@ def test_completed_post_merge_only_without_merge_requested_updates_merge_pending
 
     wf_manager.update_status.assert_called_once_with(77, "merge_pending")
     merge.assert_called_once_with(runner_id, ctx.redis_client)
+
+
+def test_completed_post_merge_only_with_terminal_error_blocks_merge_pending(tmp_path):
+    runner_id = "runner-terminal-error"
+    plan = tmp_path / "plan.md"
+    plan.write_text(
+        "> 상태: 구현중\n\n"
+        "### Phase T4: E2E\n\n"
+        "- [ ] run e2e\n",
+        encoding="utf-8",
+    )
+    wf_manager = MagicMock()
+    wf_manager.get_by_runner_id.return_value = {"id": 78}
+    ctx = _make_ctx(runner_id=runner_id, exit_code=0, completed_for_flow=True, wf_manager=wf_manager)
+    ctx.redis_client.get.side_effect = _redis_getter({
+        f"plan-runner:runners:{runner_id}:plan_file": str(plan),
+        f"plan-runner:runners:{runner_id}:merge_status": "error",
+        f"plan-runner:runners:{runner_id}:merge_reason": "rebase_conflict",
+    })
+
+    with patch("_dr_stream_cleanup.detect_merged_but_not_done", return_value=None), \
+         patch("_dr_stream_cleanup._do_inline_merge") as merge, \
+         patch("_dr_stream_cleanup._cleanup_process_state"):
+        _update_workflow_and_execute_cleanup(ctx, merge_requested=False)
+
+    wf_manager.update_status.assert_called_once()
+    args, kwargs = wf_manager.update_status.call_args
+    assert args[:2] == (78, "failed")
+    assert "blocked_post_merge_error" in kwargs["error_message"]
+    assert "rebase_conflict" in kwargs["error_message"]
+    merge.assert_not_called()

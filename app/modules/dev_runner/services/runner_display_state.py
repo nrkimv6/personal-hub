@@ -38,13 +38,23 @@ def _secondary_stale_label(model: RunnerReadModel) -> str | None:
 def build_display_state(model: RunnerReadModel) -> RunnerDisplayState:
     merge_status = model.merge_status
     secondary = _secondary_stale_label(model)
+    terminal_detail = model.merge_reason or model.merge_message or secondary
 
+    if model.auto_retry_blocked:
+        return RunnerDisplayState("auto_retry_blocked", "자동 재시도 차단", "error", terminal_detail)
+    if merge_status == "error" and model.remaining_post_merge_tasks > 0:
+        return RunnerDisplayState(
+            "blocked_post_merge_error",
+            "후처리 차단",
+            "error",
+            terminal_detail or f"remaining_post_merge={model.remaining_post_merge_tasks}",
+        )
     if merge_status == "error":
-        return RunnerDisplayState("merge_error", "머지 오류", "error", secondary)
+        return RunnerDisplayState("merge_error", "머지 오류", "error", terminal_detail)
     if merge_status == "conflict":
-        return RunnerDisplayState("merge_conflict", "충돌", "error", secondary)
+        return RunnerDisplayState("merge_conflict", "충돌", "error", terminal_detail)
     if merge_status == "test_failed":
-        return RunnerDisplayState("merge_test_failed", "테스트 실패", "error", secondary)
+        return RunnerDisplayState("merge_test_failed", "테스트 실패", "error", terminal_detail)
     if merge_status == "approval_required":
         return RunnerDisplayState("approval_required", "승인 필요", "approval", None, True)
     if (model.remaining_post_merge_tasks > 0 or model.merge_evidence_missing) and model.exit_reason == "completed":

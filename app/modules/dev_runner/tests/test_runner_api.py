@@ -870,8 +870,9 @@ class TestListRunners:
         assert data[0]["merge_reason"] == "stale_merge_blocked"
         assert data[0]["gate_evidence_summary"]["reason"] == "stale_merge_blocked"
         assert data[0]["remaining_post_merge_tasks"] == 1
-        assert data[0]["display_state"] == "merge_error"
-        assert data[0]["display_label"] == "머지 오류"
+        assert data[0]["display_state"] == "blocked_post_merge_error"
+        assert data[0]["display_label"] == "후처리 차단"
+        assert data[0]["display_secondary"] == "stale_merge_blocked"
 
     async def test_get_all_runners_R_runner_state_db_row_survives_redis_metadata_loss(self, client, mock_executor_redis, runner_state_db):
         rid = "db-only-runner-001"

@@ -84,6 +84,7 @@ export interface RunStatusResponse {
 	claim_owner_runner_id?: string | null;
 	claim_message?: string | null;
 	gate_evidence_summary?: GateEvidenceSummary | null;
+	auto_retry_blocked?: boolean;
 }
 
 export interface RunnerListItem {
@@ -120,6 +121,7 @@ export interface RunnerListItem {
 	display_secondary?: string | null;
 	hide_stale_branch_badge?: boolean;
 	gate_evidence_summary?: GateEvidenceSummary | null;
+	auto_retry_blocked?: boolean;
 }
 
 export interface OrphanRunnerCandidate {

@@ -94,6 +94,10 @@ class RunStatusResponse(BaseModel):
     gate_evidence_summary: Optional[dict[str, Any]] = None
     runtime_source_root: Optional[str] = None
     runtime_source_commit: Optional[str] = None
+    merge_status: Optional[str] = None
+    merge_reason: Optional[str] = None
+    merge_message: Optional[str] = None
+    auto_retry_blocked: bool = False
 
 
 class RunnerListItem(BaseModel):
@@ -134,6 +138,7 @@ class RunnerListItem(BaseModel):
     gate_evidence_summary: Optional[dict[str, Any]] = None
     runtime_source_root: Optional[str] = None
     runtime_source_commit: Optional[str] = None
+    auto_retry_blocked: bool = False
 
 
 class OrphanRunnerCandidate(BaseModel):
