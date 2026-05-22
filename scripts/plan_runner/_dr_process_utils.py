@@ -195,15 +195,18 @@ def _mark_root_impl_scope_blocked(redis_client: redis.Redis, runner_id: str, mes
 def _force_cleanup_test_runner_worktree(runner_id: str, redis_client: redis.Redis) -> bool:
     """test_source가 있는 runner의 worktree/branch를 강제 정리한다."""
     test_source = redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:test_source")
+    test_source = _decode_recent_meta_value(test_source)
     if not test_source:
         return False
 
+    repo_root = read_runner_test_repo_root(redis_client, runner_id, project_root=PROJECT_ROOT) or PROJECT_ROOT
     worktree_path = redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:worktree_path")
+    worktree_path = _decode_recent_meta_value(worktree_path)
     branch = redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:branch") or f"runner/{runner_id}"
-    repo_root = PROJECT_ROOT
+    branch = _decode_recent_meta_value(branch) or f"runner/{runner_id}"
 
     if not worktree_path:
-        worktree_path = str(WORKTREE_BASE_DIR / runner_id)
+        worktree_path = str((repo_root / ".worktrees") / runner_id)
 
     logger.info(
         "[cleanup][test_source=%s] forcing worktree cleanup for runner=%s branch=%s path=%s",

@@ -7,6 +7,7 @@ del _sys_inject, _Path_inject
 
 import json
 import logging
+import os
 import subprocess
 import threading
 import time
@@ -1124,6 +1125,20 @@ def _launch_plan_runner_process(
     if command.get("worktree") or worktree_path:
         cmd.append("--worktree")
 
+    test_engine_script = os.environ.get("DEV_RUNNER_TEST_ENGINE_SCRIPT")
+    if test_engine_script and command.get("test_source"):
+        script_path = Path(test_engine_script).expanduser().resolve()
+        if not script_path.is_file():
+            return {"success": False, "message": f"test engine script not found: {script_path}"}
+        cmd = [
+            str(PLAN_RUNNER_PYTHON),
+            str(script_path),
+            "--plan-file",
+            plan_file or "",
+            "--runner-id",
+            runner_id,
+        ]
+
     logger.info(
         "[session] runner_id=%s session_id=%s fused=%s",
         runner_id,
@@ -1170,7 +1185,6 @@ def _launch_plan_runner_process(
 
         _publish_with_retry(redis_client, f"{LOG_CHANNEL_PREFIX}:{runner_id}", run_meta_line)
 
-        import os
         import re as _re
         env = _make_plan_runner_env(
             runner_id,
