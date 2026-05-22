@@ -1274,9 +1274,10 @@ def _check_stale_merge_gate(
     redis_client: redis.Redis,
     branch: str,
     pub_fn,
-    project_root: Path,
+    project_root: Path | None = None,
     action_name: str = "inline-merge",
 ) -> tuple[Optional[dict], Optional[str]]:
+    project_root = project_root or PROJECT_ROOT
     if not branch:
         pub_fn("merge branch 없음 — stale merge gate/snapshot skip")
         return None, None

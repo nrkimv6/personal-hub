@@ -310,6 +310,16 @@ def _do_inline_merge(runner_id: str, redis_client: redis.Redis) -> None:
                     import uuid as _uuid
 
                     new_runner_id = _uuid.uuid4().hex[:8]
+                    test_source = redis_client.get(
+                        f"{RUNNER_KEY_PREFIX}:{runner_id}:test_source"
+                    )
+                    if isinstance(test_source, bytes):
+                        test_source = test_source.decode("utf-8")
+                    test_repo_root = redis_client.get(
+                        f"{RUNNER_KEY_PREFIX}:{runner_id}:test_repo_root"
+                    )
+                    if isinstance(test_repo_root, bytes):
+                        test_repo_root = test_repo_root.decode("utf-8")
                     command = {
                         "action": "run",
                         "runner_id": new_runner_id,
@@ -318,6 +328,10 @@ def _do_inline_merge(runner_id: str, redis_client: redis.Redis) -> None:
                         "fix_engine": fix_engine,
                         "trigger": trigger,
                     }
+                    if test_source:
+                        command["test_source"] = test_source
+                    if test_repo_root:
+                        command["test_repo_root"] = test_repo_root
                     redis_client.lpush(
                         COMMANDS_KEY, json.dumps(command, ensure_ascii=False)
                     )

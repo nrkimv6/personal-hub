@@ -505,6 +505,8 @@ def _cleanup_process_state(runner_id: str, redis_client: redis.Redis, reason: st
     try:
         merge_status = redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_status")
         merge_status = _decode_recent_meta_value(merge_status)
+        merge_reason = redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:merge_reason")
+        merge_reason = _decode_recent_meta_value(merge_reason)
         claim_id_val = redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:claim_id")
         if isinstance(claim_id_val, bytes):
             claim_id_val = claim_id_val.decode("utf-8", errors="replace")
@@ -548,6 +550,7 @@ def _cleanup_process_state(runner_id: str, redis_client: redis.Redis, reason: st
     except Exception as e:
         logger.warning(f"[cleanup] state capture failed (runner_id={runner_id}): {e}")
         merge_status = None
+        merge_reason = None
         claim_id_val = None
         plan_file_val = None
         _trigger_val = None
@@ -586,9 +589,21 @@ def _cleanup_process_state(runner_id: str, redis_client: redis.Redis, reason: st
         _target_root = test_repo_root or (get_target_project_root(plan_file_val) if plan_file_val else WORKTREE_BASE_DIR.parent)
         _cleanup_worktree_base = _target_root / ".worktrees"
 
-        if force_test_cleanup:
+        preserve_test_cleanup = (
+            merge_status in {"conflict", "approval_required", "residue_blocked"}
+            or merge_reason in {"service_lock", "ownership_guard", "residue_guard", "root_dirty_reroute_required"}
+        )
+        if force_test_cleanup and not preserve_test_cleanup:
             _force_cleanup_test_runner_worktree(runner_id, redis_client)
             logger.info("[cleanup] test_source runner force-cleaned: %s", runner_id)
+        elif force_test_cleanup:
+            logger.warning(
+                "[cleanup] test_source runner preserved: runner=%s merge_status=%s merge_reason=%s",
+                runner_id,
+                merge_status,
+                merge_reason,
+            )
+            redis_client.persist(f"{RUNNER_KEY_PREFIX}:{runner_id}:worktree_path")
         else:
             _preserve_worktree = False
             if plan_file_val and _is_plan_in_progress(plan_file_val):
