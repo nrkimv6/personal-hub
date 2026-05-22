@@ -45,6 +45,8 @@ class TestRestartAfterMergeTriggerIntegration:
         shared_redis.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:engine", "claude")
         shared_redis.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:fix_engine", "claude-mini")
         shared_redis.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:trigger", "user")
+        shared_redis.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:test_source", "restart-after-merge")
+        shared_redis.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:test_repo_root", "D:/tmp/restart-after-merge-repo")
         shared_redis.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:restart_after_merge", "1")
 
         # _execute_merge_with_lock mock (merge 성공 시뮬레이션, 실제 git 실행 방지)
@@ -76,6 +78,8 @@ class TestRestartAfterMergeTriggerIntegration:
         assert command["engine"] == "claude"
         assert command["fix_engine"] == "claude-mini"
         assert command["action"] == "run"
+        assert command["test_source"] == "restart-after-merge"
+        assert command["test_repo_root"] == "D:/tmp/restart-after-merge-repo"
 
         # restart_after_merge 플래그가 삭제됐는지 확인 (중복 실행 방지)
         flag = shared_redis.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:restart_after_merge")

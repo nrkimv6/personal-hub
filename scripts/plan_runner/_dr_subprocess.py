@@ -19,6 +19,7 @@ from _dr_constants import (
     LOG_CHANNEL_PREFIX, RUNNER_KEY_PREFIX,
 )
 from _dr_state import get_running_processes, get_running_log_files, get_stream_threads
+from _dr_test_repo_root import read_runner_test_repo_root
 
 logger = logging.getLogger(__name__)
 
@@ -216,6 +217,29 @@ def _get_profile_env(redis_client, runner_id: str) -> tuple:
         return None, None, None
 
 
+def _redis_text(redis_client, key: str) -> str:
+    try:
+        value = redis_client.get(key)
+    except Exception:
+        return ""
+    if value is None:
+        return ""
+    if isinstance(value, bytes):
+        return value.decode("utf-8", errors="replace")
+    return str(value)
+
+
+def _runner_project_root(redis_client, runner_id: str) -> Path:
+    try:
+        return read_runner_test_repo_root(
+            redis_client,
+            runner_id,
+            project_root=PROJECT_ROOT,
+        ) or PROJECT_ROOT
+    except Exception:
+        return PROJECT_ROOT
+
+
 def _launch_conflict_resolver_process(runner_id: str, branch: str, worktree_path: Path, redis_client, pub_fn=None, engine: str = "claude", needs_remerge: bool = False) -> dict:
     """plan-runner resolve 서브커맨드로 conflict 자동 해결 프로세스를 실행한다.
 
@@ -227,15 +251,36 @@ def _launch_conflict_resolver_process(runner_id: str, branch: str, worktree_path
     Returns:
         {"success": bool, "message": str, "merge_status": str, "conflict": bool}
     """
-    cmd = [
-        str(PLAN_RUNNER_PYTHON),
-        "-m",
-        "plan_runner",
-        "resolve",
-        "--branch", branch,
-        "--project-dir", str(PROJECT_ROOT),
-        "--engine", engine,
-    ]
+    project_root = _runner_project_root(redis_client, runner_id)
+    test_resolver_script = os.environ.get("DEV_RUNNER_TEST_CONFLICT_RESOLVER_SCRIPT", "").strip()
+    is_test_source = bool(_redis_text(redis_client, f"{RUNNER_KEY_PREFIX}:{runner_id}:test_source").strip())
+    if test_resolver_script and is_test_source:
+        script_path = Path(test_resolver_script).expanduser().resolve()
+        if not script_path.is_file():
+            return {
+                "success": False,
+                "message": f"test conflict resolver script not found: {script_path}",
+                "merge_status": "error",
+                "conflict": False,
+            }
+        cmd = [
+            str(PLAN_RUNNER_PYTHON),
+            str(script_path),
+            "--runner-id", runner_id,
+            "--branch", branch,
+            "--project-dir", str(project_root),
+            "--worktree", str(worktree_path),
+        ]
+    else:
+        cmd = [
+            str(PLAN_RUNNER_PYTHON),
+            "-m",
+            "plan_runner",
+            "resolve",
+            "--branch", branch,
+            "--project-dir", str(project_root),
+            "--engine", engine,
+        ]
     if needs_remerge:
         cmd.append("--needs-remerge")
 
@@ -245,7 +290,7 @@ def _launch_conflict_resolver_process(runner_id: str, branch: str, worktree_path
         profile_env_key=pek,
         profile_config_dir=pcd,
         profile_extra_env=pee,
-        PLAN_RUNNER_PROJECT_ROOT=str(PROJECT_ROOT),
+        PLAN_RUNNER_PROJECT_ROOT=str(project_root),
         PLAN_RUNNER_WORK_DIR=str(worktree_path),
     )
 

@@ -62,6 +62,12 @@ class FullLifecycleContext:
     monitor_root_marker_path: Path | None = None
 
 
+@dataclass(frozen=True)
+class ConflictLifecycleContext(FullLifecycleContext):
+    conflict_file_path: Path | None = None
+    expected_resolved_content: str = "RESOLVED_VERSION\n"
+
+
 def normalize_path(path: str | Path) -> str:
     return str(path).replace("\\", "/")
 
@@ -151,6 +157,51 @@ def init_full_lifecycle_repo(tmp_path: Path, *, plan_name: str = "2026-05-22_tes
     _run_git(repo_root, "add", "README.md", str(plan_path.relative_to(repo_root)))
     _run_git(repo_root, "commit", "-m", "init full lifecycle plan")
     return repo_root, plan_path
+
+
+def init_conflict_lifecycle_repo(
+    tmp_path: Path,
+    *,
+    runner_id: str = "t-conflict-lifecycle",
+    plan_name: str = "2026-05-22_test-conflict-plan.md",
+) -> ConflictLifecycleContext:
+    repo_root, plan_path = init_full_lifecycle_repo(tmp_path, plan_name=plan_name)
+    conflict_file = repo_root / "conflict_target.txt"
+    conflict_file.write_text("BASELINE\n", encoding="utf-8")
+    _run_git(repo_root, "add", "conflict_target.txt")
+    _run_git(repo_root, "commit", "-m", "init conflict target")
+
+    branch = f"runner/{runner_id}"
+    worktree = repo_root / ".worktrees" / runner_id
+    _run_git(repo_root, "worktree", "add", str(worktree), "-b", branch)
+
+    conflict_file.write_text("MAIN_VERSION\n", encoding="utf-8")
+    _run_git(repo_root, "add", "conflict_target.txt")
+    _run_git(repo_root, "commit", "-m", "main conflict side")
+
+    (worktree / "conflict_target.txt").write_text("RUNNER_VERSION\n", encoding="utf-8")
+    marker_path = worktree / "full-lifecycle-marker.txt"
+    marker_path.write_text(f"{DUMMY_PLAN_SENTINEL}\n", encoding="utf-8")
+    worktree_plan = worktree / "docs" / "plan" / plan_name
+    text = worktree_plan.read_text(encoding="utf-8", errors="replace")
+    text = re.sub(r"\[ \]", "[x]", text)
+    text = re.sub(r"(>\s*상태:\s*).+", r"\1머지대기", text)
+    text = re.sub(r"(>\s*진행률:\s*).+", r"\g<1>1/1 (100%)", text)
+    text = re.sub(r"\*상태:.*?\| 진행률:.*?\*", "*상태: 머지대기 | 진행률: 1/1 (100%)*", text)
+    worktree_plan.write_text(text, encoding="utf-8")
+    _run_git(worktree, "add", "conflict_target.txt", "full-lifecycle-marker.txt", str(worktree_plan.relative_to(worktree)))
+    _run_git(worktree, "commit", "-m", "runner conflict side")
+
+    return ConflictLifecycleContext(
+        repo_root=repo_root,
+        runner_id=runner_id,
+        runner_branch=branch,
+        runner_worktree=worktree,
+        original_plan_path=plan_path,
+        archive_plan_path=repo_root / "docs" / "archive" / plan_name,
+        marker_path=repo_root / "full-lifecycle-marker.txt",
+        conflict_file_path=conflict_file,
+    )
 
 
 def _git_stdout(repo: Path, *args: str) -> str:

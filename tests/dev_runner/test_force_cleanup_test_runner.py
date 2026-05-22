@@ -132,3 +132,21 @@ def test_cleanup_process_state_calls_force_cleanup_helper():
         mod._cleanup_process_state(runner_id, redis_client, reason="test_force_cleanup")
 
     mock_force.assert_called_once_with(runner_id, redis_client)
+
+
+def test_cleanup_process_state_preserves_test_source_conflict_runner():
+    mod = _import_process_utils()
+    redis_client = _make_redis()
+    runner_id = "t-clean-conflict"
+    redis_client.set(f"plan-runner:runners:{runner_id}:status", "running")
+    redis_client.set(f"plan-runner:runners:{runner_id}:test_source", "cleanup")
+    redis_client.set(f"plan-runner:runners:{runner_id}:branch", f"runner/{runner_id}")
+    redis_client.set(f"plan-runner:runners:{runner_id}:worktree_path", f"D:/repo/.worktrees/{runner_id}")
+    redis_client.set(f"plan-runner:runners:{runner_id}:trigger", "user")
+    redis_client.set(f"plan-runner:runners:{runner_id}:merge_status", "conflict")
+
+    with patch.object(mod, "_force_cleanup_test_runner_worktree", return_value=True) as mock_force:
+        mod._cleanup_process_state(runner_id, redis_client, reason="test_conflict_preserve")
+
+    mock_force.assert_not_called()
+    assert redis_client.get(f"plan-runner:runners:{runner_id}:worktree_path") == f"D:/repo/.worktrees/{runner_id}"
