@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -44,6 +45,21 @@ class DummyRunnerArtifacts:
     log_file_path: Path
     worktree_path: Path | None = None
     branch: str | None = None
+
+
+@dataclass(frozen=True)
+class FullLifecycleContext:
+    repo_root: Path
+    runner_id: str
+    runner_branch: str
+    runner_worktree: Path
+    original_plan_path: Path
+    archive_plan_path: Path
+    marker_path: Path
+    redis_client: object | None = None
+    http_response: dict | None = None
+    logs_full_response: dict | None = None
+    monitor_root_marker_path: Path | None = None
 
 
 def normalize_path(path: str | Path) -> str:
@@ -102,6 +118,81 @@ def init_dummy_temp_repo(tmp_path: Path, *, runner_id: str = "t-dummy-plan-lifec
         marker_relpath=marker_relpath,
         marker_text=marker_text,
     )
+
+
+def init_full_lifecycle_repo(tmp_path: Path, *, plan_name: str = "2026-05-22_test-full-pipeline-plan.md") -> tuple[Path, Path]:
+    repo_root = tmp_path / "full-lifecycle-repo"
+    repo_root.mkdir()
+    _run_git(repo_root, "init", "-b", "main")
+    _run_git(repo_root, "config", "commit.gpgsign", "false")
+    _run_git(repo_root, "config", "user.name", "dummy-plan-test")
+    _run_git(repo_root, "config", "user.email", "dummy-plan-test@example.invalid")
+
+    plan_path = repo_root / "docs" / "plan" / plan_name
+    plan_path.parent.mkdir(parents=True, exist_ok=True)
+    plan_path.write_text(
+        "\n".join(
+            [
+                "# test full pipeline plan",
+                "",
+                "> 상태: 구현중",
+                "> 진행률: 0/1 (0%)",
+                "",
+                "## TODO",
+                "- [ ] create lifecycle marker",
+                "",
+                "*상태: 구현중 | 진행률: 0/1 (0%)*",
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    (repo_root / "README.md").write_text("full lifecycle repo\n", encoding="utf-8")
+    _run_git(repo_root, "add", "README.md", str(plan_path.relative_to(repo_root)))
+    _run_git(repo_root, "commit", "-m", "init full lifecycle plan")
+    return repo_root, plan_path
+
+
+def _git_stdout(repo: Path, *args: str) -> str:
+    return _run_git(repo, *args).stdout
+
+
+def _assert(condition: bool, message: str) -> None:
+    if not condition:
+        raise AssertionError(message)
+
+
+def assert_full_lifecycle_clean(ctx: FullLifecycleContext) -> None:
+    _assert(ctx.marker_path.exists(), f"marker missing: {ctx.marker_path}")
+    marker_text = ctx.marker_path.read_text(encoding="utf-8", errors="replace")
+    _assert(DUMMY_PLAN_SENTINEL in marker_text, f"marker mismatch: {ctx.marker_path}")
+
+    _assert(not ctx.original_plan_path.exists(), f"active plan residue: {ctx.original_plan_path}")
+    _assert(ctx.archive_plan_path.exists(), f"archive missing: {ctx.archive_plan_path}")
+
+    archive_text = ctx.archive_plan_path.read_text(encoding="utf-8", errors="replace")
+    _assert(re.search(r">\s*상태:\s*(구현완료|완료)", archive_text), "archive status not completed")
+    _assert(re.search(r">\s*완료일:\s*\d{4}-\d{2}-\d{2}", archive_text), "archive completion date missing")
+    _assert("[ ]" not in archive_text, "archive has unchecked TODO")
+    if "진행률" in archive_text:
+        _assert("100%" in archive_text, "archive progress is not 100%")
+
+    worktrees = _git_stdout(ctx.repo_root, "worktree", "list", "--porcelain").replace("\\", "/")
+    _assert(normalize_path(ctx.runner_worktree) not in worktrees, f"worktree residue: {ctx.runner_worktree}")
+    branches = _git_stdout(ctx.repo_root, "branch", "--list", ctx.runner_branch)
+    _assert(branches.strip() == "", f"branch residue: {ctx.runner_branch}")
+
+    if ctx.monitor_root_marker_path is not None:
+        _assert(not ctx.monitor_root_marker_path.exists(), f"monitor root marker residue: {ctx.monitor_root_marker_path}")
+
+
+def assert_full_lifecycle_preserved(ctx: FullLifecycleContext) -> None:
+    _assert(ctx.original_plan_path.exists(), f"active plan missing: {ctx.original_plan_path}")
+    _assert(not ctx.archive_plan_path.exists(), f"archive unexpectedly exists: {ctx.archive_plan_path}")
+    worktrees = _git_stdout(ctx.repo_root, "worktree", "list", "--porcelain").replace("\\", "/")
+    _assert(normalize_path(ctx.runner_worktree) in worktrees, f"worktree not preserved: {ctx.runner_worktree}")
+    branches = _git_stdout(ctx.repo_root, "branch", "--list", ctx.runner_branch)
+    _assert(ctx.runner_branch in branches, f"branch not preserved: {ctx.runner_branch}")
 
 
 def seed_dummy_runner_state(

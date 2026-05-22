@@ -103,6 +103,139 @@ def _decode_redis_value(val) -> str:
     return "" if val is None else str(val)
 
 
+def _env_truthy(name: str) -> bool:
+    return (os.environ.get(name) or "").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _resolve_post_merge_plan_file(plan_file: str | None, runner_id: str, redis_client) -> str | None:
+    if not plan_file:
+        return plan_file
+
+    try:
+        test_repo_root = read_runner_test_repo_root(
+            redis_client,
+            runner_id,
+            project_root=PROJECT_ROOT,
+        )
+    except Exception:
+        test_repo_root = None
+    if test_repo_root is None:
+        return plan_file
+
+    try:
+        worktree_raw = _decode_redis_value(redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:worktree_path")).strip()
+        if not worktree_raw:
+            return plan_file
+        worktree_path = Path(worktree_raw).resolve(strict=False)
+        active_path = Path(plan_file).resolve(strict=False)
+        rel = active_path.relative_to(worktree_path)
+        root_plan = test_repo_root.resolve(strict=False) / rel
+        if root_plan.exists():
+            return str(root_plan)
+    except Exception:
+        return plan_file
+    return plan_file
+
+
+def _is_test_source_runner(runner_id: str, redis_client) -> bool:
+    try:
+        return bool(_decode_redis_value(redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:test_source")).strip())
+    except Exception:
+        return False
+
+
+def _replace_or_append_header_line(content: str, key: str, value: str) -> str:
+    pattern = re.compile(rf"^> {re.escape(key)}:.*$", re.MULTILINE)
+    line = f"> {key}: {value}"
+    if pattern.search(content):
+        return pattern.sub(line, content, count=1)
+    lines = content.splitlines()
+    insert_at = 1 if lines and lines[0].startswith("# ") else 0
+    lines.insert(insert_at, line)
+    return "\n".join(lines) + ("\n" if content.endswith("\n") else "")
+
+
+def _call_test_done_in_process(plan_file: str, runner_id: str, pub_fn) -> dict:
+    """Test-source-only local done adapter for isolated repos.
+
+    This intentionally stays behind DEV_RUNNER_TEST_IN_PROCESS_DONE and a
+    test_source runner so production still uses the Admin API done path.
+    """
+    plan_path = Path(plan_file).resolve(strict=False)
+    if not plan_path.exists():
+        return {"success": False, "reason": "plan_missing", "message": f"Plan file not found: {plan_path}"}
+
+    project_root = None
+    parts = plan_path.parts
+    for index, part in enumerate(parts):
+        if part == "plan" and index > 0 and parts[index - 1] == "docs":
+            project_root = Path(*parts[: index - 1])
+            break
+    if project_root is None:
+        project_root = plan_path.parent.parent.parent
+
+    archive_path = project_root / "docs" / "archive" / plan_path.name
+    archive_path.parent.mkdir(parents=True, exist_ok=True)
+
+    content = plan_path.read_text(encoding="utf-8", errors="replace")
+    today = datetime.now().date().isoformat()
+    content = _replace_or_append_header_line(content, "상태", "구현완료")
+    content = _replace_or_append_header_line(content, "완료일", today)
+    content = _replace_or_append_header_line(content, "진행률", "100%")
+    content = re.sub(r"\*상태:.*?\| 진행률:.*?\*", "*상태: 구현완료 | 진행률: 100%*", content)
+
+    archive_path.write_text(content, encoding="utf-8")
+    plan_path.unlink()
+
+    done_path = project_root / "docs" / "DONE.md"
+    done_path.parent.mkdir(parents=True, exist_ok=True)
+    title_match = re.search(r"^#\s+(.+)", content, re.MULTILINE)
+    title = title_match.group(1).strip() if title_match else plan_path.stem
+    done_entry = f"- [x] {today}: {title}\n"
+    if done_path.exists():
+        existing = done_path.read_text(encoding="utf-8")
+        header_match = re.match(r"(#[^\n]+\n\n?)", existing)
+        if header_match:
+            done_path.write_text(existing[: header_match.end()] + done_entry + existing[header_match.end():], encoding="utf-8")
+        else:
+            done_path.write_text(done_entry + existing, encoding="utf-8")
+    else:
+        done_path.write_text(f"# DONE\n\n{done_entry}", encoding="utf-8")
+
+    try:
+        rels = [
+            str(plan_path.relative_to(project_root)),
+            str(archive_path.relative_to(project_root)),
+            str(done_path.relative_to(project_root)),
+        ]
+        subprocess.run(["git", "add", "-A", "--", *rels], cwd=str(project_root), check=True, capture_output=True, text=True, timeout=30)
+        commit = subprocess.run(
+            ["git", "commit", "-m", f"docs: {plan_path.stem} done archive"],
+            cwd=str(project_root),
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=30,
+        )
+        if commit.returncode != 0 and "nothing to commit" not in (commit.stdout + commit.stderr).lower():
+            return {
+                "success": False,
+                "reason": "git_commit_failed",
+                "message": (commit.stderr or commit.stdout or "git commit failed").strip()[:500],
+            }
+    except Exception as exc:
+        return {"success": False, "reason": "git_commit_exception", "message": str(exc)}
+
+    pub_fn(f"test in-process done 완료: {archive_path}")
+    return {
+        "success": True,
+        "reason": "test_in_process_done",
+        "message": "test in-process done completed",
+        "archive_path": str(archive_path),
+    }
+
+
 def _plan_runner_source_commit() -> str:
     try:
         result = subprocess.run(
@@ -1442,6 +1575,7 @@ def _handle_post_merge_done(plan_file: str, runner_id: str, pub_fn, redis_client
         has_phase_r as _has_phase_r,
         has_undefended_paths as _has_undefended_paths,
     )
+    plan_file = _resolve_post_merge_plan_file(plan_file, runner_id, redis_client)
     if not plan_file or plan_file in (PLAN_FILE_ALL, _LEGACY_ALL):
         pub_fn("plan_file 없음(--all 모드) — done 스킵")
         return {"success": True, "status": "skipped_no_plan", "reason": "no_plan_file"}
@@ -1518,7 +1652,10 @@ def _handle_post_merge_done(plan_file: str, runner_id: str, pub_fn, redis_client
             _register_post_merge_owned_files(runner_id, plan_file)
         except Exception as exc:
             logger.warning("[_handle_post_merge_done] ownership owned-files register 실패: runner=%s error=%s", runner_id, exc)
-        done_result = _call_done_api(plan_file, runner_id, pub_fn)
+        if _env_truthy("DEV_RUNNER_TEST_IN_PROCESS_DONE") and _is_test_source_runner(runner_id, redis_client):
+            done_result = _call_test_done_in_process(plan_file, runner_id, pub_fn)
+        else:
+            done_result = _call_done_api(plan_file, runner_id, pub_fn)
         if done_result.get("success"):
             try:
                 redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:done_post_merge_status", "success")
