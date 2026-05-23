@@ -468,10 +468,15 @@ def _cleanup_process_state(runner_id: str, redis_client: redis.Redis, reason: st
 
     # release merge turn if process died (skip for approval_required — user must act first)
     _repo_id = None
+    try:
+        _queue_project_root = read_runner_test_repo_root(redis_client, runner_id, project_root=PROJECT_ROOT) or PROJECT_ROOT
+    except Exception as exc:
+        logger.debug("[cleanup] test_repo_root unavailable for merge queue release: %s", exc)
+        _queue_project_root = PROJECT_ROOT
     if _ar_guard_ms != "approval_required":
         try:
             from merge_queue import release_merge_turn, _get_repo_id
-            _repo_id = _get_repo_id(PROJECT_ROOT)
+            _repo_id = _get_repo_id(_queue_project_root)
             release_merge_turn(redis_client, runner_id, repo_id=_repo_id)
         except Exception:
             pass
@@ -485,7 +490,7 @@ def _cleanup_process_state(runner_id: str, redis_client: redis.Redis, reason: st
         try:
             from merge_queue import get_queue_key, _get_repo_id
             if _repo_id is None:
-                _repo_id = _get_repo_id(PROJECT_ROOT)
+                _repo_id = _get_repo_id(_queue_project_root)
             redis_client.lrem(get_queue_key(_repo_id), 0, runner_id)
         except Exception:
             pass
