@@ -70,7 +70,7 @@ def _env_truthy(name: str) -> bool:
     return (os.environ.get(name) or "").strip().lower() in {"1", "true", "yes", "on"}
 
 
-def _resolve_test_repo_root_override(request: RunRequest) -> str | None:
+def _resolve_test_repo_root_override(request: RunRequest, *, allow_test_repo_root: bool = False) -> str | None:
     if not request.test_repo_root:
         return None
     if not request.test_source:
@@ -78,7 +78,7 @@ def _resolve_test_repo_root_override(request: RunRequest) -> str | None:
             status_code=400,
             detail="test_repo_root는 test_source 요청에서만 사용할 수 있습니다",
         )
-    if not _env_truthy(ALLOW_TEST_REPO_ROOT_ENV):
+    if not allow_test_repo_root and not _env_truthy(ALLOW_TEST_REPO_ROOT_ENV):
         raise HTTPException(
             status_code=400,
             detail=f"test_repo_root 사용은 {ALLOW_TEST_REPO_ROOT_ENV}=1 환경에서만 허용됩니다",
@@ -602,7 +602,12 @@ class ExecutorService:
             "result": data,
         }
 
-    async def start_dev_runner(self, request: RunRequest) -> RunStatusResponse:
+    async def start_dev_runner(
+        self,
+        request: RunRequest,
+        *,
+        allow_test_repo_root: bool = False,
+    ) -> RunStatusResponse:
         """plan-runner 실행 시작 - Redis 명령 전송 (비동기, 멀티 runner 지원)"""
         # Redis + listener 사전 확인
         await self._check_redis_and_listener()
@@ -621,7 +626,10 @@ class ExecutorService:
             )
 
         resolved_engine, resolved_fix_engine = self.resolve_run_engines(request, settings)
-        test_repo_root = _resolve_test_repo_root_override(request)
+        test_repo_root = _resolve_test_repo_root_override(
+            request,
+            allow_test_repo_root=allow_test_repo_root,
+        )
 
         # 새 runner_id 생성 (멀티 실행 지원 - 409 체크 없음)
         # test_source가 있으면 TC 추적용 접두사 포함 (t-{source}-{4hex})
