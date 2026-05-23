@@ -144,7 +144,7 @@ async def test_full_pipeline_start_to_archive_cleanup_readback(isolated_redis_db
     monkeypatch.setenv("PLAN_RUNNER_REDIS_DB", "15")
     monkeypatch.setenv("DEV_RUNNER_ALLOW_TEST_REPO_ROOT", "1")
     monkeypatch.setenv("DEV_RUNNER_TEST_ENGINE_SCRIPT", str(scripted_engine))
-    monkeypatch.setenv("DEV_RUNNER_TEST_IN_PROCESS_DONE", "1")
+    monkeypatch.delenv("DEV_RUNNER_TEST_IN_PROCESS_DONE", raising=False)
     monkeypatch.setenv("DEV_RUNNER_TEST_MARKER_RELPATH", "full-lifecycle-marker.txt")
     monkeypatch.setenv("MERGE_TEST_LOCK_TIMEOUT", "20")
     executor_service.reconnect()

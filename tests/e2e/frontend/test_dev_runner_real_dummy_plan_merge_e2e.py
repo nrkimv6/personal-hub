@@ -12,7 +12,11 @@ import pytest
 import redis as redis_lib
 from playwright.sync_api import Page
 
-from tests.dev_runner.dummy_plan_lifecycle_helpers import DUMMY_PLAN_SENTINEL
+from tests.dev_runner.dummy_plan_lifecycle_helpers import (
+    DUMMY_PLAN_SENTINEL,
+    FullLifecycleContext,
+    assert_full_lifecycle_clean,
+)
 
 
 pytestmark = [pytest.mark.e2e, pytest.mark.http_live, pytest.mark.timeout(600)]
@@ -22,7 +26,7 @@ DEFAULT_REAL_RUNNER_ENGINE = "claude"
 ENGINE = os.environ.get("E2E_REAL_DEV_RUNNER_ENGINE", DEFAULT_REAL_RUNNER_ENGINE)
 MAX_CYCLES = int(os.environ.get("E2E_REAL_DEV_RUNNER_MAX_CYCLES", "2"))
 MAX_ATTEMPTS = int(os.environ.get("E2E_REAL_DEV_RUNNER_MAX_ATTEMPTS", "2"))
-HTTP_TIMEOUT = httpx.Timeout(10.0, connect=2.0)
+HTTP_TIMEOUT = httpx.Timeout(45.0, connect=5.0)
 RUNNER_KEY_PREFIX = "plan-runner:runners"
 TERMINAL_FAILURE_TOKENS = (
     "[FAILURE]",
@@ -234,6 +238,85 @@ def _runner_evidence(client: httpx.Client, runner_id: str) -> dict:
     return evidence
 
 
+def _filesystem_snapshot(repo: Path, plan: Path, runner_id: str, runner_branch: str, runner_worktree: Path) -> dict:
+    def _git_text(*args: str) -> str:
+        result = subprocess.run(
+            ["git", *args],
+            cwd=str(repo),
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=30,
+        )
+        return result.stdout.strip() if result.returncode == 0 else result.stderr.strip()
+
+    archive = repo / "docs" / "archive" / plan.name
+    return {
+        "runner_id": runner_id,
+        "active_plan_exists": plan.exists(),
+        "archive_plan_exists": archive.exists(),
+        "marker_exists": (repo / "dummy-plan-playwright-marker.txt").exists(),
+        "runner_worktree": str(runner_worktree),
+        "runner_worktree_exists": runner_worktree.exists(),
+        "runner_branch": runner_branch,
+        "branch_list": _git_text("branch", "--list", runner_branch),
+        "worktree_list": _git_text("worktree", "list", "--porcelain")[:2000],
+    }
+
+
+def _runner_path_context(repo: Path, plan: Path, runner_id: str, evidence: dict) -> tuple[str, Path]:
+    redis_fields = evidence.get("redis") or {}
+    runner_branch = redis_fields.get("branch") or f"runner/{runner_id}"
+    raw_worktree = redis_fields.get("worktree_path")
+    if raw_worktree:
+        runner_worktree = Path(raw_worktree)
+    else:
+        runner_worktree = repo / ".worktrees" / runner_id
+    return runner_branch, runner_worktree
+
+
+def _assert_final_http_filesystem_readback(client: httpx.Client, repo: Path, plan: Path, runner_id: str, success: dict) -> None:
+    evidence = _runner_evidence(client, runner_id)
+    runner_branch, runner_worktree = _runner_path_context(repo, plan, runner_id, evidence)
+    ctx = FullLifecycleContext(
+        repo_root=repo,
+        runner_id=runner_id,
+        runner_branch=runner_branch,
+        runner_worktree=runner_worktree,
+        original_plan_path=plan,
+        archive_plan_path=repo / "docs" / "archive" / plan.name,
+        marker_path=repo / "dummy-plan-playwright-marker.txt",
+        http_response=success.get("merged"),
+        logs_full_response=(evidence.get("full") or {}).get("body"),
+    )
+    snapshot = _filesystem_snapshot(repo, plan, runner_id, runner_branch, runner_worktree)
+    try:
+        assert_full_lifecycle_clean(ctx)
+    except AssertionError as exc:
+        raise AssertionError(
+            "HTTP merge result did not match filesystem/git final state\n"
+            f"reason={exc}\n"
+            f"http={json.dumps(success.get('merged'), ensure_ascii=False, default=str)[:3000]}\n"
+            f"snapshot={json.dumps(snapshot, ensure_ascii=False, default=str)[:3000]}\n"
+            f"evidence={json.dumps(evidence, ensure_ascii=False, default=str)[:3000]}"
+        ) from exc
+
+    full_body = (evidence.get("full") or {}).get("body") or {}
+    full_lines = full_body.get("lines") if isinstance(full_body, dict) else []
+    summary_hits = [
+        line
+        for line in full_lines
+        if any(token in line for token in ("worktree 정리 완료", "머지 + 테스트 성공", "archive", "docs/archive"))
+    ]
+    assert summary_hits, (
+        "logs/full missing final read-back summary "
+        f"http={json.dumps(success.get('merged'), ensure_ascii=False, default=str)[:3000]} "
+        f"snapshot={json.dumps(snapshot, ensure_ascii=False, default=str)[:3000]} "
+        f"logs_full={json.dumps(full_body, ensure_ascii=False, default=str)[:3000]}"
+    )
+
+
 def _build_run_payload(repo: Path, plan: Path, *, engine: str = ENGINE, max_cycles: int = MAX_CYCLES) -> dict:
     return {
         "plan_file": str(plan),
@@ -437,5 +520,6 @@ def test_claude_real_dummy_plan_runner_merges_isolated_repo_from_admin_ui_with_s
             assert marker.exists(), f"isolated repo marker missing attempts={attempts}"
             assert DUMMY_PLAN_SENTINEL in marker.read_text(encoding="utf-8", errors="replace")
             assert not (Path(__file__).resolve().parents[3] / marker.name).exists()
+            _assert_final_http_filesystem_readback(client, repo, plan, runner_id, success)
         finally:
             _cleanup_runner(client, runner_id)
