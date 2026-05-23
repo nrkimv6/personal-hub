@@ -5,10 +5,12 @@ import pytest
 from tests.dev_runner.dummy_plan_lifecycle_helpers import (
     DUMMY_PLAN_SENTINEL,
     FullLifecycleContext,
+    MergePhaseBarrier,
     _run_git,
     assert_full_lifecycle_clean,
     assert_full_lifecycle_preserved,
     init_full_lifecycle_repo,
+    init_multi_runner_lifecycle_repo,
 )
 
 
@@ -85,3 +87,24 @@ def test_assert_full_lifecycle_preserved_accepts_terminal_preservation(tmp_path)
     ctx = _ctx(tmp_path)
 
     assert_full_lifecycle_preserved(ctx)
+
+
+def test_init_multi_runner_lifecycle_repo_creates_distinct_runner_worktrees(tmp_path):
+    multi = init_multi_runner_lifecycle_repo(tmp_path)
+
+    assert len(multi.runner_contexts) == 2
+    runner_ids = {ctx.runner_id for ctx in multi.runner_contexts}
+    assert runner_ids == {"t-multi-runner-a", "t-multi-runner-b"}
+    for ctx in multi.runner_contexts:
+        assert ctx.runner_worktree.exists()
+        assert ctx.original_plan_path.exists()
+        assert ctx.runner_branch in _run_git(multi.repo_root, "branch", "--list", ctx.runner_branch).stdout
+
+
+def test_merge_phase_barrier_records_arrival_and_release_order():
+    barrier = MergePhaseBarrier(1)
+
+    index = barrier.arrive("t-barrier-a", "merge")
+
+    assert index == 0
+    assert barrier.phases_for("t-barrier-a") == ["merge:arrive", "merge:release"]

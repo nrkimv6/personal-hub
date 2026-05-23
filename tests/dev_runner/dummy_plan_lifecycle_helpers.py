@@ -8,6 +8,8 @@ import sys
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
+from threading import Barrier, Lock
+from time import monotonic
 from typing import Iterable
 
 
@@ -66,6 +68,30 @@ class FullLifecycleContext:
 class ConflictLifecycleContext(FullLifecycleContext):
     conflict_file_path: Path | None = None
     expected_resolved_content: str = "RESOLVED_VERSION\n"
+
+
+@dataclass(frozen=True)
+class MultiRunnerLifecycleContext:
+    repo_root: Path
+    runner_contexts: tuple[FullLifecycleContext, ...]
+
+
+class MergePhaseBarrier:
+    def __init__(self, parties: int):
+        self._barrier = Barrier(parties)
+        self._lock = Lock()
+        self.timeline: list[tuple[str, str, float]] = []
+
+    def arrive(self, runner_id: str, phase: str, timeout: float = 5.0) -> int:
+        with self._lock:
+            self.timeline.append((runner_id, f"{phase}:arrive", monotonic()))
+        index = self._barrier.wait(timeout=timeout)
+        with self._lock:
+            self.timeline.append((runner_id, f"{phase}:release", monotonic()))
+        return index
+
+    def phases_for(self, runner_id: str) -> list[str]:
+        return [phase for rid, phase, _ in self.timeline if rid == runner_id]
 
 
 def normalize_path(path: str | Path) -> str:
@@ -202,6 +228,71 @@ def init_conflict_lifecycle_repo(
         marker_path=repo_root / "full-lifecycle-marker.txt",
         conflict_file_path=conflict_file,
     )
+
+
+def init_multi_runner_lifecycle_repo(
+    tmp_path: Path,
+    *,
+    runner_ids: tuple[str, ...] = ("t-multi-runner-a", "t-multi-runner-b"),
+) -> MultiRunnerLifecycleContext:
+    repo_root = tmp_path / "multi-runner-repo"
+    repo_root.mkdir()
+    _run_git(repo_root, "init", "-b", "main")
+    _run_git(repo_root, "config", "commit.gpgsign", "false")
+    _run_git(repo_root, "config", "user.name", "dummy-plan-test")
+    _run_git(repo_root, "config", "user.email", "dummy-plan-test@example.invalid")
+
+    (repo_root / "README.md").write_text("multi runner repo\n", encoding="utf-8")
+    _run_git(repo_root, "add", "README.md")
+    _run_git(repo_root, "commit", "-m", "init multi runner repo")
+
+    contexts: list[FullLifecycleContext] = []
+    for index, runner_id in enumerate(runner_ids, start=1):
+        plan_name = f"2026-05-22_test-multi-runner-{index}.md"
+        plan_path = repo_root / "docs" / "plan" / plan_name
+        plan_path.parent.mkdir(parents=True, exist_ok=True)
+        plan_path.write_text(
+            "\n".join(
+                [
+                    f"# test multi runner {index}",
+                    "",
+                    "> 상태: 구현중",
+                    "> 진행률: 0/1 (0%)",
+                    "",
+                    "## TODO",
+                    "- [ ] create multi runner marker",
+                    "",
+                    "*상태: 구현중 | 진행률: 0/1 (0%)*",
+                    "",
+                ]
+            ),
+            encoding="utf-8",
+        )
+        _run_git(repo_root, "add", str(plan_path.relative_to(repo_root)))
+        _run_git(repo_root, "commit", "-m", f"add plan {index}")
+
+        branch = f"runner/{runner_id}"
+        worktree = repo_root / ".worktrees" / runner_id
+        _run_git(repo_root, "worktree", "add", str(worktree), "-b", branch)
+        marker = worktree / f"multi-runner-marker-{index}.txt"
+        marker.write_text(f"{DUMMY_PLAN_SENTINEL}:{runner_id}\n", encoding="utf-8")
+        _run_git(worktree, "add", str(marker.relative_to(worktree)))
+        _run_git(worktree, "commit", "-m", f"runner {index} marker")
+
+        contexts.append(
+            FullLifecycleContext(
+                repo_root=repo_root,
+                runner_id=runner_id,
+                runner_branch=branch,
+                runner_worktree=worktree,
+                original_plan_path=plan_path,
+                archive_plan_path=repo_root / "docs" / "archive" / plan_name,
+                marker_path=repo_root / marker.name,
+            )
+        )
+
+    _run_git(repo_root, "checkout", "main")
+    return MultiRunnerLifecycleContext(repo_root=repo_root, runner_contexts=tuple(contexts))
 
 
 def _git_stdout(repo: Path, *args: str) -> str:
