@@ -158,8 +158,8 @@ def _replace_or_append_header_line(content: str, key: str, value: str) -> str:
 def _call_test_done_in_process(plan_file: str, runner_id: str, pub_fn) -> dict:
     """Test-source-only local done adapter for isolated repos.
 
-    This intentionally stays behind DEV_RUNNER_TEST_IN_PROCESS_DONE and a
-    test_source runner so production still uses the Admin API done path.
+    This intentionally stays behind a test_source runner so production still
+    uses the Admin API done path.
     """
     plan_path = Path(plan_file).resolve(strict=False)
     if not plan_path.exists():
@@ -1653,7 +1653,7 @@ def _handle_post_merge_done(plan_file: str, runner_id: str, pub_fn, redis_client
             _register_post_merge_owned_files(runner_id, plan_file)
         except Exception as exc:
             logger.warning("[_handle_post_merge_done] ownership owned-files register 실패: runner=%s error=%s", runner_id, exc)
-        if _env_truthy("DEV_RUNNER_TEST_IN_PROCESS_DONE") and _is_test_source_runner(runner_id, redis_client):
+        if _is_test_source_runner(runner_id, redis_client):
             done_result = _call_test_done_in_process(plan_file, runner_id, pub_fn)
         else:
             done_result = _call_done_api(plan_file, runner_id, pub_fn)
