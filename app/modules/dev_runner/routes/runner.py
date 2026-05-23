@@ -6,7 +6,7 @@ from datetime import datetime
 from typing import Optional
 import redis
 import redis.asyncio as aioredis
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query, Request
 
 from app.modules.dev_runner.schemas import (
     DirectMergeRequest,
@@ -64,9 +64,13 @@ async def stop_runner(runner_id: str):
 
 
 @router.post("/run", response_model=RunStatusResponse)
-async def start_run(request: RunRequest):
+async def start_run(request: RunRequest, http_request: Request):
     """plan-runner 실행 시작"""
-    return await executor_service.start_dev_runner(request)
+    allow_test_repo_root = http_request.headers.get("x-api-gate-bypass") == "1"
+    return await executor_service.start_dev_runner(
+        request,
+        allow_test_repo_root=allow_test_repo_root,
+    )
 
 
 @router.post("/stop-all")

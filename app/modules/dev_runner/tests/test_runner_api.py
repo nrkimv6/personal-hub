@@ -311,6 +311,32 @@ class TestStartRun:
         assert response.status_code == 400
         assert "DEV_RUNNER_ALLOW_TEST_REPO_ROOT" in response.text
 
+    async def test_start_run_test_repo_root_allows_api_gate_bypass_header(self, client, mock_executor_redis, tmp_path, monkeypatch):
+        """R: live E2E can use isolated repo roots without mutating NSSM env."""
+        fake_async = mock_executor_redis["async"]
+        await fake_async.set("plan-runner:listener:heartbeat", datetime.now().isoformat())
+        repo = tmp_path / "isolated-repo"
+        repo.mkdir()
+        (repo / ".git").mkdir()
+        monkeypatch.delenv("DEV_RUNNER_ALLOW_TEST_REPO_ROOT", raising=False)
+
+        with patch.object(fake_async, "brpop", new=AsyncMock(return_value=None)):
+            response = await client.post(
+                "/api/v1/dev-runner/run",
+                json={
+                    "plan_file": str(repo / "docs/plan/test.md"),
+                    "test_source": "real_dummy_plan_playwright",
+                    "test_repo_root": str(repo),
+                },
+                headers={"x-api-gate-bypass": "1"},
+            )
+
+        assert response.status_code == 200
+        raw = await fake_async.lrange("plan-runner:commands", 0, -1)
+        command = json.loads(raw[0])
+        assert command["test_repo_root"] == str(repo.resolve())
+        assert command["test_repo_root_allowed"] is True
+
     async def test_start_run_test_repo_root_stored_in_command(self, client, mock_executor_redis, tmp_path, monkeypatch):
         """R: env gate + test_source가 있으면 command payload로 isolated repo root 전달"""
         fake_async = mock_executor_redis["async"]
