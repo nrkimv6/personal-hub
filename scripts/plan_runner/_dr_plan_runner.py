@@ -648,6 +648,7 @@ def _do_start_plan_runner(command: Dict, redis_client: redis.Redis):
             command.get("test_repo_root"),
             test_source=command.get("test_source"),
             project_root=_PR,
+            allow_env_override=bool(command.get("test_repo_root_allowed")),
         )
     except ValueError as exc:
         _set_error_status(str(exc))
@@ -1041,6 +1042,8 @@ def start_plan_runner(command: Dict, redis_client: redis.Redis) -> Dict:
             redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:test_source", command["test_source"])
         if command.get("test_repo_root"):
             redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:test_repo_root", command["test_repo_root"])
+            if command.get("test_repo_root_allowed"):
+                redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:test_repo_root_allowed", "1")
     except Exception as _meta_err:
         logger.warning(f"[start_plan_runner] accepted 메타 저장 실패 (무시): {_meta_err}")
 
@@ -1194,6 +1197,7 @@ def _launch_plan_runner_process(
             PLAN_RUNNER_WORK_DIR=str(worktree_path),
             PLAN_RUNNER_WORKTREE_PATH=str(worktree_path),
             PLAN_RUNNER_PROJECT_ROOT=str(project_root),
+            **({"DEV_RUNNER_ALLOW_TEST_REPO_ROOT": "1"} if command.get("test_repo_root_allowed") else {}),
         )
         # 로그 prefix 식별자: plan명(날짜 제거, 첫 2단어) + runner_id 앞 4자
         _plan_basename = os.path.splitext(os.path.basename(plan_file or ""))[0]
@@ -1340,6 +1344,8 @@ def _launch_plan_runner_process(
             redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:test_source", command["test_source"])
         if command.get("test_repo_root"):
             redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:test_repo_root", command["test_repo_root"])
+            if command.get("test_repo_root_allowed"):
+                redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:test_repo_root_allowed", "1")
         redis_client.delete(f"{RUNNER_KEY_PREFIX}:{runner_id}:quota_stopped")
         redis_client.delete(f"{RUNNER_KEY_PREFIX}:{runner_id}:stop_stage")
         redis_client.sadd(ACTIVE_RUNNERS_KEY, runner_id)
