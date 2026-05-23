@@ -331,6 +331,7 @@ class TestStartRun:
         raw = await fake_async.lrange("plan-runner:commands", 0, -1)
         command = json.loads(raw[0])
         assert command["test_repo_root"] == str(repo.resolve())
+        assert command["test_repo_root_allowed"] is True
 
     async def test_double_start_returns_429(self, client, mock_executor_redis):
         """max_concurrent_runners 초과 시 429 반환 — 동시 실행 제한 short-circuit 검증"""

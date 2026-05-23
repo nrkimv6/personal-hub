@@ -320,6 +320,11 @@ def _do_inline_merge(runner_id: str, redis_client: redis.Redis) -> None:
                     )
                     if isinstance(test_repo_root, bytes):
                         test_repo_root = test_repo_root.decode("utf-8")
+                    test_repo_root_allowed = redis_client.get(
+                        f"{RUNNER_KEY_PREFIX}:{runner_id}:test_repo_root_allowed"
+                    )
+                    if isinstance(test_repo_root_allowed, bytes):
+                        test_repo_root_allowed = test_repo_root_allowed.decode("utf-8")
                     command = {
                         "action": "run",
                         "runner_id": new_runner_id,
@@ -332,6 +337,8 @@ def _do_inline_merge(runner_id: str, redis_client: redis.Redis) -> None:
                         command["test_source"] = test_source
                     if test_repo_root:
                         command["test_repo_root"] = test_repo_root
+                        if str(test_repo_root_allowed or "").strip().lower() in {"1", "true", "yes", "on"}:
+                            command["test_repo_root_allowed"] = True
                     redis_client.lpush(
                         COMMANDS_KEY, json.dumps(command, ensure_ascii=False)
                     )

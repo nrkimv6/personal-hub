@@ -722,6 +722,7 @@ class ExecutorService:
             command["test_source"] = request.test_source
         if test_repo_root:
             command["test_repo_root"] = test_repo_root
+            command["test_repo_root_allowed"] = True
 
         # fused 세션 ID 주입
         command["session_id"] = session_id
@@ -746,6 +747,7 @@ class ExecutorService:
                     "session_id": session_id,
                     "test_source": request.test_source,
                     "test_repo_root": test_repo_root,
+                    "test_repo_root_allowed": bool(test_repo_root),
                 },
             }
         )

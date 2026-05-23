@@ -266,20 +266,15 @@ def _release_test_claim(client: httpx.Client, plan_file: str) -> None:
 
 
 def _start_real_runner(page: Page, client: httpx.Client, payload: dict) -> str:
+    del page
     response = None
     for attempt in range(1, 4):
-        response = page.evaluate(
-            """async (payload) => {
-                const res = await fetch('/api/v1/dev-runner/run', {
-                    method: 'POST',
-                    headers: {'Content-Type': 'application/json', 'x-api-gate-bypass': '1'},
-                    body: JSON.stringify(payload),
-                });
-                const text = await res.text();
-                return {status: res.status, text};
-            }""",
-            payload,
+        raw_response = client.post(
+            "/api/v1/dev-runner/run",
+            json=payload,
+            headers={"x-api-gate-bypass": "1"},
         )
+        response = {"status": raw_response.status_code, "text": raw_response.text}
         if not _is_releasable_test_claim_conflict(response["status"], response["text"], payload):
             break
         _release_test_claim(client, payload["plan_file"])

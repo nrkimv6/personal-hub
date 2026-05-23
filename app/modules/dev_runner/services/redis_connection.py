@@ -51,7 +51,7 @@ RUNNER_KEY_SUFFIXES = (
     "merge_status", "merge_requested", "merge_reason", "merge_message",
     "done_post_merge_status", "done_post_merge_error", "quarantine_diff_path",
     "service_lock_approved",
-    "current_cycle", "execution_count", "quota_stopped", "error", "restart_after_merge", "test_source", "test_repo_root", "trigger",
+    "current_cycle", "execution_count", "quota_stopped", "error", "restart_after_merge", "test_source", "test_repo_root", "test_repo_root_allowed", "trigger",
     "exit_reason", "subprocess_heartbeat", "pid_create_time", "process_cmdline_hash", "reflect_final_path",
     # 관측 메타 키 (기존 누락 3개 — _dr_constants.py와 동기화)
     "accepted_at", "accepted_source", "started_at",

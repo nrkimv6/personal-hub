@@ -17,12 +17,13 @@ def resolve_test_repo_root(
     *,
     test_source: str | None,
     project_root: Path,
+    allow_env_override: bool = False,
 ) -> Path | None:
     if not value:
         return None
     if not test_source:
         raise ValueError("test_repo_root requires test_source")
-    if not _env_truthy(ALLOW_TEST_REPO_ROOT_ENV):
+    if not allow_env_override and not _env_truthy(ALLOW_TEST_REPO_ROOT_ENV):
         raise ValueError(f"test_repo_root requires {ALLOW_TEST_REPO_ROOT_ENV}=1")
 
     root = Path(value).expanduser().resolve()
@@ -42,4 +43,12 @@ def read_runner_test_repo_root(redis_client, runner_id: str, *, project_root: Pa
     test_source = redis_client.get(f"plan-runner:runners:{runner_id}:test_source")
     if isinstance(test_source, bytes):
         test_source = test_source.decode("utf-8", errors="replace")
-    return resolve_test_repo_root(raw, test_source=test_source, project_root=project_root)
+    allowed = redis_client.get(f"plan-runner:runners:{runner_id}:test_repo_root_allowed")
+    if isinstance(allowed, bytes):
+        allowed = allowed.decode("utf-8", errors="replace")
+    return resolve_test_repo_root(
+        raw,
+        test_source=test_source,
+        project_root=project_root,
+        allow_env_override=str(allowed or "").strip().lower() in {"1", "true", "yes", "on"},
+    )
