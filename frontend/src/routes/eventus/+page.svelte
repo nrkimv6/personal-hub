@@ -202,13 +202,6 @@
 		}
 	}
 
-	function handleTabChange(tab: string) {
-		activeTab = tab as ActiveTab;
-		if (tab === 'history' && !historyLoadedOnce) {
-			loadHistory();
-		}
-	}
-
 	function openDetail(event: MonitoringEvent) {
 		selectedEvent = event;
 		showDetailModal = true;
@@ -227,19 +220,26 @@
 	}
 
 	onMount(load);
+
+	$effect(() => {
+		if (activeTab === 'history' && !historyLoadedOnce) {
+			loadHistory();
+		}
+	});
 </script>
+
+{#snippet headerActions()}
+	<Button variant="ghost" size="icon" onclick={load} title="새로고침">
+		<RefreshCw class="h-4 w-4" />
+	</Button>
+{/snippet}
 
 <TabbedPageLayout
 	title="이벤터스 잔여석 모니터링"
-	tabs={eventusTabs}
-	bind:activeTab
-	on:tabChange={(e) => handleTabChange(e.detail)}
+	primaryTabs={eventusTabs}
+	bind:activePrimaryTab={activeTab}
+	actions={headerActions}
 >
-	<svelte:fragment slot="header-actions">
-		<Button variant="ghost" size="icon" on:click={load} title="새로고침">
-			<RefreshCw class="h-4 w-4" />
-		</Button>
-	</svelte:fragment>
 
 	<!-- ─── 일정 탭 ──────────────────────────────────────────── -->
 	{#if activeTab === 'schedules'}
