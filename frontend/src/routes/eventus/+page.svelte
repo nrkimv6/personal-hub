@@ -14,44 +14,44 @@
 
 	type ActiveTab = 'schedules' | 'history';
 
-	let activeTab: ActiveTab = 'schedules';
-	let targets: EventusTarget[] = [];
-	let schedules: EventusSchedule[] = [];
-	let historyEvents: MonitoringEvent[] = [];
+	let activeTab = $state<ActiveTab>('schedules');
+	let targets = $state<EventusTarget[]>([]);
+	let schedules = $state<EventusSchedule[]>([]);
+	let historyEvents = $state<MonitoringEvent[]>([]);
 
 	// Analyze form
-	let analyzeInput = '';
-	let analyzeLoading = false;
-	let analyzeResult: EventusAnalyzeResponse | null = null;
-	let analyzeError = '';
+	let analyzeInput = $state('');
+	let analyzeLoading = $state(false);
+	let analyzeResult = $state<EventusAnalyzeResponse | null>(null);
+	let analyzeError = $state('');
 
 	// Target creation from analyze result
-	let selectedBundleId = '';
-	let selectedTimeKey = '';
-	let createTargetLoading = false;
-	let createTargetError = '';
+	let selectedBundleId = $state('');
+	let selectedTimeKey = $state('');
+	let createTargetLoading = $state(false);
+	let createTargetError = $state('');
 
 	// Schedule form
-	let selectedTargetId = '';
-	let scheduleDate = '';
+	let selectedTargetId = $state('');
+	let scheduleDate = $state('');
 
-	let loading = false;
-	let error = '';
-	let historyLoading = false;
-	let historyError = '';
-	let historyLoadedOnce = false;
-	let selectedEvent: MonitoringEvent | null = null;
-	let showDetailModal = false;
+	let loading = $state(false);
+	let error = $state('');
+	let historyLoading = $state(false);
+	let historyError = $state('');
+	let historyLoadedOnce = $state(false);
+	let selectedEvent = $state<MonitoringEvent | null>(null);
+	let showDetailModal = $state(false);
 
-	let historyPage = 1;
-	let historyPageSize = 30;
-	let historyTotal = 0;
-	let historyTotalPages = 1;
-	let historyFilters = {
+	let historyPage = $state(1);
+	let historyPageSize = $state(30);
+	let historyTotal = $state(0);
+	let historyTotalPages = $state(1);
+	let historyFilters = $state({
 		status: '',
 		date_from: getTodayDate(),
 		date_to: ''
-	};
+	});
 
 	const eventusTabs = [
 		{ id: 'schedules', label: '일정' },
