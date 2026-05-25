@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <title>20대 커피챗 네트워킹 이벤트 | event-us</title>
+</head>
+<body>
+  <!-- Event title -->
+  <h1 class="event-title">20대 커피챗 네트워킹 이벤트</h1>
+
+  <!-- Organizer anchor: /{slug}/event href -->
+  <a href="/age20scoffee/event" class="organizer-link">Age20s Coffee</a>
+
+  <!-- ProjectId JS var (used by html_parser._extract_event_id_from_html) -->
+  <script>
+    var ProjectId = 126341;
+  </script>
+
+  <!-- Bundle 1: 오전 세션 (전체 마감) -->
+  <div class="bundle-section" v-if="userSlectedBundle.id === 'bundle_morning_A'">
+    <ui-menu-item disabled>
+      <span class="time-label">6/1 09:00~11:00</span>
+      <span class="text-danger-400">모집마감</span>
+    </ui-menu-item>
+    <ui-menu-item disabled>
+      <span class="time-label">6/1 11:00~13:00</span>
+      <span class="text-danger-400">모집마감</span>
+    </ui-menu-item>
+    <ui-menu-item disabled>
+      <span class="time-label">6/1 13:00~15:00</span>
+      <span class="text-danger-400">Application Closed</span>
+    </ui-menu-item>
+    <ui-menu-item disabled>
+      <span class="time-label">6/1 15:00~17:00</span>
+      <span class="text-danger-400">No Left Tickets</span>
+    </ui-menu-item>
+    <ui-menu-item disabled>
+      <span class="time-label">6/1 17:00~19:00</span>
+      <span class="text-danger-400">모집마감</span>
+    </ui-menu-item>
+  </div>
+
+  <!-- Bundle 2: 오후 세션 (마감임박 포함) -->
+  <div class="bundle-section" v-if="userSlectedBundle.id === 'bundle_afternoon_B'">
+    <ui-menu-item disabled>
+      <span class="time-label">6/2 10:00~12:00</span>
+      <span class="text-danger-400">모집마감</span>
+    </ui-menu-item>
+    <ui-menu-item disabled>
+      <span class="time-label">6/2 12:00~14:00</span>
+      <span class="text-danger-400">모집마감</span>
+    </ui-menu-item>
+    <ui-menu-item disabled>
+      <span class="time-label">6/2 14:00~16:00</span>
+      <span class="text-danger-400">모집마감</span>
+    </ui-menu-item>
+    <ui-menu-item>
+      <span class="time-label">6/2 16:00~18:00</span>
+      <span class="text-danger-400">마감임박</span>
+    </ui-menu-item>
+    <ui-menu-item disabled>
+      <span class="time-label">6/2 18:00~20:00</span>
+      <span class="text-danger-400">모집마감</span>
+    </ui-menu-item>
+  </div>
+
+  <!-- Bundle 3: 저녁 세션 (전체 마감) -->
+  <div class="bundle-section" v-if="userSlectedBundle.id === 'bundle_evening_C'">
+    <ui-menu-item disabled>
+      <span class="time-label">6/3 18:00~20:00</span>
+      <span class="text-danger-400">모집마감</span>
+    </ui-menu-item>
+    <ui-menu-item disabled>
+      <span class="time-label">6/3 20:00~22:00</span>
+      <span class="text-danger-400">모집마감</span>
+    </ui-menu-item>
+    <ui-menu-item disabled>
+      <span class="time-label">6/3 21:00~23:00</span>
+      <span class="text-danger-400">Application Closed</span>
+    </ui-menu-item>
+    <ui-menu-item disabled>
+      <span class="time-label">6/3 22:00~23:59</span>
+      <span class="text-danger-400">No Left Tickets</span>
+    </ui-menu-item>
+    <ui-menu-item disabled>
+      <span class="time-label">6/4 00:00~02:00</span>
+      <span class="text-danger-400">모집마감</span>
+    </ui-menu-item>
+  </div>
+</body>
+</html>

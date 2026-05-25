@@ -84,6 +84,7 @@ try:
     from app.worker.coupang_monitor_worker import CoupangMonitorWorker
     from app.worker.popup_monitor_worker import PopupMonitorWorker
     from app.worker.popply_monitor_worker import PopplyMonitorWorker
+    from app.worker.eventus_monitor_worker import EventusMonitorWorker
 
     # 크롤러 및 워커 관련 로거들이 워커 로거와 같은 핸들러를 사용하도록 설정
     worker_handlers = logger.handlers
@@ -108,6 +109,9 @@ try:
         'app.modules.coupang_travel.services.api_client',
         'app.modules.popply_reservation.services.http_client',
         'app.modules.popply_reservation.services.adapter',
+        'app.worker.eventus_monitor_worker',
+        'app.modules.eventus_reservation.services.http_client',
+        'app.modules.eventus_reservation.services.adapter',
         'app.worker.crawl_worker_base',
         'app.modules.git_repos.worker',
         'instagram.worker_status',
@@ -163,6 +167,7 @@ async def run_with_orchestrator(
     run_coupang: bool = True,
     run_popup: bool = True,
     run_popply: bool = True,
+    run_eventus: bool = True,
 ):
     """WorkerOrchestrator를 사용하여 워커들을 실행합니다.
 
@@ -340,6 +345,20 @@ async def run_with_orchestrator(
                     _e,
                 )
 
+        # Eventus 잔여석 모니터 워커
+        if run_eventus:
+            try:
+                eventus_worker = EventusMonitorWorker(
+                    browser_manager=orchestrator.browser_manager
+                )
+                orchestrator.register_worker("eventus_monitor", eventus_worker)
+                logger.info("[EVENTUS_REGISTER] EventusMonitorWorker 등록됨")
+            except Exception as _e:
+                logger.warning(
+                    "[EVENTUS_REGISTER] 등록 실패: %s",
+                    _e,
+                )
+
         if not orchestrator.workers:
             logger.error("실행할 워커가 없습니다.")
             return
@@ -375,7 +394,8 @@ async def main(args):
             f"git={args.git or args.all}, "
             f"coupang={args.coupang or args.all}, "
             f"popup={args.popup or args.all}, "
-            f"popply={args.popply or args.all}"
+            f"popply={args.popply or args.all}, "
+            f"eventus={args.eventus or args.all}"
     )
     logger.info("=" * 50)
 
@@ -394,6 +414,7 @@ async def main(args):
             run_coupang=args.coupang or args.all,
             run_popup=args.popup or args.all,
             run_popply=args.popply or args.all,
+            run_eventus=args.eventus or args.all,
         )
     except Exception as e:
         logger.critical(f"워커 치명적 오류: {e}", exc_info=True)
@@ -474,6 +495,11 @@ def parse_args():
         help="POPPLY 예약 모니터 워커만 실행",
     )
     parser.add_argument(
+        "--eventus",
+        action="store_true",
+        help="Eventus 잔여석 모니터 워커만 실행",
+    )
+    parser.add_argument(
         "--all",
         action="store_true",
         default=True,
@@ -483,7 +509,7 @@ def parse_args():
     args = parser.parse_args()
 
     # 개별 옵션이 지정되면 --all은 False
-    if args.naver or args.scheduled or args.ondemand or args.google or args.crawl or args.activity or args.mobile or args.video_dl or args.file_search or args.git or args.coupang or args.popup or args.popply:
+    if args.naver or args.scheduled or args.ondemand or args.google or args.crawl or args.activity or args.mobile or args.video_dl or args.file_search or args.git or args.coupang or args.popup or args.popply or args.eventus:
         args.all = False
 
     return args

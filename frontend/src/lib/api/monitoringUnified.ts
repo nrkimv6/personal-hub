@@ -7,6 +7,7 @@
 import { scheduleApi } from './naver-booking';
 import { coupangTravelApi } from './coupangTravel';
 import { popplyReservationApi } from './popplyReservation';
+import { eventusReservationApi } from './eventusReservation';
 import { getConfigs, toggleConfig } from './kakaoMonitor';
 import { activityApi, formatActivityRegion } from './activity';
 import { eventApi } from './system';
@@ -122,6 +123,27 @@ export async function fetchEventItems(): Promise<UnifiedMonitorItem[]> {
 	];
 }
 
+function eventusStatusToMonitorStatus(isEnabled: boolean, isActive: boolean, runStatus: string): MonitorStatus {
+	if (!isEnabled) return 'disabled';
+	if (isActive || runStatus === 'running') return 'running';
+	if (runStatus === 'error') return 'error';
+	return 'idle';
+}
+
+export async function fetchEventusItems(): Promise<UnifiedMonitorItem[]> {
+	const items = await eventusReservationApi.listSchedules();
+	return items.map((s) => ({
+		id: `eventus-${s.id}`,
+		type: 'eventus' as MonitorType,
+		name: s.item_name ?? `이벤터스 일정 ${s.date}`,
+		status: eventusStatusToMonitorStatus(s.is_enabled, s.is_active, s.run_status),
+		lastChecked: s.last_check_time ?? undefined,
+		summary: s.last_event_status ?? s.event_id ?? undefined,
+		detailHref: '/eventus',
+		toggleable: true
+	}));
+}
+
 // ─── 병렬 통합 fetch ─────────────────────────────────────────
 
 export interface FetchAllResult {
@@ -136,7 +158,8 @@ export async function fetchAllMonitorItems(types?: MonitorType[]): Promise<Fetch
 		{ key: 'POPPLY', type: 'popply', fn: fetchPopplyItems },
 		{ key: '카카오', type: 'kakao', fn: fetchKakaoItems },
 		{ key: '체육센터', type: 'activity', fn: fetchActivityItems },
-		{ key: '이벤트', type: 'event', fn: fetchEventItems }
+		{ key: '이벤트', type: 'event', fn: fetchEventItems },
+		{ key: '이벤터스', type: 'eventus', fn: fetchEventusItems }
 	];
 
 	const active = types ? fetchers.filter((f) => types.includes(f.type)) : fetchers;
@@ -182,6 +205,12 @@ export async function toggleMonitorItem(item: UnifiedMonitorItem): Promise<void>
 			await popplyReservationApi.disableSchedule(rawId);
 		} else {
 			await popplyReservationApi.enableSchedule(rawId);
+		}
+	} else if (item.type === 'eventus') {
+		if (enabled) {
+			await eventusReservationApi.disableSchedule(rawId);
+		} else {
+			await eventusReservationApi.enableSchedule(rawId);
 		}
 	} else if (item.type === 'kakao') {
 		await toggleConfig(rawId);
