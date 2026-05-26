@@ -11,7 +11,7 @@ def read(path: Path) -> str:
     return path.read_text(encoding="utf-8")
 
 
-def test_misc_workspaces_exist_and_standalone_routes_are_wrappers():
+def test_misc_workspaces_exist_after_standalone_routes_redirect():
     kakao_route = FRONTEND / "routes" / "kakao-monitor"
     activity_route = FRONTEND / "routes" / "activity"
     eventus_route = FRONTEND / "routes" / "eventus"
@@ -19,9 +19,9 @@ def test_misc_workspaces_exist_and_standalone_routes_are_wrappers():
     assert (kakao_route / "KakaoMonitorWorkspace.svelte").exists()
     assert (activity_route / "ActivityWorkspace.svelte").exists()
     assert (eventus_route / "EventusWorkspace.svelte").exists()
-    assert "KakaoMonitorWorkspace" in read(kakao_route / "+page.svelte")
-    assert "ActivityWorkspace" in read(activity_route / "+page.svelte")
-    assert "EventusWorkspace" in read(eventus_route / "+page.svelte")
+    assert "/monitoring?type=kakao&view=dashboard" in read(kakao_route / "+page.svelte")
+    assert "/monitoring?type=activity&view=centers" in read(activity_route / "+page.svelte")
+    assert "/monitoring?type=eventus&view=schedules" in read(eventus_route / "+page.svelte")
 
 
 def test_monitoring_workspace_renders_misc_workspaces_and_event_summary():

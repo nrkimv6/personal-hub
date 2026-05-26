@@ -28,7 +28,7 @@ def read_eventus_surface() -> str:
     page = (FRONTEND_ROOT / "routes" / "eventus" / "+page.svelte").read_text(
         encoding="utf-8"
     )
-    if "EventusWorkspace" in page:
+    if "EventusWorkspace" in page or "type=eventus" in page:
         return (
             FRONTEND_ROOT / "routes" / "eventus" / "EventusWorkspace.svelte"
         ).read_text(encoding="utf-8")

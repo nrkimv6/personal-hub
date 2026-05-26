@@ -11,14 +11,14 @@ def read(path: Path) -> str:
     return path.read_text(encoding="utf-8")
 
 
-def test_commerce_workspaces_exist_and_standalone_routes_are_wrappers():
+def test_commerce_workspaces_exist_after_standalone_routes_redirect():
     coupang_route = FRONTEND / "routes" / "coupang"
     popply_route = FRONTEND / "routes" / "popply"
 
     assert (coupang_route / "CoupangWorkspace.svelte").exists()
     assert (popply_route / "PopplyWorkspace.svelte").exists()
-    assert "CoupangWorkspace" in read(coupang_route / "+page.svelte")
-    assert "PopplyWorkspace" in read(popply_route / "+page.svelte")
+    assert "/monitoring?type=coupang&view=schedules" in read(coupang_route / "+page.svelte")
+    assert "/monitoring?type=popply&view=schedules" in read(popply_route / "+page.svelte")
 
 
 def test_monitoring_workspace_renders_commerce_workspaces():
