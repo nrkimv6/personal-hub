@@ -572,7 +572,7 @@
 								</tr>
 							</thead>
 							<tbody>
-								{#each modalOpen as slot (slot.slotId ?? slot.bundleId)}
+								{#each modalOpen as slot, slotIdx (slotIdx)}
 									<tr class="border-t">
 										<td class="px-2 py-1">{getSlotLabel(slot)}</td>
 										<td class="px-2 py-1">
@@ -598,7 +598,7 @@
 									</tr>
 								</thead>
 								<tbody>
-									{#each modalClosed as slot (slot.slotId ?? slot.bundleId)}
+									{#each modalClosed as slot, slotIdx (slotIdx)}
 										<tr class="border-t">
 											<td class="px-2 py-1">{getSlotLabel(slot)}</td>
 											<td class="px-2 py-1 text-muted-foreground">{slot.closedText ?? '마감'}</td>
