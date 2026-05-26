@@ -17,6 +17,27 @@
 """
 
 
+BROWSER_CLOSED_KEYWORDS = (
+    "Target page, context or browser has been closed",
+    "browser has been closed",
+    "context has been closed",
+    "page has been closed",
+    "Target closed",
+    "Browser closed",
+)
+
+
+def find_browser_closed_keyword(error: Exception | str) -> str | None:
+    """Return the browser-closed keyword matched by an error string."""
+    error_str = str(error)
+    return next((keyword for keyword in BROWSER_CLOSED_KEYWORDS if keyword in error_str), None)
+
+
+def is_browser_closed_error(error: Exception | str) -> bool:
+    """브라우저 closed 계열 오류인지 확인합니다."""
+    return find_browser_closed_keyword(error) is not None
+
+
 class WorkerError(Exception):
     """워커 기본 예외 클래스.
 

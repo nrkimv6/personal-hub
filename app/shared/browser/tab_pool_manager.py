@@ -5,6 +5,7 @@
 """
 
 import asyncio
+import inspect
 import time
 import random
 from typing import Dict, Optional, TYPE_CHECKING
@@ -216,7 +217,10 @@ class TabPoolManager:
 
                 # 탭 유효성 검사 - 닫혔으면 풀에서 제거하고 다시 시도
                 if await self._is_tab_closed(tab):
-                    logger.warning(f"탭 {tab_id}이 닫혀있어 풀에서 제거합니다 (service_account_id={service_account_id})")
+                    logger.warning(
+                        f"[TabPool] 탭 닫힘 확인 (source=acquire_time_closed, "
+                        f"tab_id={tab_id}, service_account_id={service_account_id})"
+                    )
                     self.tab_in_use[tab_id] = False  # 잠금 해제
                     await self._remove_tab_from_pool(tab_id, service_account_id)
                     continue
@@ -665,6 +669,12 @@ class TabPoolManager:
             self.tab_pools[service_account_id] = {}
 
         for page in pages:
+            try:
+                if page.is_closed():
+                    continue
+            except Exception:
+                continue
+
             # 이미 등록된 탭인지 확인
             if hasattr(page, '_tab_id') and page._tab_id in self.tab_pool:
                 continue
@@ -696,6 +706,12 @@ class TabPoolManager:
 
         if registered_count > 0:
             logger.info(f"계정 {service_account_id}의 초기 탭 {registered_count}개 등록 완료 (전체 탭: {self.total_active_tabs}/{self.TOTAL_MAX_TABS})")
+
+        cleanup_existing = getattr(self.context_manager, "_cleanup_orphan_existing_pages", None)
+        if cleanup_existing:
+            cleanup_result = cleanup_existing(context, service_account_id)
+            if inspect.isawaitable(cleanup_result):
+                await cleanup_result
 
         return registered_count
 
@@ -861,6 +877,11 @@ class TabPoolManager:
 
         logger.info(f"[TAB-POOL] 모든 탭 닫기 완료: {closed_count}개 탭 정리됨")
         return closed_count
+
+    async def cleanup(self) -> None:
+        """Public lifecycle cleanup used by BrowserManager."""
+        await self.close_all_tabs()
+        logger.info("[TabPoolManager] cleanup 완료")
 
     def _wake_waiters(self, strategy: str = "one") -> tuple:
         """dead waiter를 건너뛰고 live waiter에게 탭 가용 신호를 전송한다.

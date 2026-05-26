@@ -8,6 +8,7 @@ from app.modules.instagram.services.crawl_service import CrawlService
 from app.modules.instagram.services.crawler import InstagramCrawler
 from app.modules.instagram.services.scheduler import InstagramScheduler
 from app.services.task_schedule_service import TaskScheduleService
+from app.shared.worker.exceptions import find_browser_closed_keyword
 from app.utils.error_utils import format_error_message
 from app.worker.schedule_handler_base import (
     ClaimedRun,
@@ -192,6 +193,7 @@ class InstagramFeedScheduler(ScheduleHandler):
                     if outcome is not None:
                         return outcome
                 except Exception as exc:
+                    closed_keyword = find_browser_closed_keyword(exc)
                     if (
                         ctx.is_browser_closed_error
                         and ctx.is_browser_closed_error(exc)
@@ -199,16 +201,27 @@ class InstagramFeedScheduler(ScheduleHandler):
                     ):
                         retry_count += 1
                         logger.warning(
-                            "[%s] 브라우저 closed 에러 감지, 재시도 (%s/%s): %s",
+                            "[%s] 브라우저 closed 에러 감지, 재시도 "
+                            "(run_id=%s, service_account_id=%s, retry=%s/%s, keyword=%s): %s",
                             ctx.worker_name,
+                            claimed.run_id,
+                            service_account_id,
                             retry_count,
                             max_retries,
+                            closed_keyword,
                             exc,
                         )
                         if ctx.reset_browser_manager:
                             await ctx.reset_browser_manager()
                         continue
-                    raise RuntimeError(format_error_message(exc)) from exc
+                    error_message = format_error_message(exc)
+                    if closed_keyword:
+                        error_message = (
+                            f"{error_message} "
+                            f"(run_id={claimed.run_id}, service_account_id={service_account_id}, "
+                            f"retry={retry_count}/{max_retries}, keyword={closed_keyword})"
+                        )
+                    raise RuntimeError(error_message) from exc
 
             raise RuntimeError("Instagram 피드 크롤링 재시도 초과")
         finally:
