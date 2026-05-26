@@ -12,7 +12,7 @@ logger = logging.getLogger(__name__)
 from collections import deque
 from datetime import datetime
 from pathlib import Path
-from typing import Optional, AsyncGenerator, List
+from typing import Optional, AsyncGenerator, List, Any
 import glob
 
 import redis
@@ -546,6 +546,55 @@ class LogService:
         except Exception:
             return {}
 
+    @staticmethod
+    def _coerce_optional_int(value: Any) -> Optional[int]:
+        """Legacy Redis/log metadata can contain "unknown"; history exposes int|null only."""
+        if value is None or isinstance(value, bool):
+            return None
+        if isinstance(value, bytes):
+            try:
+                value = value.decode("utf-8")
+            except UnicodeDecodeError:
+                return None
+        if isinstance(value, int):
+            return value
+        if isinstance(value, float):
+            return int(value) if value.is_integer() else None
+        if isinstance(value, str):
+            normalized = value.strip()
+            if not normalized or normalized.lower() in {"unknown", "none", "null", "n/a", "nan"}:
+                return None
+            try:
+                return int(normalized)
+            except ValueError:
+                return None
+        return None
+
+    @staticmethod
+    def _coerce_optional_str(value: Any) -> Optional[str]:
+        if value is None:
+            return None
+        if isinstance(value, bytes):
+            try:
+                value = value.decode("utf-8")
+            except UnicodeDecodeError:
+                return None
+        if isinstance(value, str):
+            return value if value else None
+        return None
+
+    @staticmethod
+    def _add_history_item(runs: dict[str, RunHistoryItem], runner_id: str, item_data: dict[str, Any]) -> None:
+        try:
+            runs[runner_id] = RunHistoryItem(**item_data)
+        except Exception as exc:
+            logger.warning(
+                "[history] skip invalid run history item runner_id=%s log_file=%s reason=%s",
+                runner_id,
+                item_data.get("log_file"),
+                exc,
+            )
+
     def get_run_history(self, limit: int = 20, offset: int = 0, visible_only: bool = True) -> RunHistoryResponse:
         """실행 이력 조회: Redis active_runners + 로그 파일 스캔 병합, start_time DESC 정렬"""
         runs: dict[str, RunHistoryItem] = {}
@@ -583,10 +632,7 @@ class LogService:
 
                 pid = None
                 if pid_str:
-                    try:
-                        pid = int(pid_str)
-                    except ValueError:
-                        pass
+                    pid = self._coerce_optional_int(pid_str)
 
                 has_log = bool(selected_path and selected_path.exists())
                 branch = f"runner/{runner_id}" if worktree_path else None
@@ -600,28 +646,26 @@ class LogService:
                 # execution_count: Redis에서 우선 조회
                 execution_count = None
                 ec_raw = self.redis_client.get(f"{prefix}:execution_count")
-                if ec_raw is not None:
-                    try:
-                        execution_count = int(ec_raw)
-                    except (ValueError, TypeError):
-                        pass
-                runs[runner_id] = RunHistoryItem(
-                    runner_id=runner_id,
-                    plan_file=plan_file,
-                    engine=engine,
-                    status="running",
-                    pid=pid,
-                    start_time=start_time,
-                    end_time=None,
-                    log_file=log_file_path,
-                    has_log=has_log,
-                    worktree_path=worktree_path,
-                    branch=branch,
-                    merge_status=merge_status,
-                    trigger=trigger,
-                    visible=visible,
-                    execution_count=execution_count,
-                )
+                execution_count = self._coerce_optional_int(ec_raw)
+                if execution_count is None:
+                    execution_count = self._coerce_optional_int(recent_meta.get("execution_count"))
+                self._add_history_item(runs, runner_id, {
+                    "runner_id": runner_id,
+                    "plan_file": self._coerce_optional_str(plan_file),
+                    "engine": self._coerce_optional_str(engine),
+                    "status": "running",
+                    "pid": pid,
+                    "start_time": start_time,
+                    "end_time": None,
+                    "log_file": self._coerce_optional_str(log_file_path),
+                    "has_log": has_log,
+                    "worktree_path": self._coerce_optional_str(worktree_path),
+                    "branch": branch,
+                    "merge_status": self._coerce_optional_str(merge_status),
+                    "trigger": self._coerce_optional_str(trigger),
+                    "visible": visible,
+                    "execution_count": execution_count,
+                })
         except redis.ConnectionError:
             pass
 
@@ -699,7 +743,9 @@ class LogService:
                 file_trigger = file_meta.get("trigger")
                 file_plan = file_meta.get("plan") or recent_meta.get("plan_file")
                 file_started_at = file_meta.get("started_at")
-                file_execution_count = file_meta.get("execution_count") or recent_meta.get("execution_count")
+                file_execution_count = self._coerce_optional_int(file_meta.get("execution_count"))
+                if file_execution_count is None:
+                    file_execution_count = self._coerce_optional_int(recent_meta.get("execution_count"))
                 file_engine = recent_meta.get("engine")
                 if file_trigger is None:
                     file_trigger = recent_meta.get("trigger")
@@ -712,20 +758,20 @@ class LogService:
                         start_time = datetime.fromisoformat(file_started_at)
                     except (ValueError, TypeError):
                         pass
-                runs[runner_id] = RunHistoryItem(
-                    runner_id=runner_id,
-                    plan_file=file_plan,  # 로그에서 파싱된 plan 경로 (Redis 소실 시 fallback)
-                    engine=file_engine,
-                    status="completed",
-                    pid=None,
-                    start_time=start_time,
-                    end_time=None,
-                    log_file=str(path),
-                    has_log=True,
-                    trigger=file_trigger,
-                    visible=visible,
-                    execution_count=file_execution_count,
-                )
+                self._add_history_item(runs, runner_id, {
+                    "runner_id": runner_id,
+                    "plan_file": self._coerce_optional_str(file_plan),  # 로그에서 파싱된 plan 경로 (Redis 소실 시 fallback)
+                    "engine": self._coerce_optional_str(file_engine),
+                    "status": "completed",
+                    "pid": None,
+                    "start_time": start_time,
+                    "end_time": None,
+                    "log_file": str(path),
+                    "has_log": True,
+                    "trigger": self._coerce_optional_str(file_trigger),
+                    "visible": visible,
+                    "execution_count": file_execution_count,
+                })
 
         # 3. start_time DESC 정렬
         sorted_runs = sorted(

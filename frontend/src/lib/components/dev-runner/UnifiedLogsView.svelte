@@ -21,12 +21,17 @@
 	let systemLoading = $state(false);
 	let systemError = $state<string | null>(null);
 
+	function historyEndpointErrorMessage(e: unknown): string {
+		const message = e instanceof Error ? e.message : String(e);
+		return `통합 실행 로그 API 요청 실패: ${message}`;
+	}
+
 	// ── 데이터 로드 ──────────────────────────────────────────
 	async function loadAll() {
 		loading = true;
 		error = null;
 		try {
-			const res = await devRunnerLogApi.history(10, 0, true);
+			const res = await devRunnerLogApi.history(10, 0, false);
 			runs = res.runs.filter((run) => run.visible !== false);
 			runsWithLogs = runs.map((run) => ({
 				run,
@@ -51,7 +56,7 @@
 				runsWithLogs = [...runsWithLogs]; // 반응성 트리거
 			}
 		} catch (e) {
-			error = String(e);
+			error = historyEndpointErrorMessage(e);
 		} finally {
 			loading = false;
 		}
