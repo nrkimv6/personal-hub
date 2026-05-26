@@ -15,15 +15,20 @@
 	const limit = 30;
 	let offset = $state(0);
 
+	function historyEndpointErrorMessage(e: unknown): string {
+		const message = e instanceof Error ? e.message : String(e);
+		return `실행 이력 API 요청 실패: ${message}`;
+	}
+
 	async function loadHistory() {
 		loading = true;
 		error = null;
 		try {
-			const res = await devRunnerLogApi.history(limit, offset, true);
+			const res = await devRunnerLogApi.history(limit, offset, false);
 			runs = res.runs.filter((run) => run.visible !== false);
 			total = res.total;
 		} catch (e) {
-			error = String(e);
+			error = historyEndpointErrorMessage(e);
 		} finally {
 			loading = false;
 		}
