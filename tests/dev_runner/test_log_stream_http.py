@@ -810,7 +810,10 @@ def test_http_log_recent_legacy_pseudo_id_after_size_removal():
                 f.write(f"[12:00:00] [INFO] legacy line {i}\n")
 
         # history에서 pseudo_id 확인
-        hist_resp = _live_get(f"{ADMIN_API}/api/v1/dev-runner/logs/history", params={"limit": 100})
+        hist_resp = _live_get(
+            f"{ADMIN_API}/api/v1/dev-runner/logs/history",
+            params={"limit": 100, "visible_only": "false"},
+        )
         assert hist_resp.status_code == 200
         runs = hist_resp.json().get("runs", [])
         found = any(r_item["runner_id"] == pseudo_id for r_item in runs)
