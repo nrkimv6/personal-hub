@@ -218,23 +218,57 @@ function Invoke-PlanCommit {
     if (-not (Test-Path -LiteralPath $commitScript -PathType Leaf)) {
         throw "commit.ps1 not found: $commitScript"
     }
+    $lockScript = Join-Path (Split-Path -Parent $PSScriptRoot) "plan-docs-lock.ps1"
+    if (-not (Test-Path -LiteralPath $lockScript -PathType Leaf)) {
+        throw "plan-docs-lock.ps1 not found: $lockScript"
+    }
 
     $message = "docs: plan " + [System.IO.Path]::GetFileNameWithoutExtension($Target.FullPath)
-    Push-Location $Target.Root
     $stdoutFile = ""
     $stderrFile = ""
+    $oldTargetRoot = $env:PLAN_DOCS_LOCK_TARGET_ROOT
+    $oldCommitScript = $env:PLAN_DOCS_LOCK_COMMIT_SCRIPT
+    $oldRelativePath = $env:PLAN_DOCS_LOCK_RELATIVE_PATH
+    $oldMessage = $env:PLAN_DOCS_LOCK_MESSAGE
+    $oldStdout = $env:PLAN_DOCS_LOCK_STDOUT_FILE
+    $oldStderr = $env:PLAN_DOCS_LOCK_STDERR_FILE
     try {
         $stdoutFile = [System.IO.Path]::GetTempFileName()
         $stderrFile = [System.IO.Path]::GetTempFileName()
-        & $commitScript -Files @($Target.RelativePath) -Message $message 1>$stdoutFile 2>$stderrFile
-        if ($LASTEXITCODE -ne 0) {
+        $env:PLAN_DOCS_LOCK_TARGET_ROOT = $Target.Root
+        $env:PLAN_DOCS_LOCK_COMMIT_SCRIPT = $commitScript
+        $env:PLAN_DOCS_LOCK_RELATIVE_PATH = $Target.RelativePath
+        $env:PLAN_DOCS_LOCK_MESSAGE = $message
+        $env:PLAN_DOCS_LOCK_STDOUT_FILE = $stdoutFile
+        $env:PLAN_DOCS_LOCK_STDERR_FILE = $stderrFile
+
+        $lockCommand = @"
+& '$lockScript' -RepoRoot `$env:PLAN_DOCS_LOCK_TARGET_ROOT -Operation 'hook-commit' -ScriptBlock {
+    Push-Location `$env:PLAN_DOCS_LOCK_TARGET_ROOT
+    try {
+        & `$env:PLAN_DOCS_LOCK_COMMIT_SCRIPT -Files @(`$env:PLAN_DOCS_LOCK_RELATIVE_PATH) -Message `$env:PLAN_DOCS_LOCK_MESSAGE 1>`$env:PLAN_DOCS_LOCK_STDOUT_FILE 2>`$env:PLAN_DOCS_LOCK_STDERR_FILE
+        if (`$LASTEXITCODE -ne 0) {
+            throw "commit.ps1 failed with exit code `$LASTEXITCODE"
+        }
+    } finally {
+        Pop-Location
+    }
+}
+"@
+        $lockOutput = @(& powershell.exe -NoProfile -ExecutionPolicy Bypass -Command $lockCommand 2>&1)
+        $lockExitCode = $LASTEXITCODE
+        if ($lockExitCode -eq 7) {
+            Write-HookError "PLAN_DOCS_LOCK_TIMEOUT: $($lockOutput -join ' ')"
+            return
+        }
+        if ($lockExitCode -ne 0) {
             $stderr = Get-Content -LiteralPath $stderrFile -Raw -ErrorAction SilentlyContinue
             $stdout = Get-Content -LiteralPath $stdoutFile -Raw -ErrorAction SilentlyContinue
-            $details = (($stderr + "`n" + $stdout).Trim())
+            $details = (($stderr + "`n" + $stdout + "`n" + ($lockOutput -join "`n")).Trim())
             if ($details) {
                 Write-HookError $details
             }
-            throw "commit.ps1 failed with exit code $LASTEXITCODE"
+            throw "plan-docs-lock failed with exit code $lockExitCode"
         }
         $sha = (& git -C $Target.Root rev-parse --short HEAD 2>$null)
         if ($LASTEXITCODE -eq 0 -and $sha) {
@@ -250,7 +284,12 @@ function Invoke-PlanCommit {
         if ($stderrFile -and (Test-Path -LiteralPath $stderrFile)) {
             Remove-Item -LiteralPath $stderrFile -Force -ErrorAction SilentlyContinue
         }
-        Pop-Location
+        $env:PLAN_DOCS_LOCK_TARGET_ROOT = $oldTargetRoot
+        $env:PLAN_DOCS_LOCK_COMMIT_SCRIPT = $oldCommitScript
+        $env:PLAN_DOCS_LOCK_RELATIVE_PATH = $oldRelativePath
+        $env:PLAN_DOCS_LOCK_MESSAGE = $oldMessage
+        $env:PLAN_DOCS_LOCK_STDOUT_FILE = $oldStdout
+        $env:PLAN_DOCS_LOCK_STDERR_FILE = $oldStderr
     }
 }
 
