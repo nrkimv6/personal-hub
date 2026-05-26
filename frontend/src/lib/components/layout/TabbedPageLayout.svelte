@@ -23,6 +23,8 @@
     hideTitleOnMobile?: boolean;
     hideSubtitleOnMobile?: boolean;
     stickyTabs?: boolean;
+    primaryTabsOverflow?: 'scroll' | 'wrap';
+    secondaryTabsOverflow?: 'scroll' | 'wrap';
     containerClass?: string;
     contentClass?: string;
   }
@@ -48,6 +50,8 @@
     hideTitleOnMobile = false,
     hideSubtitleOnMobile = false,
     stickyTabs = false,
+    primaryTabsOverflow = 'scroll',
+    secondaryTabsOverflow = 'scroll',
     containerClass,
     contentClass = '',
   }: Props = $props();
@@ -76,7 +80,7 @@
     replaceState={primaryReplaceState}
     size="header"
     sticky={false}
-    overflow="scroll"
+    overflow={primaryTabsOverflow}
   />
 {/snippet}
 
@@ -110,7 +114,7 @@
         replaceState={primaryReplaceState}
         size={density === 'compact' ? 'compact' : 'default'}
         sticky={stickyTabs}
-        overflow="scroll"
+        overflow={primaryTabsOverflow}
       />
     </div>
   {/if}
@@ -133,7 +137,7 @@
         replaceState={secondaryReplaceState}
         size="compact"
         sticky={stickyTabs}
-        overflow="scroll"
+        overflow={secondaryTabsOverflow}
       />
     </div>
   {/if}

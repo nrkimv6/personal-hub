@@ -471,7 +471,58 @@
 			{:else if historyEvents.length === 0}
 				<p class="text-sm text-muted-foreground">이력이 없습니다.</p>
 			{:else}
-				<div class="overflow-x-auto rounded-lg border">
+				<div class="space-y-3 md:hidden">
+					{#each historyEvents as evt (evt.id)}
+						{@const evtSlots = parseEventusSlots(evt.slots_info ?? [])}
+						{@const evtOpen = getOpenSlots(evtSlots)}
+						<article class="rounded-lg border bg-card p-3 text-sm shadow-sm">
+							<div class="flex items-start justify-between gap-3">
+								<div class="min-w-0">
+									<p class="truncate font-medium text-foreground">이벤트 #{evt.id}</p>
+									<p class="mt-1 text-xs text-muted-foreground">
+										{evt.timestamp?.slice(0, 16).replace('T', ' ') ?? '시각 없음'}
+									</p>
+								</div>
+								<span class="shrink-0 rounded px-1.5 py-0.5 text-xs {statusBadgeClass(evt.status)}">
+									{evt.status}
+								</span>
+							</div>
+							<dl class="mt-3 grid grid-cols-2 gap-2 text-xs">
+								<div>
+									<dt class="text-muted-foreground">일정 ID</dt>
+									<dd class="mt-0.5 font-medium text-foreground">{evt.schedule_id}</dd>
+								</div>
+								<div>
+									<dt class="text-muted-foreground">잔여 합계</dt>
+									<dd class="mt-0.5 font-medium text-foreground">{evt.available_count ?? '—'}</dd>
+								</div>
+							</dl>
+							<div class="mt-3 rounded-md bg-muted/40 p-2 text-xs">
+								<p class="mb-1 font-medium text-foreground">열린 옵션</p>
+								{#if evtSlots.length === 0}
+									<p class="text-muted-foreground">시간대 정보 없음</p>
+								{:else if evtOpen.length === 0}
+									<p class="text-muted-foreground">열린 옵션 없음</p>
+								{:else}
+									<p class="text-foreground">
+										{#if evtOpen.length === 1}
+											{getSlotLabel(evtOpen[0])}
+										{:else if evtOpen.length === 2}
+											{getSlotLabel(evtOpen[0])}, {getSlotLabel(evtOpen[1])}
+										{:else}
+											{getSlotLabel(evtOpen[0])}, {getSlotLabel(evtOpen[1])} 외 {evtOpen.length - 2}개
+										{/if}
+									</p>
+								{/if}
+							</div>
+							<div class="mt-3 flex justify-end">
+								<Button variant="outline" size="sm" onclick={() => openDetail(evt)}>보기</Button>
+							</div>
+						</article>
+					{/each}
+				</div>
+
+				<div class="hidden overflow-x-auto rounded-lg border md:block">
 					<table class="w-full text-sm">
 						<thead class="bg-muted/50">
 							<tr>

@@ -30,6 +30,7 @@
 		title="파일 정리기"
 		primaryTabs={modules}
 		primaryUrlBased
+		primaryTabsOverflow="wrap"
 		density="compact"
 		containerClass="mx-auto max-w-[1600px] space-y-3 p-4 lg:p-6"
 	>
