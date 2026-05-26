@@ -327,6 +327,68 @@ async def test_schedule_context_preserves_naver_required_keys_through_worker(
 
 @pytest.mark.integration
 @pytest.mark.asyncio
+async def test_schedule_context_preserves_previous_last_slots_for_notification_dedupe(
+    test_db_session,
+    seeded_schedule_context,
+):
+    item = seeded_schedule_context["item"]
+    business = seeded_schedule_context["business"]
+
+    schedule = MonitorSchedule(
+        biz_item_id=item.id,
+        service_account_id=None,
+        date="2026-05-09",
+        times="[\"14:00\"]",
+        is_enabled=True,
+        run_status="queued",
+        monitoring_mode="anonymous",
+    )
+    test_db_session.add(schedule)
+    test_db_session.commit()
+    test_db_session.refresh(schedule)
+
+    contexts = ScheduleService().get_all_with_context(
+        test_db_session,
+        is_enabled=True,
+        service_type="naver",
+    )
+    fresh_ctx = next(row for row in contexts if row["id"] == schedule.id)
+    fresh_ctx.pop("last_slots", None)
+
+    worker = NaverMonitorWorker()
+    worker._active_schedules[schedule.id] = {
+        "id": schedule.id,
+        "biz_item_id": item.id,
+        "date": schedule.date,
+        "is_enabled": True,
+        "business_type_id": business.business_type_id,
+        "naver_business_id": business.business_id,
+        "naver_biz_item_id": item.biz_item_id,
+        "last_slots": ["14:00 (2매)"],
+    }
+    worker._schedule_monitor_service = MagicMock()
+    worker._schedule_monitor_service.get_schedule.return_value = dict(fresh_ctx)
+    checked_at = datetime(2026, 5, 9, 12, 0, 0)
+    worker._execute_monitoring_cycle = AsyncMock(return_value={
+        "checked_at": checked_at,
+        "next_run_time": checked_at + timedelta(seconds=60),
+        "event_status": "available",
+        "last_slots": ["14:00 (2매)"],
+        "last_data_hash": "hash-notification-dedupe",
+        "error_message": None,
+    })
+    worker._notification_service = MagicMock()
+    worker._notification_service.send_notification_message = AsyncMock()
+
+    with patch.object(worker, "_update_schedule_run_state", AsyncMock()):
+        await worker._check_schedule(worker._active_schedules[schedule.id])
+
+    worker._notification_service.send_notification_message.assert_not_awaited()
+    assert worker._active_schedules[schedule.id]["last_slots"] == ["14:00 (2매)"]
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
 async def test_schedule_context_missing_fresh_row_is_deferred_without_cycle_repeat(
     test_db_session,
     seeded_schedule_context,

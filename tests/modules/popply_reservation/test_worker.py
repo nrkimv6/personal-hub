@@ -4,6 +4,7 @@ import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
+from unittest.mock import AsyncMock
 
 from app.models.base import Base
 from app.models.business import Business
@@ -68,7 +69,12 @@ async def test_popply_worker_records_monitoring_event_and_last_check_time(monkey
                 fetch_method="anonymous_api",
             )
 
-    worker = PopplyMonitorWorker(adapter=FakeAdapter())
+    class FakeNotification:
+        def __init__(self):
+            self.send_notification_message = AsyncMock()
+
+    notification = FakeNotification()
+    worker = PopplyMonitorWorker(adapter=FakeAdapter(), notification_service=notification)
     await worker._check_schedule({"id": schedule_id})
 
     db = factory()
@@ -79,6 +85,8 @@ async def test_popply_worker_records_monitoring_event_and_last_check_time(monkey
         assert schedule.is_active is False
         assert event.status == "available"
         assert event.available_count == 1
+        # intentional: first-check suppression per change_detector.py
+        notification.send_notification_message.assert_not_awaited()
     finally:
         db.close()
         engine.dispose()

@@ -5,6 +5,7 @@ from app.modules.availability.services.change_detector import (
 
 
 def test_change_detector_ORDER_initial_check_suppresses_notification():
+    # intentional: first-check suppression per change_detector.py
     change = detect_availability_change(None, "available")
 
     assert change.previous_status is None
