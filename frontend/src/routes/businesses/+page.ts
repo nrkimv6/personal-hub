@@ -2,5 +2,5 @@ import { redirect } from '@sveltejs/kit';
 import type { PageLoad } from './$types';
 
 export const load: PageLoad = () => {
-  redirect(307, '/schedules?tab=businesses');
+  redirect(307, '/monitoring?type=naver&view=schedules&sub=businesses');
 };

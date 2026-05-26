@@ -4,7 +4,7 @@
 
 	onMount(() => {
 		// 슬롯 조회 페이지로 리다이렉트
-		goto('/naver/slots', { replaceState: true });
+		goto('/monitoring?type=naver&view=slots', { replaceState: true });
 	});
 </script>
 

@@ -4,13 +4,20 @@ import type { PageServerLoad } from './$types';
 export const prerender = false;
 
 export const load: PageServerLoad = ({ url }) => {
-  // 기존 쿼리 파라미터를 sub 파라미터로 변환
   const tab = url.searchParams.get('tab');
-  let redirectUrl = '/naver/schedules';
+  const target = new URL('/monitoring', url.origin);
 
-  if (tab) {
-    redirectUrl += `?sub=${tab}`;
+  for (const [key, value] of url.searchParams) {
+    if (key !== 'tab') {
+      target.searchParams.append(key, value);
+    }
   }
 
-  throw redirect(301, redirectUrl);
+  target.searchParams.set('type', 'naver');
+  target.searchParams.set('view', 'schedules');
+  if (tab) {
+    target.searchParams.set('sub', tab);
+  }
+
+  throw redirect(301, `${target.pathname}${target.search}`);
 };
