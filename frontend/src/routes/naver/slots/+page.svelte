@@ -3,10 +3,11 @@
 	import { page } from '$app/stores';
 	import { onMount } from 'svelte';
 
+	const DEFAULT_HREF = '/monitoring?type=naver&view=slots';
+
 	function targetHref() {
 		const target = new URL('/monitoring', $page.url.origin);
-		target.searchParams.set('type', 'naver');
-		target.searchParams.set('view', 'slots');
+		target.search = new URL(DEFAULT_HREF, $page.url.origin).search;
 		const id = $page.url.searchParams.get('id');
 		if (id) target.searchParams.set('id', id);
 		return `${target.pathname}${target.search}`;
@@ -16,7 +17,3 @@
 		goto(targetHref(), { replaceState: true });
 	});
 </script>
-
-<svelte:head>
-	<meta http-equiv="refresh" content="0; url=/monitoring?type=naver&view=slots" />
-</svelte:head>

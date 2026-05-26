@@ -3,6 +3,8 @@
 	import { page } from '$app/stores';
 	import { onMount } from 'svelte';
 
+	const DEFAULT_HREF = '/monitoring?type=naver&view=schedules';
+
 	function normalizeSub(tab: string | null): string | null {
 		if (tab === 'booking' || tab === 'recurring' || tab === 'popup_monitor' || tab === 'history' || tab === 'businesses') {
 			return tab;
@@ -12,8 +14,7 @@
 
 	function targetHref() {
 		const target = new URL('/monitoring', $page.url.origin);
-		target.searchParams.set('type', 'naver');
-		target.searchParams.set('view', 'schedules');
+		target.search = new URL(DEFAULT_HREF, $page.url.origin).search;
 		const sub = normalizeSub($page.url.searchParams.get('tab'));
 		const id = $page.url.searchParams.get('id');
 		if (sub) target.searchParams.set('sub', sub);
@@ -25,7 +26,3 @@
 		goto(targetHref(), { replaceState: true });
 	});
 </script>
-
-<svelte:head>
-	<meta http-equiv="refresh" content="0; url=/monitoring?type=naver&view=schedules" />
-</svelte:head>
