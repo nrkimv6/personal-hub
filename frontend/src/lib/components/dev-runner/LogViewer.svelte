@@ -77,6 +77,7 @@
 	let exitBanner = $state<{ show: boolean; reason: string }>({ show: false, reason: 'completed' }); // runner 종료 배너
 	let failureBanner = $state<{ show: boolean; message: string } | null>(null); // FAILURE 태그 sticky 배너
 	let lastLogLoadError = $state<string | null>(null);
+	let lastLogLoadStage = $state<string | null>(null);
 	const MAX_LINES = 500;
 	const PREVIEW_TOGGLE_STORAGE_KEY = 'devRunnerPreviewCollapse';
 	const TAG_FILTER_STORAGE_KEY = 'devRunnerHiddenLogTags';
@@ -303,7 +304,7 @@
 	}
 
 	let emptyLogMessage = $derived.by(() => {
-		if (lastLogLoadError) return '로그를 다시 불러오는 중입니다';
+		if (lastLogLoadError) return `로그 로드 상태: ${lastLogLoadError}`;
 		if (mode === 'managed' && recentRetryBackoff.attempts > 0) return '로그 catch-up 재시도 중입니다';
 		if (mode === 'managed' && (running || apiGate.state === 'open')) return '로그 파일을 찾는 중입니다';
 		return '표시할 로그가 아직 없습니다';
@@ -311,17 +312,24 @@
 
 	function recordLogLoadError(stage: string, error: unknown) {
 		const message = describeError(error);
+		lastLogLoadStage = stage;
 		lastLogLoadError = `${stage}: ${message}`;
 		addLine(`[DIAG] ${stage} 실패: ${message}`, false);
+	}
+
+	function recordLogDiagnostic(stage: string, diagnostic: string | null | undefined, source?: string | null) {
+		if (!diagnostic) return;
+		lastLogLoadStage = stage;
+		lastLogLoadError = `${stage}: ${diagnostic}${source ? ` (${source})` : ''}`;
+		addLine(`[DIAG] ${lastLogLoadError}`, false);
 	}
 
 	function scheduleManagedRecentRetry(reason: string) {
 		if (mode !== 'managed' || hasLoadedLogContent() || recentRetryTimer) return;
 		const delay = recentRetryBackoff.nextDelay();
 		if (delay === null) {
-			if (lastLogLoadError) {
-				addLine(`[DIAG] 로그 catch-up 재시도 중단: ${lastLogLoadError}`, false);
-			}
+			const stage = lastLogLoadStage ?? 'recent';
+			addLine(`[DIAG] log source not found runner_id=${runnerId} stage=${stage} reason=${lastLogLoadError ?? reason}`, false);
 			return;
 		}
 		recentRetryTimer = setTimeout(async () => {
@@ -378,19 +386,23 @@
 		void stream.reconnect();
 	}
 
-	async function loadFull() {
+	async function loadFull(): Promise<boolean> {
 		try {
 			const res = await devRunnerLogApi.full(runnerId, 0, 500);
 			if (res.lines.length > 0) {
 				lines = res.lines.map((text: string) => parseLine(text, true));
 				expandedLongLines = new Set();
 				lastLogLoadError = null;
+				lastLogLoadStage = null;
 				recentRetryBackoff.reset();
 				clearRecentRetryTimer();
+				return true;
 			}
+			recordLogDiagnostic('full', res.diagnostic, res.source);
 		} catch (error) {
 			recordLogLoadError('full 로그 로드', error);
 		}
+		return false;
 	}
 
 	function buildSessionSeparator(identity: string): ParsedLine {
@@ -402,18 +414,25 @@
 			const res = await devRunnerLogApi.recent(runnerId, 500);
 			fromLine = res.from_line ?? 0;
 			let sourceLines = res.lines;
-			if (!running && isStartOnlyRecentLog(sourceLines)) {
+			if (!running && (sourceLines.length === 0 || isStartOnlyRecentLog(sourceLines))) {
 				try {
 					const fullRes = await devRunnerLogApi.full(runnerId, 0, 500);
 					if (fullRes.lines.length > 0) {
 						sourceLines = fullRes.lines;
 						fromLine = fullRes.offset ?? 0;
+					} else {
+						recordLogDiagnostic('full', fullRes.diagnostic, fullRes.source);
 					}
 				} catch (error) {
 					recordLogLoadError('recent fallback full 로그 로드', error);
 				}
 			}
 			const parsed = sourceLines.map((text: string) => parseLine(text, true));
+			const parsedHasContent = parsed.some((line: ParsedLine) => !HEADER_ONLY_TAGS.has(line.tag));
+			if (!parsedHasContent && hasLoadedLogContent()) {
+				recordLogDiagnostic('recent', res.diagnostic, res.source);
+				return;
+			}
 
 			if (running) {
 				// running 중이면 마지막 SEPARATOR 이후 구간은 현재 세션 → isStale: false
@@ -467,6 +486,7 @@
 				pendingStale = true;
 			}
 			lastLogLoadError = null;
+			lastLogLoadStage = null;
 			if (hasLoadedLogContent()) {
 				recentRetryBackoff.reset();
 				clearRecentRetryTimer();

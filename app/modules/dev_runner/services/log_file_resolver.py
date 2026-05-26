@@ -59,7 +59,9 @@ class LogFileResolver:
             if stream_path and log_path:
                 return self.select_display_log(stream_path, log_path)
 
-            return stream_path or log_path
+            selected_path = stream_path or log_path
+            if selected_path:
+                return selected_path
         except redis.ConnectionError:
             pass
 

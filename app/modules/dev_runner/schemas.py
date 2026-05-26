@@ -1079,6 +1079,8 @@ class LogResponse(BaseModel):
     lines: List[str]
     total_lines: int
     from_line: int = 0  # 파일 내 시작 줄 번호 (since_line 계산용)
+    source: Optional[str] = None
+    diagnostic: Optional[str] = None
 
 
 class RunHistoryItem(BaseModel):
@@ -1112,6 +1114,8 @@ class FullLogResponse(BaseModel):
     total_lines: int
     offset: int
     has_more: bool
+    source: Optional[str] = None
+    diagnostic: Optional[str] = None
 
 
 class CurrentTrackingResponse(BaseModel):
