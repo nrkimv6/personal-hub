@@ -16,6 +16,13 @@ from app.modules.dev_runner.services.plan_path_helpers import (
     extract_repo_root_from_plan_path,
     dedupe_prefer_worktree,
 )
+from app.modules.dev_runner.services.plan_item_state import (
+    CHECKBOX_MARKER_PATTERN,
+    checkbox_state,
+    is_done_marker,
+    task_key,
+    task_text_hash,
+)
 
 import logging
 
@@ -303,11 +310,11 @@ class PlanScanner:
 
             content = self._remove_code_blocks(content)
             # 멀티레벨 체크박스 지원: "- [x]", "  - [x]", "1. - [x]", "1. [x]" 모두 인식
-            checkbox_pattern = r"^[ \t]*(?:\d+\.\s+(?:[-*]\s*)?|[-*]+\s*)\[([ x→])\]"
+            checkbox_pattern = rf"^[ \t]*(?:\d+\.\s+(?:[-*]\s*)?|[-*]+\s*)\[{CHECKBOX_MARKER_PATTERN}\]"
             matches = re.findall(checkbox_pattern, content, re.MULTILINE)
 
             total = len(matches)
-            done = sum(1 for m in matches if m == "x")
+            done = sum(1 for m in matches if is_done_marker(m))
             percent = int(done / total * 100) if total > 0 else 0
 
             return PlanProgressResponse(done=done, total=total, percent=percent)
@@ -440,6 +447,8 @@ class PlanScanner:
         current_phase_name = "기타"
         current_items: List[PlanItemResponse] = []
         current_parent: Optional[PlanItemResponse] = None
+        top_level_ordinal = 0
+        child_ordinals: dict[int, int] = {}
 
         # 파일 경로 패턴: `path/to/file.ext`
         file_path_pattern = re.compile(r'`([^`]+\.[a-zA-Z]+)`')
@@ -462,48 +471,78 @@ class PlanScanner:
                 current_phase_name = phase_match.group(0).lstrip("#").strip()
                 current_items = []
                 current_parent = None
+                top_level_ordinal = 0
+                child_ordinals = {}
                 continue
 
-            # 번호 체크박스 (상위): 1. [ ] or 1. [x]
-            num_match = re.match(r'^(\d+)\.\s*\[([ x→])\]\s*(.*)', line)
+            # 번호 체크박스 (상위): 1. [ ], 1. [/], 1. [x], 1. [→TODO]
+            num_match = re.match(rf'^(\d+)\.\s*\[{CHECKBOX_MARKER_PATTERN}\]\s*(.*)', line)
             if num_match:
                 text = num_match.group(3).strip()
+                marker = num_match.group(2)
+                top_level_ordinal += 1
+                ordinal = str(top_level_ordinal)
                 fp = file_path_pattern.search(text)
                 item = PlanItemResponse(
                     level=0,
                     text=text,
-                    checked=num_match.group(2) == 'x',
+                    checked=is_done_marker(marker),
+                    marker=marker,
+                    state=checkbox_state(marker),
+                    phase_name=current_phase_name,
+                    item_ordinal=ordinal,
+                    text_hash=task_text_hash(text),
+                    task_key=task_key(current_phase_name, ordinal, text),
                     file_path=fp.group(1) if fp else None,
                 )
                 current_items.append(item)
                 current_parent = item
+                child_ordinals[id(item)] = 0
                 continue
 
-            # 대시 체크박스: - [ ] or - [x] (최상위 + 하위 모두)
-            dash_match = re.match(r'^(\s*)-\s*\[([ x→])\]\s*(.*)', line)
+            # 대시 체크박스: - [ ], - [/], - [x], - [→TODO] (최상위 + 하위 모두)
+            dash_match = re.match(rf'^(\s*)-\s*\[{CHECKBOX_MARKER_PATTERN}\]\s*(.*)', line)
             if dash_match:
                 indent = len(dash_match.group(1))
                 text = dash_match.group(3).strip()
+                marker = dash_match.group(2)
                 fp = file_path_pattern.search(text)
                 if indent > 0 and current_parent is not None:
                     # 들여쓰기 있음 → 하위 항목
+                    child_ordinals[id(current_parent)] = child_ordinals.get(id(current_parent), 0) + 1
+                    ordinal = f"{current_parent.item_ordinal}.{child_ordinals[id(current_parent)]}"
                     child = PlanItemResponse(
                         level=1,
                         text=text,
-                        checked=dash_match.group(2) == 'x',
+                        checked=is_done_marker(marker),
+                        marker=marker,
+                        state=checkbox_state(marker),
+                        phase_name=current_phase_name,
+                        item_ordinal=ordinal,
+                        text_hash=task_text_hash(text),
+                        task_key=task_key(current_phase_name, ordinal, text),
                         file_path=fp.group(1) if fp else None,
                     )
                     current_parent.children.append(child)
                 else:
                     # 들여쓰기 없음 → 상위 항목
+                    top_level_ordinal += 1
+                    ordinal = str(top_level_ordinal)
                     item = PlanItemResponse(
                         level=0,
                         text=text,
-                        checked=dash_match.group(2) == 'x',
+                        checked=is_done_marker(marker),
+                        marker=marker,
+                        state=checkbox_state(marker),
+                        phase_name=current_phase_name,
+                        item_ordinal=ordinal,
+                        text_hash=task_text_hash(text),
+                        task_key=task_key(current_phase_name, ordinal, text),
                         file_path=fp.group(1) if fp else None,
                     )
                     current_items.append(item)
                     current_parent = item
+                    child_ordinals[id(item)] = 0
 
         # 마지막 phase 저장
         if current_items:
@@ -543,7 +582,7 @@ class PlanScanner:
         """문서 전체에서 미완료 체크박스 텍스트 추출 (코드블록 제외)"""
         cleaned = PlanScanner._remove_code_blocks(content)
         # 멀티레벨 체크박스 지원: "- [ ]", "  - [ ]", "1. - [ ]" 모두 인식
-        matches = re.findall(r'^[ \t]*(?:\d+\.\s+)?[-*]\s*\[ \]\s*(.+)$', cleaned, re.MULTILINE)
+        matches = re.findall(r'^[ \t]*(?:\d+\.\s+)?[-*]\s*\[[ /]\]\s*(.+)$', cleaned, re.MULTILINE)
         return [PlanScanner._strip_markdown_inline(m) for m in matches]
 
 

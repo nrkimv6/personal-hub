@@ -261,11 +261,37 @@ class PlanStorageRootStatusResponse(BaseModel):
     push_needed_count: int = 0
 
 
+class PlanTaskExecutionClaimResponse(BaseModel):
+    """plan task 단위 실행 claim 표시용 read model."""
+
+    task_claim_id: str
+    state: str = "active"
+    runner_id: Optional[str] = None
+    job_id: Optional[str] = None
+    plan_claim_id: Optional[str] = None
+    engine: Optional[str] = None
+    session_id: Optional[str] = None
+    task_key: Optional[str] = None
+    phase_name: Optional[str] = None
+    item_ordinal: Optional[str] = None
+    text_hash: Optional[str] = None
+    started_at: Optional[str] = None
+    heartbeat_at: Optional[str] = None
+    stale: bool = False
+
+
 class PlanItemResponse(BaseModel):
     """plan 항목 (체크박스 1개)"""
     level: int  # 0=상위(번호), 1=하위(대시)
     text: str
     checked: bool
+    marker: str = " "
+    state: str = "pending"  # pending | running | done | claimed
+    execution_claims: List[PlanTaskExecutionClaimResponse] = Field(default_factory=list)
+    task_key: Optional[str] = None
+    phase_name: Optional[str] = None
+    item_ordinal: Optional[str] = None
+    text_hash: Optional[str] = None
     children: List['PlanItemResponse'] = []
     file_path: Optional[str] = None  # 파일 경로 언급 시
 
@@ -1550,6 +1576,7 @@ __all__ = [
     'RegisteredPathResponse',
     'LogResponse',
     'CurrentTrackingResponse',
+    'PlanTaskExecutionClaimResponse',
     'PlanItemResponse',
     'PlanPhaseResponse',
     'PlanDetailResponse',

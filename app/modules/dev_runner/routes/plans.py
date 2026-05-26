@@ -30,6 +30,10 @@ from app.modules.dev_runner.services.plan_record_service import PlanRecordServic
 from app.modules.dev_runner.services.plan_wait_tracking_service import (
     upsert_wait_tracking_for_plan,
 )
+from app.modules.dev_runner.services.plan_execution_claim_service import (
+    attach_task_execution_claims,
+    get_active_task_execution_claims_for_plan,
+)
 from app.modules.dev_runner.services.plan_path_helpers import (
     collect_plan_storage_root_candidates,
     iter_repo_plan_path_candidates,
@@ -258,7 +262,7 @@ async def get_plan_content(encoded_path: str):
 
 
 @router.get("/plans/{encoded_path}/items", response_model=PlanDetailResponse)
-async def get_plan_items(encoded_path: str):
+async def get_plan_items(encoded_path: str, db: Session = Depends(get_db)):
     """plan 항목 상세 조회 (Phase별 체크박스 파싱)"""
     try:
         decoded_path = _decode_path(encoded_path)
@@ -273,7 +277,9 @@ async def get_plan_items(encoded_path: str):
     if not path.exists():
         raise HTTPException(status_code=404, detail="Plan file not found")
 
-    return await asyncio.to_thread(plan_service.parse_plan_items, path)
+    detail = await asyncio.to_thread(plan_service.parse_plan_items, path)
+    claims = await asyncio.to_thread(get_active_task_execution_claims_for_plan, db, str(path))
+    return attach_task_execution_claims(detail, claims)
 
 
 @router.post("/plans/{encoded_path}/summary", status_code=202)

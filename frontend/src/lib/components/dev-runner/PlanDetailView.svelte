@@ -10,6 +10,14 @@
 
 	let { detail, status, onClose }: Props = $props();
 
+	function isRunningItem(item: DevRunnerPlanDetailResponse['phases'][number]['items'][number]): boolean {
+		return item.state === 'running' || item.marker === '/' || (item.execution_claims?.length ?? 0) > 0;
+	}
+
+	function claimLabel(claim: NonNullable<DevRunnerPlanDetailResponse['phases'][number]['items'][number]['execution_claims']>[number]): string {
+		return claim.runner_id || claim.job_id || claim.task_claim_id;
+	}
+
 	function statusBadge(s: string): string {
 		const map: Record<string, string> = {
 			'구현중': 'bg-blue-100 text-blue-700 border border-blue-200',
@@ -125,14 +133,30 @@
 								<svg class="w-3.5 h-3.5 shrink-0 text-green-500 mt-0.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
 									<polyline points="20 6 9 17 4 12" />
 								</svg>
+							{:else if isRunningItem(item)}
+								<span class="w-3.5 h-3.5 shrink-0 rounded-full bg-blue-500 mt-0.5 animate-pulse"></span>
 							{:else}
 								<svg class="w-3.5 h-3.5 shrink-0 text-muted-foreground/40 mt-0.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
 									<rect x="3" y="3" width="18" height="18" rx="2" ry="2" />
 								</svg>
 							{/if}
-							<span class="text-xs leading-snug {item.checked ? 'line-through text-muted-foreground' : 'text-foreground'}">
-								{item.text}
-							</span>
+							<div class="min-w-0 flex-1">
+								<span class="text-xs leading-snug {item.checked ? 'line-through text-muted-foreground' : 'text-foreground'}">
+									{item.text}
+								</span>
+								{#if item.marker === '/' || item.execution_claims?.length}
+									<div class="mt-1 flex flex-wrap items-center gap-1">
+										{#if item.marker === '/'}
+											<span class="inline-flex h-5 items-center rounded border border-blue-200 bg-blue-50 px-1.5 text-[10px] font-medium text-blue-700">running</span>
+										{/if}
+										{#each item.execution_claims ?? [] as claim}
+											<span class="inline-flex h-5 max-w-[150px] items-center rounded border border-slate-200 bg-slate-50 px-1.5 font-mono text-[10px] text-slate-700" title={claim.task_claim_id}>
+												{claimLabel(claim).slice(0, 12)}
+											</span>
+										{/each}
+									</div>
+								{/if}
+							</div>
 						</div>
 
 						{#each item.children as child}
@@ -141,14 +165,30 @@
 									<svg class="w-3 h-3 shrink-0 text-green-500 mt-0.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
 										<polyline points="20 6 9 17 4 12" />
 									</svg>
+								{:else if isRunningItem(child)}
+									<span class="w-3 h-3 shrink-0 rounded-full bg-blue-500 mt-0.5 animate-pulse"></span>
 								{:else}
 									<svg class="w-3 h-3 shrink-0 text-muted-foreground/40 mt-0.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
 										<rect x="3" y="3" width="18" height="18" rx="2" ry="2" />
 									</svg>
 								{/if}
-								<span class="text-xs leading-snug {child.checked ? 'line-through text-muted-foreground' : 'text-muted-foreground'}">
-									{child.text}
-								</span>
+								<div class="min-w-0 flex-1">
+									<span class="text-xs leading-snug {child.checked ? 'line-through text-muted-foreground' : 'text-muted-foreground'}">
+										{child.text}
+									</span>
+									{#if child.marker === '/' || child.execution_claims?.length}
+										<div class="mt-1 flex flex-wrap items-center gap-1">
+											{#if child.marker === '/'}
+												<span class="inline-flex h-4 items-center rounded border border-blue-200 bg-blue-50 px-1 text-[9px] font-medium text-blue-700">running</span>
+											{/if}
+											{#each child.execution_claims ?? [] as claim}
+												<span class="inline-flex h-4 max-w-[130px] items-center rounded border border-slate-200 bg-slate-50 px-1 font-mono text-[9px] text-slate-700" title={claim.task_claim_id}>
+													{claimLabel(claim).slice(0, 12)}
+												</span>
+											{/each}
+										</div>
+									{/if}
+								</div>
 							</div>
 						{/each}
 					{/each}

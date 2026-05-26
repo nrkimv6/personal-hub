@@ -237,8 +237,32 @@ export interface PlanItemResponse {
 	level: number;
 	text: string;
 	checked: boolean;
+	marker: string;
+	state: 'pending' | 'running' | 'done' | 'claimed' | string;
+	execution_claims: PlanTaskExecutionClaimResponse[];
+	task_key?: string | null;
+	phase_name?: string | null;
+	item_ordinal?: string | null;
+	text_hash?: string | null;
 	children: PlanItemResponse[];
 	file_path: string | null;
+}
+
+export interface PlanTaskExecutionClaimResponse {
+	task_claim_id: string;
+	state: string;
+	runner_id?: string | null;
+	job_id?: string | null;
+	plan_claim_id?: string | null;
+	engine?: string | null;
+	session_id?: string | null;
+	task_key?: string | null;
+	phase_name?: string | null;
+	item_ordinal?: string | null;
+	text_hash?: string | null;
+	started_at?: string | null;
+	heartbeat_at?: string | null;
+	stale: boolean;
 }
 
 export interface PlanPhaseResponse {

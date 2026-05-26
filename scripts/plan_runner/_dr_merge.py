@@ -149,7 +149,7 @@ def _resolve_post_merge_plan_file(plan_file: str | None, runner_id: str, redis_c
 
 
 def _plan_completion_progress_value(content: str) -> str:
-    checkboxes = re.findall(r"(?m)^\s*[-*]\s+\[(x|X| )\]", content)
+    checkboxes = re.findall(r"(?m)^\s*[-*]\s+\[(x|X| |/)\]", content)
     if not checkboxes:
         return "100%"
     total_count = len(checkboxes)

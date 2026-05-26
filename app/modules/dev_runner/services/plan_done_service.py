@@ -150,7 +150,7 @@ class PlanDoneService:
     @staticmethod
     def _todo_line_matches_plan(line: str, plan_title: str, plan_path: Path | None = None) -> bool:
         """Return True only for the TODO checkbox item for this completed plan."""
-        checkbox_match = re.match(r'^\s*[-*]\s*\[[ xX→]\]\s*(.+?)\s*$', line)
+        checkbox_match = re.match(r'^\s*[-*]\s*\[[ xX→/]\]\s*(.+?)\s*$', line)
         if not checkbox_match:
             return False
 

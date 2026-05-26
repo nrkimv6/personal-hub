@@ -188,7 +188,7 @@ def _remaining_leaf_summary_for_plan(plan_file: str | None) -> dict[str, int]:
     if not plan_path or not plan_path.exists():
         return summary
     current_phase = ""
-    checkbox_re = re.compile(r"^\s*(?:[-*]|\d+\.)\s+(?:[-*]\s+)?\[\s\]")
+    checkbox_re = re.compile(r"^\s*(?:[-*]|\d+\.)\s+(?:[-*]\s+)?\[[ /]\]")
     phase_re = re.compile(r"^\s*#{1,6}\s+(.+?)\s*$")
     try:
         for line in plan_path.read_text(encoding="utf-8", errors="replace").splitlines():
