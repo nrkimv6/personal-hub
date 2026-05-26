@@ -144,8 +144,54 @@ class CoupangMonitorService:
                 )
 
                 if state_key not in self._previous_statuses:
-                    # 최초: 상태만 저장, 알림 없음
                     self._previous_statuses[state_key] = current
+                    if not self._is_item_available(vi):
+                        # 최초 unavailable은 상태만 저장하고 알림을 보내지 않는다.
+                        continue
+
+                    change = StatusChange(
+                        date=date,
+                        item_name=vi.vendor_item_name,
+                        old_status="UNKNOWN",
+                        new_status=current.sale_status,
+                        old_stock=0,
+                        new_stock=current.stock_count,
+                    )
+                    changes.append(change)
+                    core_notify = self._is_within_notify_times(notify_times)
+                    kakao_notify = self._should_send_kakao_alert(date, change)
+
+                    if not core_notify and not kakao_notify:
+                        logger.warning(
+                            "[CoupangMonitorService] 알림 제외: date=%s item=%s core_notify=%s kakao_notify=%s",
+                            change.date,
+                            change.item_name,
+                            core_notify,
+                            kakao_notify,
+                        )
+                        continue
+
+                    logger.warning(
+                        "[CoupangMonitorService] 최초 available 알림 전송 결정: date=%s item=%s core_notify=%s kakao_notify=%s",
+                        change.date,
+                        change.item_name,
+                        core_notify,
+                        kakao_notify,
+                    )
+                    await self._send_notification(
+                        change,
+                        send_telegram=core_notify,
+                        send_desktop=core_notify,
+                        send_kakao=kakao_notify,
+                        kakao_metadata={
+                            "date": change.date,
+                            "item_name": change.item_name,
+                            "old_status": change.old_status,
+                            "new_status": change.new_status,
+                            "old_stock": change.old_stock,
+                            "new_stock": change.new_stock,
+                        },
+                    )
                     continue
 
                 prev = self._previous_statuses[state_key]

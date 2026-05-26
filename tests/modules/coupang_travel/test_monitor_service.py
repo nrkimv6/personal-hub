@@ -38,7 +38,7 @@ async def test_check_and_notify_initial_no_alert():
 
 @pytest.mark.asyncio
 async def test_check_and_notify_initial_available_writes_event_without_alert():
-    """R: 최초 available 호출은 event를 쓰지만 상태 bootstrap만 하고 알림은 보내지 않는다."""
+    """R: 최초 available 호출은 event를 쓰고 core 알림도 보낸다."""
     service, api_client, notification = make_service()
     api_client.fetch_vendor_items = AsyncMock(return_value=[
         VendorItem(vendor_item_name="옵션A", sale_status="ON_SALE", stock_count=2)
@@ -53,13 +53,32 @@ async def test_check_and_notify_initial_available_writes_event_without_alert():
             schedule_id=77,
         )
 
-    assert changes == []
-    notification.send_notification_message.assert_not_called()
+    assert len(changes) == 1
+    assert changes[0].old_status == "UNKNOWN"
+    assert changes[0].new_status == "ON_SALE"
+    notification.send_notification_message.assert_called_once()
     mock_write.assert_called_once()
     result = mock_write.call_args.kwargs["result"]
     assert mock_write.call_args.kwargs["schedule_id"] == 77
     assert result.available_count == 1
     assert result.slots[0].available_count == 2
+
+
+@pytest.mark.asyncio
+async def test_check_and_notify_initial_available_then_same_no_duplicate():
+    """B: 최초 available 알림 뒤 같은 상태 반복은 중복 알림을 보내지 않는다."""
+    service, api_client, notification = make_service()
+    api_client.fetch_vendor_items = AsyncMock(return_value=[
+        VendorItem(vendor_item_name="옵션A", sale_status="ON_SALE", stock_count=2)
+    ])
+
+    await service.check_and_notify("123", "pkg", ["2026-04-10"], make_page())
+    notification.send_notification_message.reset_mock()
+
+    changes = await service.check_and_notify("123", "pkg", ["2026-04-10"], make_page())
+
+    assert changes == []
+    notification.send_notification_message.assert_not_called()
 
 
 @pytest.mark.asyncio
@@ -278,13 +297,14 @@ async def test_check_and_notify_stock_change():
 
 @pytest.mark.asyncio
 async def test_check_and_notify_no_change():
-    """B: 상태 동일 2회 → StatusChange 빈 리스트, notification 0회"""
+    """B: 최초 available 알림 후 상태 동일 반복 → StatusChange 빈 리스트, notification 0회"""
     service, api_client, notification = make_service()
 
     same_items = [VendorItem(vendor_item_name="옵션A", sale_status="ON_SALE", stock_count=3)]
     api_client.fetch_vendor_items = AsyncMock(return_value=same_items)
 
     await service.check_and_notify("123", "pkg", ["2026-04-10"], make_page())
+    notification.send_notification_message.reset_mock()
     changes = await service.check_and_notify("123", "pkg", ["2026-04-10"], make_page())
 
     assert changes == []
