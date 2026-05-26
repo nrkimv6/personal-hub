@@ -22,6 +22,18 @@ from pathlib import Path
 
 FRONTEND_ROOT = Path(__file__).parents[2] / "frontend" / "src"
 
+
+def read_eventus_surface() -> str:
+    """Read the Eventus UI surface after the route was split into a wrapper + workspace."""
+    page = (FRONTEND_ROOT / "routes" / "eventus" / "+page.svelte").read_text(
+        encoding="utf-8"
+    )
+    if "EventusWorkspace" in page:
+        return (
+            FRONTEND_ROOT / "routes" / "eventus" / "EventusWorkspace.svelte"
+        ).read_text(encoding="utf-8")
+    return page
+
 # ---------------------------------------------------------------------------
 # T1-14a: MonitorType union + MONITOR_TYPE_META.eventus
 # ---------------------------------------------------------------------------
@@ -138,9 +150,7 @@ def test_monitoring_unified_eventus_id_prefix_distinct_from_event_summary():
 
 def test_eventus_page_imports_eventus_slot_display_helper():
     """S: /eventus +page.svelte가 eventusSlotDisplay에서 parseEventusSlots를 import하는지 검증한다."""
-    eventus_page = (
-        FRONTEND_ROOT / "routes" / "eventus" / "+page.svelte"
-    ).read_text(encoding="utf-8")
+    eventus_page = read_eventus_surface()
     assert "parseEventusSlots" in eventus_page, (
         "+page.svelte에 parseEventusSlots import가 없습니다."
         " eventusSlotDisplay 헬퍼가 사용되지 않습니다."
@@ -202,9 +212,7 @@ def test_eventus_slot_display_ts_label_fallback_chain():
 
 def test_eventus_page_history_thead_uses_open_option_label():
     """S: /eventus +page.svelte history table thead의 컬럼명이 '잔여' 대신 '열린 옵션'인지 검증한다."""
-    eventus_page = (
-        FRONTEND_ROOT / "routes" / "eventus" / "+page.svelte"
-    ).read_text(encoding="utf-8")
+    eventus_page = read_eventus_surface()
     # '열린 옵션' should be in the thead
     assert "열린 옵션" in eventus_page, (
         "+page.svelte history thead에 '열린 옵션' 컬럼명이 없습니다."
@@ -219,9 +227,7 @@ def test_eventus_page_history_thead_uses_open_option_label():
 
 def test_eventus_page_button_uses_button_component_click_contract():
     """S: /eventus page uses Button's onclick prop, not component on:click directives."""
-    eventus_page = (
-        FRONTEND_ROOT / "routes" / "eventus" / "+page.svelte"
-    ).read_text(encoding="utf-8")
+    eventus_page = read_eventus_surface()
     button_blocks = re.findall(r"<Button\b.*?(?:</Button>|/>)", eventus_page, re.DOTALL)
     offenders = [
         block.strip().splitlines()[0]

@@ -2,5 +2,5 @@ import { redirect } from '@sveltejs/kit';
 import type { PageLoad } from './$types';
 
 export const load: PageLoad = () => {
-  redirect(307, '/instagram/posts?tab=settings');
+  redirect(307, '/collect/schedule');
 };
