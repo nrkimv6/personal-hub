@@ -146,6 +146,53 @@ async def test_raw_fields_present():
 
 
 # ---------------------------------------------------------------------------
+# raw key regression (Phase T1 — slot display contract)
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_raw_includes_time_key_and_bundle_id_regression():
+    """R(regression): raw dict에 timeKey, bundleId, availableCountKnown, urgencyHint 키가 항상 포함된다.
+
+    eventusSlotDisplay.ts 파서가 이 키에 의존하므로 adapter가 누락하면 안 된다.
+    """
+    html = """
+    <html><!-- event-us -->
+    <body>
+    <h1>TC Regression Event</h1>
+    <a href="/regorg/event">RegOrg</a>
+    <div v-if="userSlectedBundle.id === 'bundle_reg'">
+    <ui-menu-item>
+      <span>6/10 14:00~16:00</span>
+    </ui-menu-item>
+    </div>
+    <script>var ProjectId = 111;</script>
+    </body>
+    </html>
+    """
+    adapter = _make_adapter(html)
+    result = await adapter.check(source_url=_SOURCE_URL, target_bundle_id="bundle_reg")
+
+    open_slots = [s for s in result.slots if s.available_count > 0]
+    assert len(open_slots) >= 1, "열린 슬롯이 하나 이상 있어야 합니다."
+    raw = open_slots[0].raw
+    assert "timeKey" in raw, (
+        "raw에 timeKey 키가 없습니다. eventusSlotDisplay.ts 파서가 의존하는 키입니다."
+    )
+    assert "bundleId" in raw, (
+        "raw에 bundleId 키가 없습니다. eventusSlotDisplay.ts 파서가 의존하는 키입니다."
+    )
+    assert "availableCountKnown" in raw, (
+        "raw에 availableCountKnown 키가 없습니다. 수량 미확인 표시에 필요합니다."
+    )
+    assert "urgencyHint" in raw, (
+        "raw에 urgencyHint 키가 없습니다. 마감임박 배지에 필요합니다."
+    )
+    assert raw["availableCountKnown"] is False, (
+        "Eventus는 정확한 좌석 수를 알 수 없으므로 availableCountKnown은 항상 False여야 합니다."
+    )
+
+
+# ---------------------------------------------------------------------------
 # Fetch error
 # ---------------------------------------------------------------------------
 

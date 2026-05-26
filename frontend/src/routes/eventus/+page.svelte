@@ -11,6 +11,13 @@
 	} from '$lib/api/eventusReservation';
 	import type { MonitoringEvent } from '$lib/types';
 	import { Plus, RefreshCw, Search, X, CalendarCheck } from 'lucide-svelte';
+	import {
+		parseEventusSlots,
+		getOpenSlots,
+		getClosedSlots,
+		getSlotLabel,
+		getSlotStatusText
+	} from '$lib/utils/eventusSlotDisplay';
 
 	type ActiveTab = 'schedules' | 'history';
 
@@ -471,7 +478,7 @@
 								<th class="px-3 py-2 text-left">ID</th>
 								<th class="px-3 py-2 text-left">시각</th>
 								<th class="px-3 py-2 text-left">상태</th>
-								<th class="px-3 py-2 text-left">잔여</th>
+								<th class="px-3 py-2 text-left">열린 옵션</th>
 								<th class="px-3 py-2 text-left">일정 ID</th>
 								<th class="px-3 py-2 text-left">상세</th>
 							</tr>
@@ -486,7 +493,25 @@
 											{evt.status}
 										</span>
 									</td>
-									<td class="px-3 py-2">{evt.available_count ?? 0}</td>
+									<td class="px-3 py-2">
+										{@const evtSlots = parseEventusSlots(evt.slots_info ?? [])}
+										{@const evtOpen = getOpenSlots(evtSlots)}
+										{#if evtSlots.length === 0}
+											<span class="text-muted-foreground text-xs">시간대 정보 없음</span>
+										{:else if evtOpen.length === 0}
+											<span class="text-muted-foreground text-xs">열린 옵션 없음</span>
+										{:else}
+											<span class="text-xs">
+												{#if evtOpen.length === 1}
+													{getSlotLabel(evtOpen[0])}{#if evtOpen[0].urgencyHint === 'imminent'} <span class="rounded bg-orange-100 px-1 py-0.5 text-orange-700">마감임박</span>{/if}
+												{:else if evtOpen.length === 2}
+													{getSlotLabel(evtOpen[0])}, {getSlotLabel(evtOpen[1])}
+												{:else}
+													{getSlotLabel(evtOpen[0])}, {getSlotLabel(evtOpen[1])} 외 {evtOpen.length - 2}개
+												{/if}
+											</span>
+										{/if}
+									</td>
 									<td class="px-3 py-2">{evt.schedule_id}</td>
 									<td class="px-3 py-2">
 										<Button variant="ghost" size="sm" onclick={() => openDetail(evt)}>보기</Button>
@@ -527,14 +552,69 @@
 			<dl class="text-sm space-y-1">
 				<div class="flex gap-2"><dt class="font-medium w-24">상태:</dt><dd>{selectedEvent.status}</dd></div>
 				<div class="flex gap-2"><dt class="font-medium w-24">시각:</dt><dd>{selectedEvent.timestamp}</dd></div>
-				<div class="flex gap-2"><dt class="font-medium w-24">잔여:</dt><dd>{selectedEvent.available_count}</dd></div>
+				<div class="flex gap-2"><dt class="font-medium w-24">잔여(합계):</dt><dd>{selectedEvent.available_count}</dd></div>
 				<div class="flex gap-2"><dt class="font-medium w-24">일정 ID:</dt><dd>{selectedEvent.schedule_id}</dd></div>
 			</dl>
-			{#if selectedEvent.slots_info}
+			{#if selectedEvent.slots_info && selectedEvent.slots_info.length > 0}
+				{@const modalSlots = parseEventusSlots(selectedEvent.slots_info)}
+				{@const modalOpen = getOpenSlots(modalSlots)}
+				{@const modalClosed = getClosedSlots(modalSlots)}
 				<div>
-					<p class="font-medium text-sm mb-1">슬롯 정보:</p>
-					<pre class="text-xs bg-muted rounded p-2 overflow-auto max-h-48">{JSON.stringify(selectedEvent.slots_info, null, 2)}</pre>
+					<p class="font-medium text-sm mb-1">열린 옵션 <span class="text-muted-foreground font-normal">({modalOpen.length}개)</span></p>
+					{#if modalOpen.length === 0}
+						<p class="text-xs text-muted-foreground">열린 옵션 없음</p>
+					{:else}
+						<table class="w-full text-xs border rounded mb-2">
+							<thead class="bg-muted/50">
+								<tr>
+									<th class="px-2 py-1 text-left">시간대</th>
+									<th class="px-2 py-1 text-left">상태</th>
+								</tr>
+							</thead>
+							<tbody>
+								{#each modalOpen as slot (slot.slotId ?? slot.bundleId)}
+									<tr class="border-t">
+										<td class="px-2 py-1">{getSlotLabel(slot)}</td>
+										<td class="px-2 py-1">
+											{#if slot.urgencyHint === 'imminent'}
+												<span class="rounded bg-orange-100 px-1 py-0.5 text-orange-700">마감임박</span>
+											{:else}
+												<span class="text-green-700">{getSlotStatusText(slot)}</span>
+											{/if}
+										</td>
+									</tr>
+								{/each}
+							</tbody>
+						</table>
+					{/if}
+					{#if modalClosed.length > 0}
+						<details class="text-xs">
+							<summary class="cursor-pointer text-muted-foreground mb-1">마감 옵션 {modalClosed.length}개 보기</summary>
+							<table class="w-full border rounded mt-1">
+								<thead class="bg-muted/50">
+									<tr>
+										<th class="px-2 py-1 text-left">시간대</th>
+										<th class="px-2 py-1 text-left">사유</th>
+									</tr>
+								</thead>
+								<tbody>
+									{#each modalClosed as slot (slot.slotId ?? slot.bundleId)}
+										<tr class="border-t">
+											<td class="px-2 py-1">{getSlotLabel(slot)}</td>
+											<td class="px-2 py-1 text-muted-foreground">{slot.closedText ?? '마감'}</td>
+										</tr>
+									{/each}
+								</tbody>
+							</table>
+						</details>
+					{/if}
 				</div>
+				<details class="text-xs">
+					<summary class="cursor-pointer text-muted-foreground">원시 슬롯 데이터 보기</summary>
+					<pre class="text-xs bg-muted rounded p-2 overflow-auto max-h-48 mt-1">{JSON.stringify(selectedEvent.slots_info, null, 2)}</pre>
+				</details>
+			{:else if selectedEvent.slots_info !== null && selectedEvent.slots_info !== undefined}
+				<p class="text-xs text-muted-foreground">슬롯 정보 없음</p>
 			{/if}
 		</div>
 	</div>

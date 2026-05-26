@@ -444,6 +444,63 @@ def test_check_now_BOUNDARY_missing_source_url_returns_400(eventus_http_context,
 # monitoring events service_type filter
 # ---------------------------------------------------------------------------
 
+def test_check_now_right_slots_info_list_preserved_with_label_and_time_key(eventus_http_context, monkeypatch):
+    """R: check-now 후 /monitoring/events 응답에서 slots_info가 label/timeKey를 포함한 list로 보존된다.
+
+    Phase T1 TC — eventusSlotDisplay.ts가 읽는 slots_info 구조가 API에서 그대로 반환되는지 확인.
+    """
+    client, factory = eventus_http_context
+    target = _create_target(client)
+    schedule_id = _create_schedule(client, target["id"])
+
+    class FakeAdapter:
+        async def check(self, **kwargs):
+            return AvailabilityCheckResult(
+                source_type="eventus",
+                slots=[
+                    AvailabilitySlot(
+                        source_type="eventus",
+                        available_count=1,
+                        raw={
+                            "sourceType": "eventus",
+                            "bundleId": "bundle_morning_A",
+                            "timeKey": "10:00",
+                            "availableCountKnown": False,
+                            "urgencyHint": None,
+                            "dateLabel": "6/1",
+                        },
+                        label="10:00",
+                    )
+                ],
+                fetch_method="anonymous_html",
+            )
+
+    monkeypatch.setattr(monitor_routes, "_adapter", FakeAdapter())
+
+    check_resp = client.post(f"/api/v1/eventus/schedules/{schedule_id}/check-now")
+    assert check_resp.status_code == 200
+
+    events_resp = client.get("/api/v1/monitoring/events?service_type=eventus")
+    assert events_resp.status_code == 200
+    items = events_resp.json()["items"]
+    assert len(items) >= 1, "이벤트가 하나 이상 있어야 합니다."
+    slots_info = items[0]["slots_info"]
+    assert isinstance(slots_info, list), (
+        "slots_info가 list가 아닙니다. API Pydantic 변환 경로가 slots_info를 보존해야 합니다."
+    )
+    assert len(slots_info) >= 1, "slots_info가 비어 있습니다."
+    first_slot = slots_info[0]
+    assert first_slot.get("timeKey") == "10:00", (
+        f"slots_info[0].timeKey가 '10:00'이 아닙니다: {first_slot.get('timeKey')}"
+    )
+    assert first_slot.get("bundleId") == "bundle_morning_A", (
+        f"slots_info[0].bundleId가 'bundle_morning_A'가 아닙니다: {first_slot.get('bundleId')}"
+    )
+    assert first_slot.get("availableCountKnown") is False, (
+        "slots_info[0].availableCountKnown이 False가 아닙니다. 수량 미확인 표시에 필요합니다."
+    )
+
+
 def test_eventus_monitoring_events_RIGHT_service_type_filter_returns_only_eventus(eventus_http_context):
     """R: GET /monitoring/events?service_type=eventus → eventus 이벤트만 반환."""
     client, factory = eventus_http_context

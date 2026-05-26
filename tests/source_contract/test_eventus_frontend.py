@@ -8,6 +8,11 @@ Covered items (plan Phase T1, item 14):
   - MonitorType includes 'eventus'; existing 'event' preserved
   - monitoringUnified.ts has fetchEventusItems + toggle branch
   - monitoring page uses MONITOR_TYPE_META.eventus; type=eventus deep link
+
+Covered items (plan Phase T1, item 5 — slot display contract):
+  - +page.svelte imports parseEventusSlots / eventusSlotDisplay
+  - eventusSlotDisplay.ts contains availableCountKnown / 수량 미확인 text
+  - eventusSlotDisplay.ts has label→timeKey→bundleId→'시간대 정보 없음' fallback chain
 """
 
 from __future__ import annotations
@@ -123,6 +128,92 @@ def test_monitoring_unified_eventus_id_prefix_distinct_from_event_summary():
     # eventus- prefix
     assert "eventus-" in unified_ts, (
         "monitoringUnified.ts에 eventus- id prefix가 없습니다."
+    )
+
+
+# ---------------------------------------------------------------------------
+# T1-5a: +page.svelte imports eventusSlotDisplay helper
+# ---------------------------------------------------------------------------
+
+
+def test_eventus_page_imports_eventus_slot_display_helper():
+    """S: /eventus +page.svelte가 eventusSlotDisplay에서 parseEventusSlots를 import하는지 검증한다."""
+    eventus_page = (
+        FRONTEND_ROOT / "routes" / "eventus" / "+page.svelte"
+    ).read_text(encoding="utf-8")
+    assert "parseEventusSlots" in eventus_page, (
+        "+page.svelte에 parseEventusSlots import가 없습니다."
+        " eventusSlotDisplay 헬퍼가 사용되지 않습니다."
+    )
+    assert "eventusSlotDisplay" in eventus_page, (
+        "+page.svelte에 '$lib/utils/eventusSlotDisplay' import 경로가 없습니다."
+    )
+
+
+# ---------------------------------------------------------------------------
+# T1-5b: eventusSlotDisplay.ts has availableCountKnown / 수량 미확인 text
+# ---------------------------------------------------------------------------
+
+
+def test_eventus_slot_display_ts_has_available_count_known_contract():
+    """S: eventusSlotDisplay.ts에 availableCountKnown 필드와 '수량 미확인' 문구가 있는지 검증한다."""
+    slot_display_ts = (
+        FRONTEND_ROOT / "lib" / "utils" / "eventusSlotDisplay.ts"
+    ).read_text(encoding="utf-8")
+    assert "availableCountKnown" in slot_display_ts, (
+        "eventusSlotDisplay.ts에 availableCountKnown 필드가 없습니다."
+        " Eventus는 정확한 좌석 수를 알 수 없으므로 이 필드가 반드시 필요합니다."
+    )
+    assert "수량 미확인" in slot_display_ts, (
+        "eventusSlotDisplay.ts에 '수량 미확인' 문구가 없습니다."
+        " availableCountKnown=false인 슬롯에 UI가 오해 없이 표시해야 합니다."
+    )
+
+
+# ---------------------------------------------------------------------------
+# T1-5c: eventusSlotDisplay.ts helper fallback chain
+# ---------------------------------------------------------------------------
+
+
+def test_eventus_slot_display_ts_label_fallback_chain():
+    """S: getSlotLabel fallback 순서(label→timeKey→bundleId→시간대 정보 없음)가 소스에 존재하는지 검증한다."""
+    slot_display_ts = (
+        FRONTEND_ROOT / "lib" / "utils" / "eventusSlotDisplay.ts"
+    ).read_text(encoding="utf-8")
+    # All four steps of the fallback chain must appear in source
+    assert "slot.label" in slot_display_ts, (
+        "eventusSlotDisplay.ts getSlotLabel에 slot.label fallback이 없습니다."
+    )
+    assert "slot.timeKey" in slot_display_ts or "timeKey" in slot_display_ts, (
+        "eventusSlotDisplay.ts getSlotLabel에 timeKey fallback이 없습니다."
+    )
+    assert "slot.bundleId" in slot_display_ts or "bundleId" in slot_display_ts, (
+        "eventusSlotDisplay.ts getSlotLabel에 bundleId fallback이 없습니다."
+    )
+    assert "시간대 정보 없음" in slot_display_ts, (
+        "eventusSlotDisplay.ts getSlotLabel에 '시간대 정보 없음' 최종 fallback이 없습니다."
+    )
+
+
+# ---------------------------------------------------------------------------
+# T1-5d: +page.svelte history thead has '열린 옵션' instead of '잔여'
+# ---------------------------------------------------------------------------
+
+
+def test_eventus_page_history_thead_uses_open_option_label():
+    """S: /eventus +page.svelte history table thead의 컬럼명이 '잔여' 대신 '열린 옵션'인지 검증한다."""
+    eventus_page = (
+        FRONTEND_ROOT / "routes" / "eventus" / "+page.svelte"
+    ).read_text(encoding="utf-8")
+    # '열린 옵션' should be in the thead
+    assert "열린 옵션" in eventus_page, (
+        "+page.svelte history thead에 '열린 옵션' 컬럼명이 없습니다."
+        " '잔여'에서 변경이 적용되지 않았습니다."
+    )
+    # The old raw available_count display should not exist in the table cell
+    assert "{evt.available_count ?? 0}" not in eventus_page, (
+        "+page.svelte history 표 행에 '{evt.available_count ?? 0}' raw 표시가 남아 있습니다."
+        " slot summary로 대체돼야 합니다."
     )
 
 
