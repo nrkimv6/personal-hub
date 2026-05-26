@@ -26,7 +26,7 @@ DEFAULT_REAL_RUNNER_ENGINE = "claude"
 ENGINE = os.environ.get("E2E_REAL_DEV_RUNNER_ENGINE", DEFAULT_REAL_RUNNER_ENGINE)
 MAX_CYCLES = int(os.environ.get("E2E_REAL_DEV_RUNNER_MAX_CYCLES", "2"))
 MAX_ATTEMPTS = int(os.environ.get("E2E_REAL_DEV_RUNNER_MAX_ATTEMPTS", "2"))
-HTTP_TIMEOUT = httpx.Timeout(10.0, connect=2.0)
+HTTP_TIMEOUT = httpx.Timeout(30.0, connect=2.0)
 RUNNER_KEY_PREFIX = "plan-runner:runners"
 TERMINAL_FAILURE_TOKENS = (
     "[FAILURE]",
