@@ -12,13 +12,9 @@
 
 	type ActiveTab = 'schedules' | 'history';
 
-	interface Props {
-		view?: string | null;
-		sub?: string | null;
-		unified?: boolean;
-	}
-
-	let { view = null, sub = null, unified = false }: Props = $props();
+	export let view: string | null = null;
+	export let sub: string | null = null;
+	export let unified = false;
 
 	type PopplySlot = {
 		reservationDate?: string;

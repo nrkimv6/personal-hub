@@ -18,12 +18,8 @@
 
   type ScheduleTab = 'schedules' | 'booking' | 'recurring' | 'history' | 'businesses' | 'popup_monitor';
 
-  interface Props {
-    sub?: string | null;
-    unified?: boolean;
-  }
-
-  let { sub = null, unified = false }: Props = $props();
+  export let sub: string | null = null;
+  export let unified = false;
 
   let schedules: ScheduleWithContext[] = [];
   let businesses: Business[] = [];
