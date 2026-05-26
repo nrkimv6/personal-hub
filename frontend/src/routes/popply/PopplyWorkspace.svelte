@@ -12,9 +12,13 @@
 
 	type ActiveTab = 'schedules' | 'history';
 
-	export let view: string | null = null;
-	export let sub: string | null = null;
-	export let unified = false;
+	interface Props {
+		view?: string | null;
+		sub?: string | null;
+		unified?: boolean;
+	}
+
+	let { view = null, sub = null, unified = false }: Props = $props();
 
 	type PopplySlot = {
 		reservationDate?: string;
@@ -50,18 +54,14 @@
 		return 'schedules';
 	}
 
-	$: {
+	$effect(() => {
 		if (unified) activeTab = normalizePopplyTab(sub ?? view);
-	}
+	});
 
-	let popplyTabs = [
-		{ id: 'schedules', label: '일정', href: undefined as string | undefined },
-		{ id: 'history', label: '실행내역', href: undefined as string | undefined }
-	];
-	$: popplyTabs = [
+	const popplyTabs = $derived([
 		{ id: 'schedules', label: '일정', href: unified ? '/monitoring?type=popply&view=schedules' : undefined },
 		{ id: 'history', label: '실행내역', href: unified ? '/monitoring?type=popply&view=history' : undefined }
-	];
+	]);
 	const fieldClass = 'h-9 rounded-md border border-input bg-background px-3 text-sm text-foreground';
 
 	let historyPage = 1;
