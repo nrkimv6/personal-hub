@@ -1,5 +1,5 @@
 param(
-    [ValidateSet("Commit", "Status", "PostCheckout", "Dirty")]
+    [ValidateSet("Commit", "Status", "PostCheckout", "Dirty", "PreRebase")]
     [string]$Mode = "Status"
 )
 
@@ -223,6 +223,33 @@ if ($Mode -eq "Dirty") {
     [Console]::Error.WriteLine("affected paths:")
     $dirtyImpl | ForEach-Object { [Console]::Error.WriteLine("  - $_") }
     [Console]::Error.WriteLine("recommended recovery: run scripts\diagnostics\rescue-root-impl-dirty.ps1 first without -Apply, inspect the classification, then rerun with -Apply only when the rescue worktree target is correct.")
+    exit 1
+}
+
+if ($Mode -eq "PreRebase") {
+    Write-Context $context
+    if (-not $context.IsRootCheckout) {
+        Write-Output "root_main_rebase_guard_clean: not root checkout"
+        exit 0
+    }
+    if ($context.Branch -ne "main") {
+        Write-Output "root_main_rebase_guard_clean: branch=$($context.Branch)"
+        exit 0
+    }
+
+    if ($env:ROOT_GUARD_ALLOW_MAIN_REBASE -eq "1") {
+        $approver = if ($null -eq $env:ROOT_GUARD_MAIN_REBASE_APPROVER) { "" } else { $env:ROOT_GUARD_MAIN_REBASE_APPROVER.Trim() }
+        $reason = if ($null -eq $env:ROOT_GUARD_MAIN_REBASE_REASON) { "" } else { $env:ROOT_GUARD_MAIN_REBASE_REASON.Trim() }
+        if (-not [string]::IsNullOrWhiteSpace($approver) -and -not [string]::IsNullOrWhiteSpace($reason)) {
+            [Console]::Error.WriteLine("root_main_rebase_guard_override: approver=$approver reason=$reason at=$(Get-Date -Format o)")
+            exit 0
+        }
+        [Console]::Error.WriteLine("root_main_rebase_guard_override_incomplete: ROOT_GUARD_MAIN_REBASE_APPROVER and ROOT_GUARD_MAIN_REBASE_REASON are required.")
+        exit 1
+    }
+
+    [Console]::Error.WriteLine("root_main_rebase_blocked: root checkout main must not be rebased. Use guarded candidate-tip receive or an explicit recovery decision.")
+    [Console]::Error.WriteLine("override requires ROOT_GUARD_ALLOW_MAIN_REBASE=1 plus ROOT_GUARD_MAIN_REBASE_APPROVER and ROOT_GUARD_MAIN_REBASE_REASON.")
     exit 1
 }
 

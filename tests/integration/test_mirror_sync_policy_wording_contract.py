@@ -21,7 +21,6 @@ def test_receiver_policy_does_not_reintroduce_blanket_pull_ban() -> None:
     forbidden = (
         "root receiver divergence",
         "receiver divergence",
-        "plain `git pull` 금지",
         "root `main`이 `origin/main`과 diverge된 상태에서 plain `git pull` 금지",
         "literal `git pull --ff-only` 수신만 허용한다",
     )
@@ -45,4 +44,19 @@ def test_receiver_policy_uses_state_matrix_and_narrow_mirror_ban() -> None:
     )
     for phrase in required:
         assert phrase in combined
+
+
+def test_receiver_policy_requires_guarded_candidate_tip_receive() -> None:
+    guide = _read(REPO_ROOT / "docs/dev-guide/root-branch-guard.md")
+
+    required = (
+        "scripts/services/pull-main-guarded.ps1",
+        "scripts/diagnostics/check-candidate-tip.ps1",
+        "duplicate_patch_blocked",
+        "stale_ancestry_blocked",
+        "ROOT_GUARD_ALLOW_MAIN_REBASE",
+        "plain `git pull`",
+    )
+    for phrase in required:
+        assert phrase in guide
 

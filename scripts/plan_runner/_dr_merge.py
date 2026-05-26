@@ -1269,6 +1269,167 @@ def _write_pre_merge_snapshot(runner_id: str, branch: str, project_root: Path, p
     return str(snapshot_path)
 
 
+def _run_git_lines(project_root: Path, args: list[str], timeout: int = 30) -> list[str]:
+    result = subprocess.run(
+        ["git", *args],
+        cwd=str(project_root),
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        timeout=timeout,
+    )
+    if result.returncode != 0:
+        raise RuntimeError(f"git {' '.join(args)} failed ({result.returncode}): {(result.stderr or '').strip()}")
+    return [line.strip() for line in (result.stdout or "").splitlines() if line.strip()]
+
+
+def _git_one(project_root: Path, args: list[str], timeout: int = 30) -> str:
+    lines = _run_git_lines(project_root, args, timeout=timeout)
+    return lines[0] if lines else ""
+
+
+def _git_is_ancestor(project_root: Path, ancestor: str, descendant: str) -> bool:
+    result = subprocess.run(
+        ["git", "merge-base", "--is-ancestor", ancestor, descendant],
+        cwd=str(project_root),
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        timeout=15,
+    )
+    return result.returncode == 0
+
+
+def _changed_paths(project_root: Path, rev_range: str) -> list[str]:
+    return sorted({line.replace("\\", "/") for line in _run_git_lines(project_root, ["diff", "--name-only", rev_range])})
+
+
+def _commit_paths(project_root: Path, commit: str) -> list[str]:
+    return sorted(
+        {
+            line.replace("\\", "/")
+            for line in _run_git_lines(project_root, ["show", "--format=", "--name-only", commit])
+            if line.strip()
+        }
+    )
+
+
+def _stable_patch_id(project_root: Path, commit: str) -> str:
+    show = subprocess.run(
+        ["git", "show", commit, "--pretty=format:", "--patch"],
+        cwd=str(project_root),
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        timeout=30,
+    )
+    if show.returncode != 0:
+        return ""
+    patch_id = subprocess.run(
+        ["git", "patch-id", "--stable"],
+        cwd=str(project_root),
+        input=show.stdout,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        timeout=30,
+    )
+    if patch_id.returncode != 0 or not patch_id.stdout.strip():
+        return ""
+    return patch_id.stdout.strip().split()[0]
+
+
+def _candidate_tip_evidence(project_root: Path, base: str, branch: str) -> dict:
+    current = _git_one(project_root, ["rev-parse", "--verify", base])
+    candidate = _git_one(project_root, ["rev-parse", "--verify", branch])
+    merge_base = _git_one(project_root, ["merge-base", current, candidate])
+    current_is_ancestor = _git_is_ancestor(project_root, current, candidate)
+    incoming_commits = _run_git_lines(project_root, ["rev-list", "--reverse", f"{current}..{candidate}"])
+    merge_commits = _run_git_lines(project_root, ["rev-list", "--merges", "--reverse", f"{current}..{candidate}"])
+    candidate_paths = _changed_paths(project_root, f"{merge_base}..{candidate}") if merge_base else []
+    main_paths = _changed_paths(project_root, f"{merge_base}..{current}") if merge_base else []
+    overlap = sorted(set(candidate_paths) & set(main_paths))
+    overlap_ratio = round(len(overlap) / max(1, len(set(candidate_paths))), 4)
+
+    duplicates = []
+    for line in _run_git_lines(project_root, ["cherry", "-v", current, candidate]):
+        match = re.match(r"^-\s+([0-9a-fA-F]+)\s*(.*)$", line)
+        if not match:
+            continue
+        commit = match.group(1)
+        duplicates.append(
+            {
+                "commit": commit,
+                "subject": match.group(2).strip(),
+                "patch_id": _stable_patch_id(project_root, commit),
+                "paths": _commit_paths(project_root, commit),
+            }
+        )
+
+    mirror_paths = [
+        path
+        for path in _changed_paths(project_root, f"{current}..{candidate}")
+        if re.match(r"^(\.agents|\.agent|\.claude|\.gemini)/", path)
+    ]
+    merge_parents = []
+    for merge_commit in merge_commits:
+        parent_line = _git_one(project_root, ["show", "-s", "--format=%P", merge_commit])
+        parents = []
+        for parent in [item for item in parent_line.split() if item]:
+            parents.append(
+                {
+                    "commit": parent,
+                    "current_main_is_ancestor": _git_is_ancestor(project_root, current, parent),
+                    "parent_is_ancestor_of_current_main": _git_is_ancestor(project_root, parent, current),
+                }
+            )
+        merge_parents.append({"commit": merge_commit, "parents": parents})
+
+    blockers = []
+    if not current_is_ancestor:
+        blockers.append("stale_ancestry_blocked")
+    if duplicates:
+        blockers.append("duplicate_patch_blocked")
+    warnings = []
+    if overlap_ratio >= 0.5 and overlap:
+        warnings.append("duplicate_patch_suspect")
+
+    return {
+        "base": current,
+        "branch": branch,
+        "candidate": candidate,
+        "merge_base": merge_base,
+        "current_main_is_ancestor": current_is_ancestor,
+        "incoming_commits": incoming_commits,
+        "merge_commits": merge_commits,
+        "merge_parents": merge_parents,
+        "duplicates": duplicates,
+        "mirror_paths": mirror_paths,
+        "path_overlap_ratio": overlap_ratio,
+        "path_overlap_paths": overlap,
+        "blockers": blockers,
+        "warnings": warnings,
+    }
+
+
+def _persist_candidate_tip_evidence(redis_client: redis.Redis, runner_id: str, evidence: dict) -> None:
+    try:
+        redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:candidate_tip_evidence", json.dumps(evidence, ensure_ascii=False))
+        if evidence.get("duplicates"):
+            redis_client.set(
+                f"{RUNNER_KEY_PREFIX}:{runner_id}:duplicate_patch_commits",
+                json.dumps(evidence.get("duplicates"), ensure_ascii=False),
+            )
+        if evidence.get("path_overlap_ratio") is not None:
+            redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:path_overlap_ratio", str(evidence.get("path_overlap_ratio")))
+    except Exception:
+        pass
+
+
 def _check_stale_merge_gate(
     runner_id: str,
     redis_client: redis.Redis,
@@ -1298,18 +1459,58 @@ def _check_stale_merge_gate(
     except Exception:
         pass
 
+    candidate_evidence: dict = {}
+    candidate_blockers: list[str] = []
+    try:
+        candidate_evidence = _candidate_tip_evidence(project_root, "main", branch)
+        _persist_candidate_tip_evidence(redis_client, runner_id, candidate_evidence)
+        candidate_blockers = list(candidate_evidence.get("blockers") or [])
+        warnings = list(candidate_evidence.get("warnings") or [])
+        if warnings:
+            pub_fn(
+                "candidate tip WARN: "
+                f"warnings={','.join(warnings)}, path_overlap_ratio={candidate_evidence.get('path_overlap_ratio')}, branch={branch}"
+            )
+        if candidate_blockers:
+            duplicate_count = len(candidate_evidence.get("duplicates") or [])
+            pub_fn(
+                "candidate tip BLOCK: "
+                f"blockers={','.join(candidate_blockers)}, duplicate_count={duplicate_count}, branch={branch}"
+            )
+    except Exception as exc:
+        candidate_blockers = ["candidate_tip_check_failed"]
+        candidate_evidence = {"blockers": candidate_blockers, "error": str(exc), "branch": branch}
+        _persist_candidate_tip_evidence(redis_client, runner_id, candidate_evidence)
+        pub_fn(f"candidate tip check failed — safe block: {exc}")
+
     if risk == "WARN":
         pub_fn("stale merge WARN — 수동 확인 필요 로그를 남기고 merge를 계속 진행")
 
     allow_override = os.environ.get("DEV_RUNNER_ALLOW_STALE_MERGE") == "1"
-    if risk == "BLOCK" and not allow_override:
-        reason = "stale_merge_blocked"
+    hard_blockers = list(candidate_blockers)
+    if risk == "BLOCK":
+        hard_blockers.append("stale_merge_blocked")
+    if hard_blockers and not allow_override:
+        if "duplicate_patch_blocked" in hard_blockers:
+            reason = "duplicate_patch_blocked"
+        elif "stale_ancestry_blocked" in hard_blockers:
+            reason = "stale_ancestry_blocked"
+        elif "candidate_tip_check_failed" in hard_blockers:
+            reason = "candidate_tip_check_failed"
+        else:
+            reason = "stale_merge_blocked"
+        block_message = (
+            f"{reason}: candidate tip guard blocked branch={branch}; "
+            f"blockers={','.join(dict.fromkeys(hard_blockers))}; "
+            f"duplicates={len(candidate_evidence.get('duplicates') or [])}; "
+            f"path_overlap_ratio={candidate_evidence.get('path_overlap_ratio')}"
+        )
         transition = _transition_merge_status(
             runner_id,
             redis_client,
             ERROR,
             reason=reason,
-            message=message,
+            message=block_message,
             action_name=action_name,
         )
         if not transition.allowed:
@@ -1321,22 +1522,24 @@ def _check_stale_merge_gate(
                 "action": action_name,
                 "reason": state.merge_reason or state.merge_status or transition.reason,
                 "stale_merge": {"risk": risk, "behind": behind, "ahead": ahead, "branch": branch},
+                "candidate_tip": candidate_evidence,
             }, None
         return {
             "success": False,
-            "message": message,
+            "message": block_message,
             "merge_status": ERROR,
             "action": action_name,
             "reason": reason,
             "stale_merge": {"risk": risk, "behind": behind, "ahead": ahead, "branch": branch},
+            "candidate_tip": candidate_evidence,
         }, None
 
-    if risk == "BLOCK":
+    if hard_blockers:
         approver = os.environ.get("DEV_RUNNER_STALE_MERGE_APPROVER", "").strip() or "unknown"
         override_reason = os.environ.get("DEV_RUNNER_STALE_MERGE_REASON", "").strip() or "not provided"
         pub_fn(
             "stale merge BLOCK override 사용: "
-            f"approver={approver}, reason={override_reason}, at={datetime.now().isoformat()}"
+            f"approver={approver}, reason={override_reason}, blockers={','.join(dict.fromkeys(hard_blockers))}, at={datetime.now().isoformat()}"
         )
 
     try:

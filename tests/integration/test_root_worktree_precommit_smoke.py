@@ -35,6 +35,10 @@ def _copy_hook_scripts(src_root: Path, dst_root: Path) -> None:
         src_root / "scripts" / "git-hooks" / "post-checkout-root-branch-guard.ps1",
         dst_hooks / "post-checkout-root-branch-guard.ps1",
     )
+    shutil.copy2(
+        src_root / "scripts" / "git-hooks" / "pre-rebase-root-guard.ps1",
+        dst_hooks / "pre-rebase-root-guard.ps1",
+    )
 
 
 def _init_repo(tmp_path: Path) -> Path:
@@ -113,6 +117,15 @@ def _install_post_checkout_hook(repo: Path) -> None:
     guard = repo / "scripts" / "git-hooks" / "post-checkout-root-branch-guard.ps1"
     hook.write_text(
         f'#!/bin/sh\npowershell.exe -NoProfile -ExecutionPolicy Bypass -File "{guard.as_posix()}" "$1" "$2" "$3"\n',
+        encoding="utf-8",
+    )
+
+
+def _install_pre_rebase_hook(repo: Path) -> None:
+    hook = repo / ".git" / "hooks" / "pre-rebase"
+    guard = repo / "scripts" / "git-hooks" / "pre-rebase-root-guard.ps1"
+    hook.write_text(
+        f'#!/bin/sh\npowershell.exe -NoProfile -ExecutionPolicy Bypass -File "{guard.as_posix()}" "$1" "$2"\n',
         encoding="utf-8",
     )
 
@@ -509,6 +522,73 @@ def test_root_guard_blocks_named_branch_even_with_transient_evidence(tmp_path):
     assert "root_branch_guard_violation" in output
     assert sentinel.exists()
     assert "branch=impl/foo" in sentinel.read_text(encoding="utf-8")
+
+
+def test_root_guard_pre_rebase_blocks_root_main_by_default(tmp_path):
+    repo = _init_repo(tmp_path)
+
+    result = _run_root_guard(repo, "PreRebase")
+
+    output = result.stdout + result.stderr
+    assert result.returncode != 0
+    assert "root_main_rebase_blocked" in output
+
+
+def test_root_guard_pre_rebase_allows_impl_worktree_branch(tmp_path):
+    repo = _init_repo(tmp_path)
+    worktree = repo / ".worktrees" / "impl-rebase"
+    _run(["git", "worktree", "add", str(worktree), "-b", "impl/rebase"], repo)
+
+    result = _run_root_guard(worktree, "PreRebase")
+
+    output = result.stdout + result.stderr
+    assert result.returncode == 0
+    assert "root_main_rebase_guard_clean: not root checkout" in output
+
+
+def test_pre_rebase_hook_blocks_git_rebase_on_root_main(tmp_path):
+    repo = _init_repo(tmp_path)
+    _install_pre_rebase_hook(repo)
+    (repo / "local.txt").write_text("local\n", encoding="utf-8")
+    _run(["git", "add", "local.txt"], repo)
+    _run(["git", "commit", "-m", "local"], repo)
+
+    result = subprocess.run(
+        ["git", "rebase", "--force-rebase", "HEAD~1"],
+        cwd=str(repo),
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+    )
+
+    output = result.stdout + result.stderr
+    assert result.returncode != 0
+    assert "root_main_rebase_blocked" in output
+
+
+def test_pre_rebase_hook_allows_impl_worktree_rebase(tmp_path):
+    repo = _init_repo(tmp_path)
+    _install_pre_rebase_hook(repo)
+    worktree = repo / ".worktrees" / "impl-rebase"
+    _run(["git", "worktree", "add", str(worktree), "-b", "impl/rebase"], repo)
+    (worktree / "impl.txt").write_text("impl\n", encoding="utf-8")
+    _run(["git", "add", "impl.txt"], worktree)
+    _run(["git", "commit", "-m", "impl"], worktree)
+    (repo / "main.txt").write_text("main\n", encoding="utf-8")
+    _run(["git", "add", "main.txt"], repo)
+    _run(["git", "commit", "-m", "main"], repo)
+
+    result = subprocess.run(
+        ["git", "rebase", "main"],
+        cwd=str(worktree),
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+    )
+
+    assert result.returncode == 0, result.stdout + result.stderr
 
 
 def test_root_guard_real_rebase_transient_detached_head_without_sentinel(tmp_path):

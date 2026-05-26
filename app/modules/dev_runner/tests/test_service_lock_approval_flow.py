@@ -377,3 +377,78 @@ def test_stale_gate_block_preserves_existing_terminal_approval_required_R():
     assert result["reason"] == "service_lock"
     assert fake.get(f"{prefix}:merge_status") == "approval_required"
     assert (f"{prefix}:merge_status", "error") not in fake.set_calls
+
+
+def test_stale_gate_blocks_duplicate_patch_even_when_divergence_warn_passes_R():
+    """overwrite-block: duplicate patch-id is a hard gate, not a behind-count WARN/PASS."""
+    _dr_merge, _dr_commands, merge_queue = _import_plan_runner_modules()
+
+    rid = "t-duplicate-patch-gate-001"
+    prefix = f"plan-runner:runners:{rid}"
+    fake = _FakeRedis()
+    evidence = {
+        "blockers": ["duplicate_patch_blocked"],
+        "warnings": [],
+        "duplicates": [
+            {
+                "commit": "abc1234",
+                "subject": "original patch",
+                "patch_id": "pid123",
+                "paths": ["app/foo.py"],
+            }
+        ],
+        "path_overlap_ratio": 1.0,
+    }
+
+    with patch("plan_worktree_helpers.get_branch_divergence", return_value=(12, 1)), \
+         patch("plan_worktree_helpers.classify_merge_risk", return_value="PASS"), \
+         patch.object(_dr_merge, "_candidate_tip_evidence", return_value=evidence):
+        result, snapshot = _dr_merge._check_stale_merge_gate(  # noqa: SLF001
+            rid,
+            fake,
+            "impl/stale-duplicate",
+            lambda _msg: None,
+            action_name="inline-merge",
+        )
+
+    assert snapshot is None
+    assert result["merge_status"] == "error"
+    assert result["reason"] == "duplicate_patch_blocked"
+    assert result["candidate_tip"]["duplicates"][0]["commit"] == "abc1234"
+    assert fake.get(f"{prefix}:merge_reason") == "duplicate_patch_blocked"
+    assert f"{prefix}:duplicate_patch_commits" in fake.store
+
+
+def test_stale_gate_warns_on_duplicate_patch_suspect_without_blocking_R(tmp_path):
+    """display: overlap heuristic is persisted as warning evidence for read models/logs."""
+    _dr_merge, _dr_commands, merge_queue = _import_plan_runner_modules()
+
+    rid = "t-duplicate-suspect-gate-001"
+    prefix = f"plan-runner:runners:{rid}"
+    fake = _FakeRedis()
+    logs: list[str] = []
+    evidence = {
+        "blockers": [],
+        "warnings": ["duplicate_patch_suspect"],
+        "duplicates": [],
+        "path_overlap_ratio": 0.75,
+        "path_overlap_paths": ["app/foo.py"],
+    }
+
+    with patch("plan_worktree_helpers.get_branch_divergence", return_value=(12, 1)), \
+         patch("plan_worktree_helpers.classify_merge_risk", return_value="PASS"), \
+         patch.object(_dr_merge, "_candidate_tip_evidence", return_value=evidence), \
+         patch.object(_dr_merge, "_write_pre_merge_snapshot", return_value=str(tmp_path / "snapshot.md")):
+        result, snapshot = _dr_merge._check_stale_merge_gate(  # noqa: SLF001
+            rid,
+            fake,
+            "impl/current",
+            logs.append,
+            project_root=tmp_path,
+            action_name="inline-merge",
+        )
+
+    assert result is None
+    assert snapshot == str(tmp_path / "snapshot.md")
+    assert fake.get(f"{prefix}:path_overlap_ratio") == "0.75"
+    assert any("duplicate_patch_suspect" in item for item in logs)
