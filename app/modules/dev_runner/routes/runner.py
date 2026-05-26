@@ -63,6 +63,12 @@ async def stop_runner(runner_id: str):
     return await executor_service.stop_dev_runner(runner_id)
 
 
+@router.post("/stop/{runner_id}")
+async def stop_runner_legacy(runner_id: str):
+    """특정 runner 중지 (legacy path)."""
+    return await executor_service.stop_dev_runner(runner_id)
+
+
 @router.post("/run", response_model=RunStatusResponse)
 async def start_run(request: RunRequest, http_request: Request):
     """plan-runner 실행 시작"""

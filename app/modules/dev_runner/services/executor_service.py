@@ -832,6 +832,15 @@ class ExecutorService:
             accepted = await self._enqueue_command(command)
             accepted_sent = True
             accepted_at = datetime.now()
+            runner_metadata = {
+                "status": "queued",
+                "plan_file": request.plan_file or "__ALL_PLANS__",
+                "engine": resolved_engine,
+                "trigger": trigger,
+                "start_time": accepted_at.isoformat(),
+            }
+            for suffix, value in runner_metadata.items():
+                await self.async_redis.set(self._runner_key(runner_id, suffix), str(value), ex=86400)
 
             self._best_effort_upsert_runner_state(
                 {
@@ -1015,6 +1024,11 @@ class ExecutorService:
             # Redis 사전 확인 (ping만 — listener는 stop 시에는 없을 수도 있음)
             try:
                 await self.async_redis.ping()
+            except RuntimeError as exc:
+                if "Event loop is closed" not in str(exc):
+                    raise
+                self.reconnect()
+                await self.async_redis.ping()
             except (redis.ConnectionError, ConnectionRefusedError, OSError):
                 raise HTTPException(
                     status_code=503,
@@ -1024,6 +1038,10 @@ class ExecutorService:
             # Redis를 통해 해당 runner 상태 확인
             status = await self.async_redis.get(self._runner_key(runner_id, "status"))
             if status != "running":
+                await self._preserve_recent_meta_for_non_running_runner(
+                    runner_id,
+                    reason=f"stop_non_running_status:{status or 'missing'}",
+                )
                 # stale 상태 정리: active_runners set에서 제거
                 await self.async_redis.srem(ACTIVE_RUNNERS_KEY, runner_id)
                 raise HTTPException(status_code=404, detail="Not running")
@@ -1058,6 +1076,51 @@ class ExecutorService:
             logger.error(f"[dev-runner] stop 실패: {traceback.format_exc()}")
             await self._cleanup_runner_state(runner_id, reason="stop_exception")
             raise HTTPException(status_code=500, detail=f"Failed to stop: {str(e)}")
+
+    async def _preserve_recent_meta_for_non_running_runner(self, runner_id: str, *, reason: str) -> bool:
+        """queued/starting runner가 stop 404로 끝나도 UI 복원용 recent-meta를 남긴다."""
+        try:
+            existing = await self.async_redis.get(f"plan-runner:recent-meta:{runner_id}")
+            if existing:
+                return True
+
+            data = await self._get_runner_fields(
+                runner_id,
+                "plan_file", "engine", "trigger", "execution_count", "log_file_path",
+                "stream_log_path", "exit_reason", "start_time", "accepted_at", "started_at",
+            )
+            if not any(data.get(key) for key in ("plan_file", "engine", "trigger", "accepted_at", "start_time")):
+                return False
+
+            plan_file = data.get("plan_file")
+            meta = {
+                "runner_id": runner_id,
+                "plan_file": plan_file,
+                "display_plan_name": Path(str(plan_file)).name if plan_file else None,
+                "engine": data.get("engine"),
+                "trigger": data.get("trigger"),
+                "execution_count": data.get("execution_count"),
+                "log_file_path": data.get("log_file_path"),
+                "stream_log_path": data.get("stream_log_path"),
+                "exit_reason": data.get("exit_reason") or reason,
+                "accepted_at": data.get("accepted_at") or data.get("start_time"),
+                "started_at": data.get("started_at") or data.get("start_time"),
+            }
+            compact_meta = {key: value for key, value in meta.items() if value is not None}
+            await self.async_redis.setex(
+                f"plan-runner:recent-meta:{runner_id}",
+                3600,
+                json.dumps(compact_meta, ensure_ascii=False),
+            )
+            return True
+        except Exception as exc:
+            logger.debug(
+                "[dev-runner] recent-meta preserve skipped runner_id=%s reason=%s error=%s",
+                runner_id,
+                reason,
+                exc,
+            )
+            return False
 
     @staticmethod
     def _parse_process_cmdline(cmdline: list[str]) -> dict[str, Any]:

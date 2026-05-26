@@ -60,3 +60,30 @@ def test_log_evidence_matrix_service_lock_merge_lines_count_as_runner_output_R(t
 def test_runner_id_parser_does_not_treat_legacy_stream_prefix_as_runner_id():
     legacy = Path("plan-runner-stream-20260513_172900.log")
     assert LogFileResolver._runner_id_from_log_name(legacy) is None
+
+
+def test_find_filesystem_log_right_fd_runner_pair_with_underscore_stream_timestamp(tmp_path):
+    runner_id = "fd6be696"
+    stream_file = tmp_path / f"plan-runner-stream-{runner_id}-20260523_215902.log"
+    main_file = tmp_path / f"plan-runner-{runner_id}-20260523-215902.log"
+    stream_file.write_text(
+        "[TRIGGER] user | plan=fix-dev-runner.md | runner_id=fd6be696\n"
+        "[RUN_META] started_at=2026-05-23T21:59:02 | execution_count=1 | plan_key=fix-dev-runner\n"
+        "[MERGE] branch preflight\n"
+        "[FAILURE] merge_failed\n",
+        encoding="utf-8",
+    )
+    main_file.write_text("[STDERR] merge failed detail\n", encoding="utf-8")
+
+    assert LogFileResolver._runner_id_from_log_name(stream_file) == runner_id
+    assert LogFileResolver._runner_id_from_log_name(main_file) == runner_id
+    assert _resolver(tmp_path).find_filesystem_log(runner_id) == stream_file
+
+
+def test_select_display_log_keeps_stream_when_stream_has_merge_failure(tmp_path):
+    stream_file = tmp_path / "plan-runner-stream-fd6be696-20260523_215902.log"
+    main_file = tmp_path / "plan-runner-fd6be696-20260523-215902.log"
+    stream_file.write_text("[MERGE] starting\n[FAILURE] merge_failed\n", encoding="utf-8")
+    main_file.write_text("[STDERR] fallback detail\n", encoding="utf-8")
+
+    assert LogFileResolver.select_display_log(stream_file, main_file) == stream_file

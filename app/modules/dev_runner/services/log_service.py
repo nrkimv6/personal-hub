@@ -155,6 +155,25 @@ class LogService:
         log_path = LogFileResolver._latest_existing(log_dir.glob(f"plan-runner-{runner_id}-*.log"))
         return LogFileResolver.select_display_log(stream_path, log_path)
 
+    def _resolve_read_log(self, runner_id: str) -> tuple[Optional[Path], str, Optional[str]]:
+        """recent/full 조회용 로그 파일과 진단 정보를 함께 결정한다."""
+        log_file = self._find_current_log(runner_id)
+        if log_file and log_file.exists():
+            return log_file, "filesystem", None
+
+        if runner_id.startswith("lg-"):
+            legacy_file = self._resolve_legacy_log(runner_id)
+            if legacy_file and legacy_file.exists():
+                return legacy_file, "legacy", None
+            return None, "legacy", f"legacy log source not found runner_id={runner_id}"
+
+        log_dir = self._get_log_dir()
+        filesystem_log = self._find_filesystem_log(runner_id, log_dir)
+        if filesystem_log and filesystem_log.exists():
+            return filesystem_log, "filesystem", None
+
+        return None, "none", f"log source not found runner_id={runner_id}"
+
     def _resolve_legacy_log(self, runner_id: str) -> Optional[Path]:
         """[shim] → self.resolver.resolve_legacy_log()"""
         self._sync_resolver()
@@ -177,11 +196,7 @@ class LogService:
 
     def tail_log_file(self, runner_id: str, n_lines: int = 100) -> LogResponse:
         """로그 파일 끝에서 N줄 읽기 (초기 로드용)."""
-        log_file = self._find_current_log(runner_id)
-
-        # Phase 2 fallback: lg- 접두사 pseudo runner_id → 레거시 파일 탐색
-        if log_file is None and runner_id.startswith("lg-"):
-            log_file = self._resolve_legacy_log(runner_id)
+        log_file, source, diagnostic = self._resolve_read_log(runner_id)
 
         if log_file and log_file.exists():
             try:
@@ -195,11 +210,21 @@ class LogService:
                         lines=[line.rstrip('\n') for line in sliced],
                         total_lines=len(sliced),
                         from_line=from_line,
+                        source=source,
                     )
+                return LogResponse(
+                    lines=[],
+                    total_lines=0,
+                    from_line=0,
+                    source=source,
+                    diagnostic=f"log file empty path={log_file}",
+                )
             except Exception as e:
                 return LogResponse(
                     lines=[f"Error reading log: {str(e)}"],
-                    total_lines=1
+                    total_lines=1,
+                    source=source,
+                    diagnostic=f"read error path={log_file}: {str(e)}",
                 )
 
         # fallback: Redis list에서 merge 로그 히스토리 조회 (dm-* runner 등 로그 파일 없는 경우)
@@ -208,11 +233,11 @@ class LogService:
             log_list_key = f"plan-runner:logs:list:{runner_id}"
             logs = self.redis_client.lrange(log_list_key, -n_lines, -1)
             if logs:
-                return LogResponse(lines=logs, total_lines=len(logs))
+                return LogResponse(lines=logs, total_lines=len(logs), source="redis")
         except Exception:
             pass
 
-        return LogResponse(lines=[], total_lines=0)
+        return LogResponse(lines=[], total_lines=0, source=source, diagnostic=diagnostic or "redis fallback empty")
 
     async def _stream_sse_loop(
         self,
@@ -716,20 +741,17 @@ class LogService:
 
     def get_full_log(self, runner_id: str, offset: int = 0, limit: int = 500) -> FullLogResponse:
         """종료된 Runner 전체 로그 조회 (offset/limit 청크 로드)"""
-        # 1. Redis에서 로그 파일 경로 조회
-        log_file = self._find_current_log(runner_id)
-
-        # 2. Redis에 없으면 파일 스캔으로 fallback
-        if log_file is None:
-            log_dir = self._get_log_dir()
-            if runner_id.startswith("lg-"):
-                # 레거시 pseudo runner_id → _legacy_map 또는 전체 스캔
-                log_file = self._resolve_legacy_log(runner_id)
-            else:
-                log_file = self._find_filesystem_log(runner_id, log_dir)
+        log_file, source, diagnostic = self._resolve_read_log(runner_id)
 
         if log_file is None or not log_file.exists():
-            return FullLogResponse(lines=[], total_lines=0, offset=offset, has_more=False)
+            return FullLogResponse(
+                lines=[],
+                total_lines=0,
+                offset=offset,
+                has_more=False,
+                source=source,
+                diagnostic=diagnostic,
+            )
 
         try:
             with open(log_file, "r", encoding="utf-8", errors="ignore") as f:
@@ -744,6 +766,8 @@ class LogService:
                 total_lines=total_lines,
                 offset=offset,
                 has_more=has_more,
+                source=source,
+                diagnostic=f"log file empty path={log_file}" if total_lines == 0 else None,
             )
         except Exception as e:
             return FullLogResponse(
@@ -751,6 +775,8 @@ class LogService:
                 total_lines=1,
                 offset=0,
                 has_more=False,
+                source=source,
+                diagnostic=f"read error path={log_file}: {str(e)}",
             )
 
     def publish_log(self, tag: str, message: str) -> None:

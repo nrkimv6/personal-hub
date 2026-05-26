@@ -221,6 +221,8 @@ export interface LogResponse {
 	lines: string[];
 	total_lines: number;
 	from_line: number;
+	source?: string | null;
+	diagnostic?: string | null;
 }
 
 export interface CurrentTrackingResponse {
@@ -628,6 +630,8 @@ export interface FullLogResponse {
 	total_lines: number;
 	offset: number;
 	has_more: boolean;
+	source?: string | null;
+	diagnostic?: string | null;
 }
 
 export const devRunnerLogApi = {

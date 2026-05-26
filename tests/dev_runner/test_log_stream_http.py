@@ -248,6 +248,56 @@ def test_http_recent_uses_main_log_when_redis_has_start_only_stream_pair(local_c
 
 
 @pytest.mark.http
+def test_http_recent_boundary_long_branch_preflight_line_not_empty(local_client, tmp_path):
+    runner_id = "fd6be696"
+    stream_file = tmp_path / f"plan-runner-stream-{runner_id}-20260523_215902.log"
+    main_file = tmp_path / f"plan-runner-{runner_id}-20260523-215902.log"
+    long_preflight = "[BRANCH_PREFLIGHT] " + json.dumps({"changed_paths": [f"file-{i}.py" for i in range(250)]})
+    stream_file.write_text(
+        "[TRIGGER] user | plan=fix-dev-runner.md | runner_id=fd6be696\n"
+        "[RUN_META] started_at=2026-05-23T21:59:02 | execution_count=1 | plan_key=fix-dev-runner\n"
+        f"{long_preflight}\n"
+        "[MERGE] attempting merge\n"
+        "[FAILURE] merge_failed\n",
+        encoding="utf-8",
+    )
+    main_file.write_text("[STDERR] merge failed detail\n", encoding="utf-8")
+
+    patches = _filesystem_only_log_service(tmp_path)
+    with patches[0], patches[1], patches[2]:
+        response = local_client.get(f"{BASE_URL}/logs/recent", params={"runner_id": runner_id, "lines": 20})
+
+    assert response.status_code == 200
+    payload = response.json()
+    joined = "\n".join(payload["lines"])
+    assert payload["source"] == "filesystem"
+    assert "[FAILURE] merge_failed" in joined
+    assert "BRANCH_PREFLIGHT" in joined
+
+
+@pytest.mark.http
+def test_http_full_error_missing_log_returns_diagnostic(local_client):
+    response = local_client.get(f"{BASE_URL}/logs/full", params={"runner_id": "missing-runner-id"})
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["lines"] == []
+    assert payload["source"] in {"none", "legacy"}
+    assert "missing-runner-id" in payload["diagnostic"]
+
+
+@pytest.mark.http
+def test_http_recent_empty_response_includes_source_and_diagnostic(local_client):
+    response = local_client.get(f"{BASE_URL}/logs/recent", params={"runner_id": "missing-recent-id", "lines": 20})
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["lines"] == []
+    assert payload["source"] in {"none", "legacy"}
+    assert "missing-recent-id" in payload["diagnostic"]
+
+
+@pytest.mark.http
 def test_fallback_sse_e2e(local_client):
     """T4: pubsub 미수신 후 fallback 모드에서 파일 내용이 SSE data: 이벤트로 전달된다.
 
