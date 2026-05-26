@@ -1,6 +1,6 @@
 """EntitySource SQLAlchemy Model - 이벤트/팝업의 다중 출처 관리."""
 
-from sqlalchemy import Column, Integer, String, Text, DateTime, Index
+from sqlalchemy import Boolean, Column, Integer, String, Text, DateTime, Index
 from sqlalchemy.orm import relationship
 from datetime import datetime
 
@@ -29,7 +29,7 @@ class EntitySource(Base):
 
     # 출처 메타정보
     priority = Column(Integer, default=50)  # 우선순위 (1-100, 높을수록 신뢰도 높음)
-    is_primary = Column(Integer, default=0, index=True)  # 대표 출처 여부
+    is_primary = Column(Boolean, default=False, index=True)  # 대표 출처 여부
     contributed_fields = Column(Text)  # JSON: 이 출처에서 가져온 필드 목록
 
     # 추출 정보 (LLM 분석 결과 원본)
