@@ -37,6 +37,32 @@ async def test_check_and_notify_initial_no_alert():
 
 
 @pytest.mark.asyncio
+async def test_check_and_notify_initial_available_writes_event_without_alert():
+    """R: 최초 available 호출은 event를 쓰지만 상태 bootstrap만 하고 알림은 보내지 않는다."""
+    service, api_client, notification = make_service()
+    api_client.fetch_vendor_items = AsyncMock(return_value=[
+        VendorItem(vendor_item_name="옵션A", sale_status="ON_SALE", stock_count=2)
+    ])
+
+    with patch.object(service_module, "write_availability_event") as mock_write:
+        changes = await service.check_and_notify(
+            "123",
+            "pkg",
+            ["2026-04-10"],
+            make_page(),
+            schedule_id=77,
+        )
+
+    assert changes == []
+    notification.send_notification_message.assert_not_called()
+    mock_write.assert_called_once()
+    result = mock_write.call_args.kwargs["result"]
+    assert mock_write.call_args.kwargs["schedule_id"] == 77
+    assert result.available_count == 1
+    assert result.slots[0].available_count == 2
+
+
+@pytest.mark.asyncio
 async def test_check_and_notify_status_change():
     """R: 2회 연속 호출 (1회차 초기화, 2회차 상태 변경) → StatusChange 1개, notification 1회"""
     service, api_client, notification = make_service()

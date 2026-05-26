@@ -167,6 +167,8 @@ async def test_eventus_worker_records_available_event(monkeypatch):
     try:
         event = db.query(MonitoringEvent).filter(MonitoringEvent.schedule_id == schedule_id).one()
         assert event.status == "available"
+        # intentional: first-check suppression per change_detector.py
+        assert notified == []
     finally:
         db.close()
         engine.dispose()

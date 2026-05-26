@@ -177,6 +177,48 @@ class TestAnonymousScheduleRoutesIntegration:
         )
         assert logged_kwargs["schedule_id"] == 9900
 
+    @pytest.mark.asyncio
+    async def test_anonymous_available_result_logs_event_and_sends_notification(self):
+        """
+        T3: anonymous available result가 EventLogger 기록 뒤 worker notification mock까지 이어진다.
+        """
+        from app.worker.naver_monitor_worker import NaverMonitorWorker
+        from app.worker.naver_monitor_cycle import NaverMonitorCycleRunner
+
+        worker = NaverMonitorWorker()
+        worker._site_monitor = MagicMock()
+        worker._cycle_runner = NaverMonitorCycleRunner(
+            site_monitor=worker._site_monitor, browser_manager=MagicMock()
+        )
+        worker._notification_service = MagicMock()
+        worker._notification_service.send_notification_message = AsyncMock()
+
+        schedule_meta = _make_schedule_meta(monitoring_mode="anonymous")
+        schedule_meta["is_enabled"] = True
+        worker._active_schedules[schedule_meta["id"]] = dict(schedule_meta, last_slots=[])
+
+        mock_anon = MagicMock()
+        mock_anon.check_availability = AsyncMock(
+            return_value=_make_anon_availability(slots=[
+                _make_slot("2026-04-25 10:00:00", unit_stock=3, unit_booking_count=1)
+            ])
+        )
+
+        with patch(
+            "app.modules.naver_booking.services.anonymous_monitor.get_anonymous_monitor",
+            return_value=mock_anon,
+        ):
+            with patch("app.services.event_logger.EventLogger.log_monitoring_event") as mock_log:
+                with patch.object(worker, "_update_schedule_run_state", AsyncMock()):
+                    await worker._check_schedule(dict(schedule_meta))
+
+        assert mock_log.call_count == 1
+        assert mock_log.call_args.kwargs["status"] == "available"
+        worker._notification_service.send_notification_message.assert_awaited_once()
+        message = worker._notification_service.send_notification_message.await_args.args[0]
+        assert "10:00" in message
+        assert schedule_meta["url"] in message
+
 
 class TestAdapterSlotFormatIntegration:
     """
