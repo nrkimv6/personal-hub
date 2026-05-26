@@ -29,15 +29,17 @@
 	import EventFormModal from '$lib/components/events/EventFormModal.svelte';
 	import EventFeedViewerModal from '$lib/components/events/EventFeedViewerModal.svelte';
 	import EventUrlImportModal from '$lib/components/events/EventUrlImportModal.svelte';
+	import EventDuplicateTab from '$lib/components/events/EventDuplicateTab.svelte';
 	import ExpoAdminWorkspace from '../expo/components/ExpoAdminWorkspace.svelte';
 	import expoData from '../expo/coffee-expo-2026/expo-data.json';
 
 	// 로컬 참여 상태 스토어 반응형 구독
 	const participatedMap = $derived($localParticipation);
 	const expo = expoData as ExpoMapDocument;
-	type TabMode = 'online' | 'offline' | 'popup' | 'uncategorized' | 'expo';
+	type TabMode = 'online' | 'offline' | 'popup' | 'uncategorized' | 'duplicates' | 'expo';
 	const DEFAULT_TAB: TabMode = 'online';
 	const ADMIN_EXPO_TAB: TabMode = 'expo';
+	const ADMIN_DUPLICATES_TAB: TabMode = 'duplicates';
 	const baseEventTabs = [
 		{ id: 'online', label: '온라인 이벤트', color: 'purple' },
 		{ id: 'offline', label: '오프라인 이벤트', color: 'green' },
@@ -157,25 +159,29 @@
 			url: $pageStore.url
 		}).canOpenExpoAdminWorkspace
 	);
+	const canOpenDuplicateReview = $derived($isAdmin);
 
 	// 탭 전환 탭 목록 (TabNav용)
 	const eventTabs = $derived.by(() => {
-		if (!canOpenExpoAdminWorkspace) {
-			return [...baseEventTabs];
+		const tabs: Array<{ id: TabMode; label: string; color: string }> = [...baseEventTabs];
+		if (canOpenDuplicateReview) {
+			tabs.push({ id: ADMIN_DUPLICATES_TAB, label: '중복 검토', color: 'blue' });
 		}
-
-		return [
-			...baseEventTabs,
-			{ id: ADMIN_EXPO_TAB, label: '커피엑스포 2026', color: 'amber' }
-		];
+		if (canOpenExpoAdminWorkspace) {
+			tabs.push({ id: ADMIN_EXPO_TAB, label: '커피엑스포 2026', color: 'amber' });
+		}
+		return tabs;
 	});
 
 	const isExpoTab = $derived(activeTab === ADMIN_EXPO_TAB);
+	const isDuplicateTab = $derived(activeTab === ADMIN_DUPLICATES_TAB);
+	const isManagedTab = $derived(isExpoTab || isDuplicateTab);
 
 	function getAvailableTabs(): TabMode[] {
-		return (canOpenExpoAdminWorkspace
-			? [...baseEventTabs.map((tab) => tab.id), ADMIN_EXPO_TAB]
-			: [...baseEventTabs.map((tab) => tab.id)]) as TabMode[];
+		const tabs = [...baseEventTabs.map((tab) => tab.id)] as TabMode[];
+		if (canOpenDuplicateReview) tabs.push(ADMIN_DUPLICATES_TAB);
+		if (canOpenExpoAdminWorkspace) tabs.push(ADMIN_EXPO_TAB);
+		return tabs;
 	}
 
 	function normalizeTab(rawTab: string | null): TabMode {
@@ -188,7 +194,7 @@
 	}
 
 	function applyDefaultStatusFilter(tab: TabMode) {
-		if (tab === ADMIN_EXPO_TAB) {
+		if (tab === ADMIN_EXPO_TAB || tab === ADMIN_DUPLICATES_TAB) {
 			filterEventStatus = null;
 			return;
 		}
@@ -222,7 +228,7 @@
 		const requestedTab = $pageStore.url.searchParams.get('tab');
 		const targetTab = normalizeTab(requestedTab);
 
-		if (requestedTab === ADMIN_EXPO_TAB && targetTab !== ADMIN_EXPO_TAB) {
+		if ((requestedTab === ADMIN_EXPO_TAB || requestedTab === ADMIN_DUPLICATES_TAB) && targetTab !== requestedTab) {
 			redirectToDefaultTab();
 			return;
 		}
@@ -234,7 +240,7 @@
 			applyDefaultStatusFilter(targetTab);
 
 			if (mounted) {
-				if (targetTab === ADMIN_EXPO_TAB) {
+				if (targetTab === ADMIN_EXPO_TAB || targetTab === ADMIN_DUPLICATES_TAB) {
 					loading = false;
 					error = null;
 					total = 0;
@@ -754,7 +760,7 @@
 		const requestedTab = searchParams.get('tab');
 		const normalizedTab = normalizeTab(requestedTab);
 
-		if (requestedTab === ADMIN_EXPO_TAB && normalizedTab !== ADMIN_EXPO_TAB) {
+		if ((requestedTab === ADMIN_EXPO_TAB || requestedTab === ADMIN_DUPLICATES_TAB) && normalizedTab !== requestedTab) {
 			redirectToDefaultTab();
 		}
 
@@ -779,7 +785,7 @@
 		}
 
 		// 5. 데이터 로드
-		if (normalizedTab === ADMIN_EXPO_TAB) {
+		if (normalizedTab === ADMIN_EXPO_TAB || normalizedTab === ADMIN_DUPLICATES_TAB) {
 			loading = false;
 			error = null;
 			total = 0;
@@ -788,7 +794,7 @@
 		}
 
 		// 6. event 파라미터로 모달 자동 열기 (데이터 로드 완료 후)
-		if (eventId && normalizedTab !== ADMIN_EXPO_TAB) {
+		if (eventId && normalizedTab !== ADMIN_EXPO_TAB && normalizedTab !== ADMIN_DUPLICATES_TAB) {
 			try {
 				const event = await eventApi.get(eventId);
 				openEditModal(event);
@@ -807,7 +813,7 @@
 </svelte:head>
 
 {#snippet headerActions()}
-	{#if $isAdmin && !isExpoTab}
+	{#if $isAdmin && !isManagedTab}
 		<div class="flex gap-2">
 			<Button variant="primary" size="sm" onclick={openCreateModal}>
 				<Plus size={16} />
@@ -822,7 +828,7 @@
 {/snippet}
 
 {#snippet filterToolbar()}
-	{#if !isExpoTab}
+	{#if !isManagedTab}
 		<div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
 			<div class="flex flex-wrap items-center gap-2">
 				{#if isAnonymous}
@@ -876,7 +882,7 @@
 	containerClass="space-y-3 p-4 md:p-6"
 >
 	<!-- 필터 패널 (로그인 사용자만) -->
-	{#if !isAnonymous && !isExpoTab}
+	{#if !isAnonymous && !isManagedTab}
 		<EventFilterPanel
 			{filterEventStatus}
 			{unknownPeriodFilter}
@@ -914,6 +920,8 @@
 			slug={expo.slug}
 			title={expo.title}
 		/>
+	{:else if isDuplicateTab}
+		<EventDuplicateTab />
 	{:else if loading}
 			<div class="flex justify-center items-center h-64">
 				<div class="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
@@ -1018,7 +1026,7 @@
 		{/if}
 
 		<!-- 페이지네이션 -->
-		{#if !isExpoTab && !loading && !error && (activeTab === 'popup' ? popups.length : activeTab === 'uncategorized' ? uncategorizedPosts.length : events.length) > 0}
+		{#if !isManagedTab && !loading && !error && (activeTab === 'popup' ? popups.length : activeTab === 'uncategorized' ? uncategorizedPosts.length : events.length) > 0}
 		<div class="flex flex-col sm:flex-row justify-between items-center gap-3 mt-6">
 			<span class="text-sm text-muted-foreground">
 				전체 {total}개 중 {(currentPage - 1) * pageSize + 1} - {Math.min(

@@ -13,6 +13,10 @@ import type {
   EventListParams,
   EventImportFromInstagram,
   EventImportFromUrlResponse,
+  DuplicateCandidate,
+  MergePreview,
+  MergeExecuteRequest,
+  MergeExecuteResponse,
   Popup,
   PopupCreate,
   PopupUpdate,
@@ -443,6 +447,40 @@ export const eventApi = {
       '이벤트 URL 가져오기 작업이 완료되지 않았습니다.',
     );
   }
+};
+
+export const eventDuplicateApi = {
+  candidates: (params?: { min_similarity?: number; max_similarity?: number; limit?: number }) => {
+    const searchParams = new URLSearchParams({ entity_type: 'event' });
+    if (params?.min_similarity !== undefined) searchParams.set('min_similarity', String(params.min_similarity));
+    if (params?.max_similarity !== undefined) searchParams.set('max_similarity', String(params.max_similarity));
+    if (params?.limit !== undefined) searchParams.set('limit', String(params.limit));
+    return request<DuplicateCandidate[]>(`/duplicates/candidates?${searchParams.toString()}`);
+  },
+
+  preview: (primaryId: number, secondaryId: number) => {
+    const searchParams = new URLSearchParams({
+      entity_type: 'event',
+      primary_id: String(primaryId),
+      secondary_id: String(secondaryId)
+    });
+    return request<MergePreview>(`/duplicates/preview?${searchParams.toString()}`);
+  },
+
+  merge: (data: MergeExecuteRequest) =>
+    request<MergeExecuteResponse>('/duplicates/merge', {
+      method: 'POST',
+      body: JSON.stringify({ entity_type: 'event', ...data })
+    }),
+
+  dismiss: (entity1Id: number, entity2Id: number) =>
+    request<{ entity_type: 'event'; entity1_id: number; entity2_id: number; dismissed: boolean }>(
+      '/duplicates/dismiss',
+      {
+        method: 'POST',
+        body: JSON.stringify({ entity_type: 'event', entity1_id: entity1Id, entity2_id: entity2Id })
+      }
+    )
 };
 
 // ============================================================

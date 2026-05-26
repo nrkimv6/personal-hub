@@ -11,9 +11,11 @@ from datetime import datetime
 from sqlalchemy.orm import Session
 from sqlalchemy import and_, or_
 
+from app.models.dismissed_duplicate import DismissedDuplicate
 from app.models.event import Event
 from app.models.popup import Popup
 from app.models.entity_source import EntitySource
+from app.schemas.duplicate_merge import DuplicateCandidateResponse, EventDuplicateSummary
 from app.utils.similarity import (
     normalize,
     normalize_url,
@@ -286,6 +288,117 @@ class DuplicateDetectionService:
 
         similar.sort(key=lambda x: x[1], reverse=True)
         return similar
+
+    def find_duplicate_candidates(
+        self,
+        db: Session,
+        entity_type: Literal["event"],
+        min_similarity: float = UNCERTAIN_THRESHOLD_LOW,
+        max_similarity: float = 0.99,
+        limit: int = 50,
+    ) -> List[DuplicateCandidateResponse]:
+        """Find bounded manual-review duplicate candidates.
+
+        First implementation supports events only. The scan is bounded to active
+        event records and de-duplicates sorted id pairs before applying dismissed
+        pair filtering.
+        """
+        if entity_type != "event":
+            raise ValueError("Only event duplicate candidates are supported")
+
+        min_similarity = max(0.0, min(1.0, min_similarity))
+        max_similarity = max(min_similarity, min(1.0, max_similarity))
+        limit = max(1, min(200, limit))
+
+        events = (
+            db.query(Event)
+            .filter(Event.status == "active")
+            .filter(Event.event_type == "event")
+            .order_by(Event.created_at.desc(), Event.id.desc())
+            .limit(300)
+            .all()
+        )
+
+        dismissed_pairs = {
+            (row.entity1_id, row.entity2_id)
+            for row in db.query(DismissedDuplicate)
+            .filter(DismissedDuplicate.entity_type == "event")
+            .all()
+        }
+
+        candidates: list[DuplicateCandidateResponse] = []
+        seen_pairs: set[tuple[int, int]] = set()
+        for index, first in enumerate(events):
+            for second in events[index + 1:]:
+                pair = DismissedDuplicate.ordered_pair(first.id, second.id)
+                if pair in seen_pairs or pair in dismissed_pairs:
+                    continue
+                seen_pairs.add(pair)
+
+                similarity = self.calculate_event_similarity(first, second)
+                if similarity < min_similarity or similarity > max_similarity:
+                    continue
+
+                matched_fields = self.get_event_matched_fields(first, second)
+                primary, secondary = self._choose_primary_event(first, second)
+                candidates.append(
+                    DuplicateCandidateResponse(
+                        entity1_id=pair[0],
+                        entity2_id=pair[1],
+                        similarity=round(similarity, 4),
+                        matched_fields=matched_fields,
+                        primary=self._event_summary(primary),
+                        secondary=self._event_summary(secondary),
+                    )
+                )
+
+        candidates.sort(key=lambda item: item.similarity, reverse=True)
+        return candidates[:limit]
+
+    def get_event_matched_fields(self, e1: Event, e2: Event) -> list[str]:
+        """Return field-level reasons that made two events look similar."""
+        fields: list[str] = []
+        if e1.event_url and e2.event_url and normalize_url(e1.event_url) == normalize_url(e2.event_url):
+            fields.append("event_url")
+        if dates_overlap(e1.event_start, e1.event_end, e2.event_start, e2.event_end):
+            fields.append("event_period")
+        if e1.organizer and e2.organizer and normalize(e1.organizer) == normalize(e2.organizer):
+            fields.append("organizer")
+        if e1.source_instagram_account and e2.source_instagram_account and e1.source_instagram_account == e2.source_instagram_account:
+            fields.append("source_instagram_account")
+        if e1.title and e2.title and text_similarity(e1.title, e2.title) >= 0.5:
+            fields.append("title")
+        prizes1 = self._parse_prizes(e1.prizes)
+        prizes2 = self._parse_prizes(e2.prizes)
+        if prizes1 and prizes2 and jaccard_similarity(prizes1, prizes2) >= 0.34:
+            fields.append("prizes")
+        return fields
+
+    def _choose_primary_event(self, first: Event, second: Event) -> tuple[Event, Event]:
+        """Choose a stable default primary for preview/candidate display."""
+        first_sources = first.source_count or 0
+        second_sources = second.source_count or 0
+        if first_sources != second_sources:
+            return (first, second) if first_sources > second_sources else (second, first)
+        first_created = first.created_at or datetime.min
+        second_created = second.created_at or datetime.min
+        if first_created != second_created:
+            return (first, second) if first_created <= second_created else (second, first)
+        return (first, second) if first.id <= second.id else (second, first)
+
+    def _event_summary(self, event: Event) -> EventDuplicateSummary:
+        return EventDuplicateSummary(
+            id=event.id,
+            title=event.title,
+            status=event.status,
+            organizer=event.organizer,
+            event_url=event.event_url,
+            event_start=event.event_start,
+            event_end=event.event_end,
+            source_type=event.source_type,
+            source_count=event.source_count or 0,
+            created_at=event.created_at,
+        )
 
     def _get_event_candidates(
         self,
