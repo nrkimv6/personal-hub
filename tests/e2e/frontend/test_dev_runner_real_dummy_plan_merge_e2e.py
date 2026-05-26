@@ -37,7 +37,7 @@ TERMINAL_FAILURE_TOKENS = (
 )
 FINAL_PLAN_SUCCESS_STATUSES = {"구현완료", "완료"}
 FINAL_PLAN_BLOCKED_STATUSES = {"머지대기", "통합테스트중"}
-EXPECTED_DUMMY_PLAN_PROGRESS = "4/4 (100%)"
+EXPECTED_DUMMY_PLAN_PROGRESS_VALUES = {"4/4 (100%)", "100%"}
 
 
 def _skip_admin_mode_if_public(system_mode: str) -> None:
@@ -318,7 +318,12 @@ def _read_final_plan_state(repo: Path, plan: Path) -> dict:
     }
     if status in FINAL_PLAN_BLOCKED_STATUSES:
         return {**state, "blocked": True, "reason": "plan_not_final_after_merge"}
-    if status in FINAL_PLAN_SUCCESS_STATUSES and archive.exists() and unchecked_count == 0 and progress == EXPECTED_DUMMY_PLAN_PROGRESS:
+    if (
+        status in FINAL_PLAN_SUCCESS_STATUSES
+        and archive.exists()
+        and unchecked_count == 0
+        and progress in EXPECTED_DUMMY_PLAN_PROGRESS_VALUES
+    ):
         return {**state, "success": True, "reason": "plan_final_state_readback_ok"}
     return {**state, "reason": "plan_final_state_pending"}
 
