@@ -12,6 +12,7 @@ Covered items (plan Phase T1, item 14):
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 FRONTEND_ROOT = Path(__file__).parents[2] / "frontend" / "src"
@@ -122,4 +123,21 @@ def test_monitoring_unified_eventus_id_prefix_distinct_from_event_summary():
     # eventus- prefix
     assert "eventus-" in unified_ts, (
         "monitoringUnified.ts에 eventus- id prefix가 없습니다."
+    )
+
+
+def test_eventus_page_button_uses_button_component_click_contract():
+    """S: /eventus page uses Button's onclick prop, not component on:click directives."""
+    eventus_page = (
+        FRONTEND_ROOT / "routes" / "eventus" / "+page.svelte"
+    ).read_text(encoding="utf-8")
+    button_blocks = re.findall(r"<Button\b.*?(?:</Button>|/>)", eventus_page, re.DOTALL)
+    offenders = [
+        block.strip().splitlines()[0]
+        for block in button_blocks
+        if re.search(r"\bon:click\s*=", block)
+    ]
+    assert offenders == [], (
+        "Button.svelte exposes an onclick prop; component-level on:click handlers "
+        f"are ignored on /eventus buttons: {offenders}"
     )

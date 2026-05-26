@@ -256,7 +256,7 @@
 						bind:value={analyzeInput}
 						on:keydown={(e) => e.key === 'Enter' && analyzeEvent()}
 					/>
-					<Button on:click={analyzeEvent} disabled={analyzeLoading || !analyzeInput.trim()}>
+					<Button onclick={analyzeEvent} disabled={analyzeLoading || !analyzeInput.trim()}>
 						{#if analyzeLoading}
 							<RefreshCw class="h-4 w-4 animate-spin mr-1" />분석 중...
 						{:else}
@@ -309,7 +309,7 @@
 						{#if createTargetError}
 							<p class="text-sm text-red-600">{createTargetError}</p>
 						{/if}
-						<Button on:click={createTargetFromAnalysis} disabled={createTargetLoading}>
+						<Button onclick={createTargetFromAnalysis} disabled={createTargetLoading}>
 							{#if createTargetLoading}
 								<RefreshCw class="h-4 w-4 animate-spin mr-1" />저장 중...
 							{:else}
@@ -335,7 +335,7 @@
 										{t.selected_time_key ? ` · ${t.selected_time_key}` : ''}
 									</p>
 								</div>
-								<Button variant="ghost" size="icon" on:click={() => deleteTarget(t)} title="삭제">
+								<Button variant="ghost" size="icon" onclick={() => deleteTarget(t)} title="삭제">
 									<X class="h-4 w-4" />
 								</Button>
 							</div>
@@ -356,7 +356,7 @@
 					</select>
 					<input class="{fieldClass}" type="date" bind:value={scheduleDate} />
 					<Button
-						on:click={addSchedule}
+						onclick={addSchedule}
 						disabled={!selectedTargetId || !scheduleDate}
 					>
 						<Plus class="h-4 w-4 mr-1" />추가
@@ -412,13 +412,13 @@
 									</td>
 									<td class="px-3 py-2">
 										<div class="flex gap-1">
-											<Button variant="outline" size="sm" on:click={() => toggleSchedule(s)}>
+											<Button variant="outline" size="sm" onclick={() => toggleSchedule(s)}>
 												{s.is_enabled ? '중지' : '시작'}
 											</Button>
-											<Button variant="outline" size="sm" on:click={() => checkNow(s)}>
+											<Button variant="outline" size="sm" onclick={() => checkNow(s)}>
 												확인
 											</Button>
-											<Button variant="ghost" size="icon" on:click={() => deleteSchedule(s)}>
+											<Button variant="ghost" size="icon" onclick={() => deleteSchedule(s)}>
 												<X class="h-3 w-3" />
 											</Button>
 										</div>
@@ -448,7 +448,7 @@
 					on:change={() => { historyPage = 1; loadHistory(); }} />
 				<input class="{fieldClass}" type="date" bind:value={historyFilters.date_to}
 					on:change={() => { historyPage = 1; loadHistory(); }} />
-				<Button variant="ghost" size="icon" on:click={() => loadHistory()}>
+				<Button variant="ghost" size="icon" onclick={() => loadHistory()}>
 					<RefreshCw class="h-4 w-4" />
 				</Button>
 			</div>
@@ -489,7 +489,7 @@
 									<td class="px-3 py-2">{evt.available_count ?? 0}</td>
 									<td class="px-3 py-2">{evt.schedule_id}</td>
 									<td class="px-3 py-2">
-										<Button variant="ghost" size="sm" on:click={() => openDetail(evt)}>보기</Button>
+										<Button variant="ghost" size="sm" onclick={() => openDetail(evt)}>보기</Button>
 									</td>
 								</tr>
 							{/each}
@@ -501,10 +501,10 @@
 				{#if historyTotalPages > 1}
 					<div class="flex items-center gap-2 text-sm">
 						<Button variant="outline" size="sm" disabled={historyPage <= 1}
-							on:click={() => { historyPage--; loadHistory(); }}>이전</Button>
+							onclick={() => { historyPage--; loadHistory(); }}>이전</Button>
 						<span>{historyPage} / {historyTotalPages} (총 {historyTotal}건)</span>
 						<Button variant="outline" size="sm" disabled={historyPage >= historyTotalPages}
-							on:click={() => { historyPage++; loadHistory(); }}>다음</Button>
+							onclick={() => { historyPage++; loadHistory(); }}>다음</Button>
 					</div>
 				{/if}
 			{/if}
@@ -522,7 +522,7 @@
 		<div class="bg-background rounded-lg shadow-lg max-w-lg w-full mx-4 p-4 space-y-3" on:click|stopPropagation>
 			<div class="flex items-center justify-between">
 				<h3 class="font-semibold">이벤트 상세 #{selectedEvent.id}</h3>
-				<Button variant="ghost" size="icon" on:click={closeDetail}><X class="h-4 w-4" /></Button>
+				<Button variant="ghost" size="icon" onclick={closeDetail}><X class="h-4 w-4" /></Button>
 			</div>
 			<dl class="text-sm space-y-1">
 				<div class="flex gap-2"><dt class="font-medium w-24">상태:</dt><dd>{selectedEvent.status}</dd></div>
