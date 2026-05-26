@@ -74,6 +74,42 @@ class TestTabReuseCycleBaseline:
         assert len(completed) == 12, f"완료 {len(completed)}/12 — starvation 없어야 함"
         assert all(not v for v in pool.tab_in_use.values()), "모든 탭이 반환된 상태여야 함"
 
+    @pytest.mark.asyncio
+    async def test_closed_available_tab_removed_and_fresh_tab_acquired(self, pool_factory):
+        """E: 닫힌 pool tab은 acquire 시 제거되고 fresh tab으로 대체된다."""
+        pool = pool_factory(total_max_tabs=5)
+        pool.tab_pools[1] = {}
+
+        stale_id = "1_1111"
+        stale_tab = MagicMock()
+        stale_tab._tab_id = stale_id
+        stale_tab._account_id = 1
+        stale_tab.is_closed = MagicMock(return_value=True)
+        pool.tab_pools[1][stale_id] = stale_tab
+        pool.tab_pool[stale_id] = stale_tab
+        pool.tab_last_used[stale_id] = time.time()
+        pool.tab_in_use[stale_id] = False
+        pool.tab_use_count[stale_id] = 0
+        pool.tab_account[stale_id] = 1
+        pool.total_active_tabs = 1
+
+        fresh_tab = MagicMock()
+        fresh_tab.set_extra_http_headers = AsyncMock()
+        fresh_tab.is_closed = MagicMock(return_value=False)
+        fresh_tab.evaluate = AsyncMock(return_value=True)
+
+        mock_context = MagicMock()
+        mock_context.pages = []
+        mock_context.new_page = AsyncMock(return_value=fresh_tab)
+        pool.context_manager.get_or_create_context = AsyncMock(return_value=mock_context)
+        pool.cleanup_old_tabs = AsyncMock(return_value=0)
+
+        acquired = await pool.get_tab(target_id=123, service_account_id=1)
+
+        assert acquired is fresh_tab
+        assert stale_id not in pool.tab_pool
+        assert stale_id not in pool.tab_pools[1]
+
 
 class TestReleaseExceptionNoStarvation:
     """_wake_waiters 예외 후에도 대기 요청이 starvation 없이 해소됨."""

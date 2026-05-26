@@ -29,7 +29,7 @@ from app.core.database import db_circuit
 from app.services.failure_alert_delivery import report_failure_alert
 from app.services.failure_alert_policy import FailureEvent
 from app.shared.worker.base_worker import BaseWorker
-from app.worker.crawl_worker_base import CrawlWorkerBase
+from app.shared.worker.exceptions import is_browser_closed_error
 from app.database import SessionLocal
 from app.models.google_search import (
     GoogleSearchQueue,
@@ -82,9 +82,8 @@ def _deserialize_search_params(raw_search_params: Optional[str]) -> Optional[dic
 
 
 def _is_browser_closed_error(error: Exception) -> bool:
-    """브라우저 관련 closed 오류인지 확인 (CrawlWorkerBase.BROWSER_CLOSED_KEYWORDS 재사용)."""
-    error_str = str(error)
-    return any(keyword in error_str for keyword in CrawlWorkerBase.BROWSER_CLOSED_KEYWORDS)
+    """브라우저 관련 closed 오류인지 확인."""
+    return is_browser_closed_error(error)
 
 
 class GoogleSearchWorker(BaseWorker):

@@ -21,6 +21,10 @@ from abc import abstractmethod
 from playwright.async_api import Page
 
 from app.shared.worker.base_worker import BaseWorker
+from app.shared.worker.exceptions import (
+    BROWSER_CLOSED_KEYWORDS as SHARED_BROWSER_CLOSED_KEYWORDS,
+    is_browser_closed_error,
+)
 from app.shared.browser.browser_manager import BrowserManager
 from app.database import SessionLocal
 from app.modules.instagram.services.worker_status_service import WorkerStatusService
@@ -40,13 +44,7 @@ class CrawlWorkerBase(BaseWorker):
     """
 
     # 브라우저 closed 에러 키워드들
-    BROWSER_CLOSED_KEYWORDS = [
-        "Target page, context or browser has been closed",
-        "browser has been closed",
-        "context has been closed",
-        "page has been closed",
-        "Target closed",
-    ]
+    BROWSER_CLOSED_KEYWORDS = SHARED_BROWSER_CLOSED_KEYWORDS
 
     def __init__(
         self,
@@ -142,8 +140,7 @@ class CrawlWorkerBase(BaseWorker):
         Returns:
             브라우저 closed 관련 오류 여부
         """
-        error_str = str(error)
-        return any(keyword in error_str for keyword in self.BROWSER_CLOSED_KEYWORDS)
+        return is_browser_closed_error(error)
 
     # ========== Worker Status 관련 (DB 연동) ==========
 

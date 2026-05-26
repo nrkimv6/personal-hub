@@ -14,6 +14,7 @@ import pytest
 from unittest.mock import AsyncMock, MagicMock
 
 from app.shared.browser.context_manager import ContextManager
+from app.shared.browser.tab_pool_manager import TabPoolManager
 
 
 def _make_mock_context():
@@ -119,6 +120,56 @@ class TestPopupHandlerRace:
 
         page_event_calls = [c for c in mock_ctx.on.call_args_list if c[0][0] == "page"]
         assert len(page_event_calls) == 1
+
+    @pytest.mark.asyncio
+    async def test_existing_about_blank_not_closed_before_initial_tab_registration_R(self):
+        """R: handler 등록만으로 persistent 초기 about:blank를 닫지 않는다."""
+        cm = ContextManager()
+        mock_ctx = _make_mock_context()
+        page = _FakePage(tab_id=None)
+        mock_ctx.pages = [page]
+
+        cm._register_popup_handler(1, mock_ctx)
+        for _ in range(3):
+            await asyncio.sleep(0)
+
+        page.close.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_existing_about_blank_preserved_after_pool_tab_id_R(self):
+        """R: register_initial_tabs 후 pool tab이 기존 page cleanup에 닫히지 않는다."""
+        cm = ContextManager()
+        mock_ctx = _make_mock_context()
+        page = _FakePage(tab_id=None)
+        mock_ctx.pages = [page]
+        cm._register_popup_handler(1, mock_ctx)
+
+        pool = TabPoolManager(cm)
+        registered = await pool.register_initial_tabs(1, mock_ctx)
+
+        assert registered == 1
+        assert hasattr(page, "_tab_id")
+        page.close.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_existing_about_blank_orphan_still_closed_E(self):
+        """E: pool 등록 이후에도 _tab_id가 없는 existing about:blank orphan은 닫힌다."""
+        cm = ContextManager()
+        mock_ctx = _make_mock_context()
+        orphan = _FakePage(tab_id=None)
+        mock_ctx.pages = [orphan]
+
+        await cm._cleanup_orphan_existing_pages(mock_ctx, 1)
+
+        orphan.close.assert_called_once()
+
+    def test_existing_and_popup_paths_share_orphan_helper_contract_C(self):
+        """C: popup event와 existing page cleanup이 같은 orphan close helper를 사용한다."""
+        import inspect
+
+        source = inspect.getsource(ContextManager)
+        assert "self._close_if_still_orphan(service_account_id, page)" in source
+        assert "asyncio.create_task(self._close_if_still_orphan(service_account_id, page))" in source
 
 
 class TestPopupHandlerRaceReproduction:

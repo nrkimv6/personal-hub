@@ -8,17 +8,20 @@ import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
-from app.models import TaskSchedule, TaskScheduleRun
+from app.models import BrowserProfile, ServiceAccount, TaskSchedule, TaskScheduleRun
 from app.modules.instagram.models.schemas import TimeWindow
 from app.modules.instagram.schedulers.feed_schedule import InstagramFeedScheduler
 from app.modules.instagram.services.scheduler import InstagramScheduler
 from app.services.schedule_contracts import build_time_window_candidate_summary
+from app.shared.worker.exceptions import is_browser_closed_error
 from app.services.task_schedule_service import TaskScheduleService
-from app.worker.schedule_handler_base import ClaimedRun, ScheduleExecutionSpec, WorkerContext
+from app.worker.schedule_handler_base import ClaimedRun, HandlerRunOutcome, ScheduleExecutionSpec, WorkerContext
 
 
 def _sqlite_session():
     engine = create_engine("sqlite:///:memory:")
+    BrowserProfile.__table__.create(engine)
+    ServiceAccount.__table__.create(engine)
     TaskSchedule.__table__.create(engine)
     TaskScheduleRun.__table__.create(engine)
     return sessionmaker(bind=engine)()
@@ -42,6 +45,24 @@ def _create_instagram_schedule(db, windows: list[dict[str, str]] | None = None) 
     db.commit()
     db.refresh(schedule)
     return schedule
+
+
+def _create_instagram_account(db, account_id: int = 6) -> ServiceAccount:
+    profile = BrowserProfile(name="test", profile_dir=f"profile_{account_id}")
+    db.add(profile)
+    db.commit()
+    db.refresh(profile)
+    account = ServiceAccount(
+        id=account_id,
+        profile_id=profile.id,
+        service_type="instagram",
+        identifier=f"account_{account_id}",
+        is_logged_in=True,
+    )
+    db.add(account)
+    db.commit()
+    db.refresh(account)
+    return account
 
 
 def test_exact_slot_schedule_returns_empty_and_requires_repair():
@@ -228,6 +249,59 @@ async def test_execute_requires_execute_with_tab_context():
             ClaimedRun(run_id=2, schedule_id=1, task_name="instagram_schedule_1_run_2"),
             ctx,
         )
+
+
+@pytest.mark.asyncio
+async def test_closed_browser_error_resets_manager_and_retries_O(caplog):
+    scheduler = InstagramFeedScheduler()
+    db = _sqlite_session()
+    try:
+        schedule = _create_instagram_schedule(db)
+        _create_instagram_account(db, 6)
+        run = TaskScheduleRun(schedule_id=schedule.id, status=TaskScheduleRun.STATUS_RUNNING)
+        db.add(run)
+        db.commit()
+        db.refresh(run)
+
+        ctx = WorkerContext(
+            worker_name="scheduled_worker",
+            browser_manager=None,
+            db_factory=lambda: db,
+            execute_with_tab=AsyncMock(
+                side_effect=[
+                    RuntimeError("Target page, context or browser has been closed"),
+                    HandlerRunOutcome(collected_count=1, saved_count=1),
+                ]
+            ),
+            is_browser_closed_error=is_browser_closed_error,
+            reset_browser_manager=AsyncMock(),
+        )
+
+        with caplog.at_level("WARNING", logger="app.modules.instagram.schedulers.feed_schedule"):
+            outcome = await scheduler.execute(
+                ScheduleExecutionSpec(
+                    schedule_id=schedule.id,
+                    target_type=TaskSchedule.TARGET_TYPE_INSTAGRAM_FEED,
+                    name="instagram",
+                    target_config={"service_account_id": 6},
+                    schedule_value=schedule.schedule_value,
+                    schedule_type=TaskSchedule.SCHEDULE_TYPE_TIME_WINDOW,
+                    display_name="Instagram",
+                ),
+                ClaimedRun(run_id=run.id, schedule_id=schedule.id, task_name="instagram_schedule_1_run_1"),
+                ctx,
+            )
+
+        assert outcome.collected_count == 1
+        assert ctx.execute_with_tab.await_count == 2
+        ctx.reset_browser_manager.assert_awaited_once()
+        retry_log = "\n".join(r.message for r in caplog.records)
+        assert f"run_id={run.id}" in retry_log
+        assert "service_account_id=6" in retry_log
+        assert "retry=1/3" in retry_log
+        assert "keyword=Target page, context or browser has been closed" in retry_log
+    finally:
+        db.close()
 
 
 @pytest.mark.asyncio

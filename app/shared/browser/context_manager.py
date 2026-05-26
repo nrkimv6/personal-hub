@@ -49,46 +49,57 @@ class ContextManager:
         self._proxy_manager = proxy_manager
         logger.info(f"[ContextManager] 프록시 매니저 {'설정됨' if proxy_manager else '해제됨'}")
 
+    async def _close_if_still_orphan(self, service_account_id: int, page: "Page"):
+        # 한 이벤트 루프 사이클 양보 — new_page() 반환 직후 tab_pool_manager가
+        # _tab_id = "__pending__" 마커를 동기적으로 설정할 시간을 확보한다.
+        await asyncio.sleep(0)
+        if hasattr(page, "_tab_id"):
+            return
+        try:
+            if page.is_closed():
+                return
+        except Exception:
+            pass
+        try:
+            await page.close()
+            logger.debug(f"[ContextManager] 팝업/고아 탭 닫힘 (service_account_id={service_account_id})")
+        except Exception as e:
+            logger.debug(f"[ContextManager] 팝업 close 실패 (무시): {e}")
+
+    async def _cleanup_orphan_existing_pages(self, context: "BrowserContext", service_account_id: int):
+        """등록 완료 후에도 _tab_id가 없는 기존 about:blank 고아 탭만 정리한다."""
+        try:
+            for page in list(context.pages):
+                if hasattr(page, "_tab_id"):
+                    logger.debug(
+                        f"[ContextManager] 기존 page 정리 연기 (pool 후보): "
+                        f"service_account_id={service_account_id}"
+                    )
+                    continue
+                try:
+                    if page.is_closed() or page.url != "about:blank":
+                        continue
+                except Exception:
+                    continue
+                await self._close_if_still_orphan(service_account_id, page)
+        except Exception as e:
+            logger.debug(f"[ContextManager] 기존 고아 탭 정리 중 오류 (무시): {e}")
+
     def _register_popup_handler(self, service_account_id: int, context: "BrowserContext"):
         """팝업 탭 자동 차단 핸들러를 context에 1회만 등록한다.
 
         pool 등록 탭(_tab_id 속성 보유)은 닫지 않는다.
-        핸들러 등록 이전에 열린 about:blank 고아 탭도 즉시 정리한다.
+        핸들러 등록 이전에 열린 about:blank 고아 탭은 pool 등록 이후 별도 정리한다.
         """
         if service_account_id in self._popup_handler_registered:
             return
 
-        async def _close_if_still_orphan(page: "Page"):
-            # 한 이벤트 루프 사이클 양보 — new_page() 반환 직후 tab_pool_manager가
-            # _tab_id = "__pending__" 마커를 동기적으로 설정할 시간을 확보한다.
-            await asyncio.sleep(0)
-            if hasattr(page, "_tab_id"):
-                return
-            try:
-                if page.is_closed():
-                    return
-            except Exception:
-                pass
-            try:
-                await page.close()
-                logger.debug(f"[ContextManager] 팝업/고아 탭 닫힘 (service_account_id={service_account_id})")
-            except Exception as e:
-                logger.debug(f"[ContextManager] 팝업 close 실패 (무시): {e}")
-
         def _on_popup(page: "Page"):
             if hasattr(page, "_tab_id"):
                 return
-            asyncio.create_task(_close_if_still_orphan(page))
+            asyncio.create_task(self._close_if_still_orphan(service_account_id, page))
 
         context.on("page", _on_popup)
-
-        # 핸들러 등록 이전에 이미 열린 about:blank 고아 탭 즉시 정리
-        try:
-            for page in context.pages:
-                if not hasattr(page, "_tab_id") and page.url == "about:blank":
-                    asyncio.create_task(page.close())
-        except Exception as e:
-            logger.debug(f"[ContextManager] 기존 고아 탭 정리 중 오류 (무시): {e}")
 
         self._popup_handler_registered.add(service_account_id)
         logger.debug(f"[ContextManager] 팝업 차단 핸들러 등록: service_account_id={service_account_id}")
