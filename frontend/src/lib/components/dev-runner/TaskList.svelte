@@ -181,7 +181,7 @@
 														{/if}
 													</span>
 													<div class="min-w-0 flex-1">
-														<span class="text-[11px] leading-relaxed break-words whitespace-pre-wrap {child.checked ? 'text-muted-foreground/80 line-through' : 'text-muted-foreground'}">{child.text}</span>
+														<span class="min-w-0 flex-1 text-[11px] leading-relaxed break-words whitespace-pre-wrap {child.checked ? 'text-muted-foreground/80 line-through' : 'text-muted-foreground'}">{child.text}</span>
 														{#if child.marker === '/' || child.execution_claims?.length}
 															<div class="mt-1 flex flex-wrap items-center gap-1">
 																{#if child.marker === '/'}
