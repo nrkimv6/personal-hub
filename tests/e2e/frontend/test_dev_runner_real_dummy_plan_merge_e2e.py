@@ -26,7 +26,7 @@ DEFAULT_REAL_RUNNER_ENGINE = "claude"
 ENGINE = os.environ.get("E2E_REAL_DEV_RUNNER_ENGINE", DEFAULT_REAL_RUNNER_ENGINE)
 MAX_CYCLES = int(os.environ.get("E2E_REAL_DEV_RUNNER_MAX_CYCLES", "2"))
 MAX_ATTEMPTS = int(os.environ.get("E2E_REAL_DEV_RUNNER_MAX_ATTEMPTS", "2"))
-HTTP_TIMEOUT = httpx.Timeout(45.0, connect=5.0)
+HTTP_TIMEOUT = httpx.Timeout(10.0, connect=2.0)
 RUNNER_KEY_PREFIX = "plan-runner:runners"
 TERMINAL_FAILURE_TOKENS = (
     "[FAILURE]",
@@ -35,6 +35,9 @@ TERMINAL_FAILURE_TOKENS = (
     "rate_limit",
     "auth failure",
 )
+FINAL_PLAN_SUCCESS_STATUSES = {"구현완료", "완료"}
+FINAL_PLAN_BLOCKED_STATUSES = {"머지대기", "통합테스트중"}
+EXPECTED_DUMMY_PLAN_PROGRESS = "4/4 (100%)"
 
 
 def _skip_admin_mode_if_public(system_mode: str) -> None:
@@ -205,6 +208,8 @@ def _redis_runner_evidence(runner_id: str) -> dict:
                 "log_file_path",
                 "branch",
                 "worktree_path",
+                "canonical_plan_file",
+                "subprocess_plan_file",
                 "test_source",
             )
         }
@@ -263,6 +268,59 @@ def _filesystem_snapshot(repo: Path, plan: Path, runner_id: str, runner_branch: 
         "branch_list": _git_text("branch", "--list", runner_branch),
         "worktree_list": _git_text("worktree", "list", "--porcelain")[:2000],
     }
+
+
+def _extract_plan_status(text: str) -> str:
+    import re
+
+    match = re.search(r"(?m)^>\s*상태:\s*(.+?)\s*$", text)
+    return match.group(1).strip() if match else ""
+
+
+def _extract_plan_progress(text: str) -> str:
+    import re
+
+    match = re.search(r"(?m)^>\s*진행률:\s*(.+?)\s*$", text)
+    return match.group(1).strip() if match else ""
+
+
+def _plan_excerpt(text: str, limit: int = 80) -> list[str]:
+    return [line[:500] for line in text.splitlines()[:limit]]
+
+
+def _read_final_plan_state(repo: Path, plan: Path) -> dict:
+    archive = repo / "docs" / "archive" / plan.name
+    target = archive if archive.exists() else plan
+    if not target.exists():
+        return {
+            "success": False,
+            "reason": "plan_missing",
+            "active_plan_exists": plan.exists(),
+            "archive_plan_exists": archive.exists(),
+            "plan_path": str(target),
+        }
+
+    text = target.read_text(encoding="utf-8", errors="replace")
+    status = _extract_plan_status(text)
+    progress = _extract_plan_progress(text)
+    unchecked_count = text.count("[ ]")
+    checked_count = text.lower().count("[x]")
+    state = {
+        "success": False,
+        "active_plan_exists": plan.exists(),
+        "archive_plan_exists": archive.exists(),
+        "plan_path": str(target),
+        "status": status,
+        "progress": progress,
+        "checked_count": checked_count,
+        "unchecked_count": unchecked_count,
+        "excerpt": _plan_excerpt(text),
+    }
+    if status in FINAL_PLAN_BLOCKED_STATUSES:
+        return {**state, "blocked": True, "reason": "plan_not_final_after_merge"}
+    if status in FINAL_PLAN_SUCCESS_STATUSES and archive.exists() and unchecked_count == 0 and progress == EXPECTED_DUMMY_PLAN_PROGRESS:
+        return {**state, "success": True, "reason": "plan_final_state_readback_ok"}
+    return {**state, "reason": "plan_final_state_pending"}
 
 
 def _runner_path_context(repo: Path, plan: Path, runner_id: str, evidence: dict) -> tuple[str, Path]:
@@ -371,7 +429,15 @@ def _start_real_runner(page: Page, client: httpx.Client, payload: dict) -> str:
     return accepted["runner_id"]
 
 
-def _poll_attempt_result(client: httpx.Client, runner_id: str, *, attempt: int, engine: str) -> dict:
+def _poll_attempt_result(
+    client: httpx.Client,
+    runner_id: str,
+    repo: Path | None = None,
+    plan: Path | None = None,
+    *,
+    attempt: int,
+    engine: str,
+) -> dict:
     def read_sentinel():
         try:
             recent = client.get("/api/v1/dev-runner/logs/recent", params={"runner_id": runner_id, "lines": 300})
@@ -447,6 +513,25 @@ def _poll_attempt_result(client: httpx.Client, runner_id: str, *, attempt: int, 
             "reason": "merge_timeout",
             "evidence": _runner_evidence(client, runner_id),
         }
+    final_plan = None
+    if repo is not None and plan is not None:
+        final_plan = _poll(
+            90.0,
+            5.0,
+            lambda: (state if (state := _read_final_plan_state(repo, plan)).get("success") or state.get("blocked") else None),
+        )
+        if not final_plan or not final_plan.get("success"):
+            final_plan = final_plan or _read_final_plan_state(repo, plan)
+            return {
+                "success": False,
+                "attempt": attempt,
+                "engine": engine,
+                "runner_id": runner_id,
+                "reason": final_plan.get("reason") or "plan_final_state_timeout",
+                "merged": merged,
+                "final_plan": final_plan,
+                "evidence": _runner_evidence(client, runner_id),
+            }
     return {
         "success": True,
         "attempt": attempt,
@@ -454,6 +539,7 @@ def _poll_attempt_result(client: httpx.Client, runner_id: str, *, attempt: int, 
         "runner_id": runner_id,
         "sentinel": sentinel,
         "merged": merged,
+        **({"final_plan": final_plan} if final_plan is not None else {}),
     }
 
 
@@ -472,7 +558,7 @@ def _run_real_runner_attempt(
 
     payload = _build_run_payload(repo, plan)
     runner_id = _start_real_runner(page, client, payload)
-    result = _poll_attempt_result(client, runner_id, attempt=attempt, engine=payload["engine"])
+    result = _poll_attempt_result(client, runner_id, repo, plan, attempt=attempt, engine=payload["engine"])
     if not result.get("success"):
         _cleanup_runner(client, runner_id)
     return result

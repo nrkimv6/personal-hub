@@ -103,6 +103,13 @@ def _decode_redis_value(val) -> str:
     return "" if val is None else str(val)
 
 
+def _redis_get_text(redis_client, key: str) -> str:
+    try:
+        return _decode_redis_value(redis_client.get(key)).strip()
+    except Exception:
+        return ""
+
+
 def _env_truthy(name: str) -> bool:
     return (os.environ.get(name) or "").strip().lower() in {"1", "true", "yes", "on"}
 
@@ -110,6 +117,10 @@ def _env_truthy(name: str) -> bool:
 def _resolve_post_merge_plan_file(plan_file: str | None, runner_id: str, redis_client) -> str | None:
     if not plan_file:
         return plan_file
+
+    canonical_raw = _redis_get_text(redis_client, f"{RUNNER_KEY_PREFIX}:{runner_id}:canonical_plan_file")
+    if canonical_raw and Path(canonical_raw).exists():
+        return canonical_raw
 
     try:
         test_repo_root = read_runner_test_repo_root(
@@ -123,7 +134,7 @@ def _resolve_post_merge_plan_file(plan_file: str | None, runner_id: str, redis_c
         return plan_file
 
     try:
-        worktree_raw = _decode_redis_value(redis_client.get(f"{RUNNER_KEY_PREFIX}:{runner_id}:worktree_path")).strip()
+        worktree_raw = _redis_get_text(redis_client, f"{RUNNER_KEY_PREFIX}:{runner_id}:worktree_path")
         if not worktree_raw:
             return plan_file
         worktree_path = Path(worktree_raw).resolve(strict=False)
@@ -135,6 +146,15 @@ def _resolve_post_merge_plan_file(plan_file: str | None, runner_id: str, redis_c
     except Exception:
         return plan_file
     return plan_file
+
+
+def _plan_completion_progress_value(content: str) -> str:
+    checkboxes = re.findall(r"(?m)^\s*[-*]\s+\[(x|X| )\]", content)
+    if not checkboxes:
+        return "100%"
+    total_count = len(checkboxes)
+    done_count = sum(1 for marker in checkboxes if marker.lower() == "x")
+    return f"{done_count}/{total_count} (100%)" if done_count == total_count else f"{done_count}/{total_count}"
 
 
 def _is_test_source_runner(runner_id: str, redis_client) -> bool:
@@ -179,10 +199,11 @@ def _call_test_done_in_process(plan_file: str, runner_id: str, pub_fn) -> dict:
 
     content = plan_path.read_text(encoding="utf-8", errors="replace")
     today = datetime.now().date().isoformat()
+    progress_value = _plan_completion_progress_value(content)
     content = _replace_or_append_header_line(content, "상태", "구현완료")
     content = _replace_or_append_header_line(content, "완료일", today)
-    content = _replace_or_append_header_line(content, "진행률", "100%")
-    content = re.sub(r"\*상태:.*?\| 진행률:.*?\*", "*상태: 구현완료 | 진행률: 100%*", content)
+    content = _replace_or_append_header_line(content, "진행률", progress_value)
+    content = re.sub(r"\*상태:.*?\| 진행률:.*?\*", f"*상태: 구현완료 | 진행률: {progress_value}*", content)
 
     archive_path.write_text(content, encoding="utf-8")
     plan_path.unlink()
@@ -233,6 +254,8 @@ def _call_test_done_in_process(plan_file: str, runner_id: str, pub_fn) -> dict:
         "reason": "test_in_process_done",
         "message": "test in-process done completed",
         "archive_path": str(archive_path),
+        "plan_file": str(plan_path),
+        "progress": progress_value,
     }
 
 

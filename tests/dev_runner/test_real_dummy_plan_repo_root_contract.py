@@ -19,6 +19,15 @@ from _dr_plan_runner import (  # noqa: E402
     _resolve_subprocess_plan_file,
     _should_write_canonical_plan_header,
 )
+from _dr_merge import _resolve_post_merge_plan_file  # noqa: E402
+
+
+class _FakeRedis:
+    def __init__(self, values: dict[str, str]):
+        self._values = values
+
+    def get(self, key: str):
+        return self._values.get(key)
 
 
 def _run(cmd: list[str], cwd: Path) -> subprocess.CompletedProcess[str]:
@@ -141,3 +150,31 @@ def test_normal_runner_keeps_canonical_plan_for_subprocess(tmp_path):
 def test_test_repo_root_does_not_write_canonical_plan_header():
     assert _should_write_canonical_plan_header({"test_repo_root": "C:/tmp/repo"}) is False
     assert _should_write_canonical_plan_header({}) is True
+
+
+def test_post_merge_done_prefers_canonical_plan_metadata(tmp_path):
+    repo = tmp_path / "isolated-repo"
+    _init_repo(repo)
+    canonical_plan = repo / "docs" / "plan" / "dummy.md"
+    canonical_plan.parent.mkdir(parents=True)
+    canonical_plan.write_text("# dummy\n> 상태: 머지대기\n", encoding="utf-8")
+
+    worktree = repo / ".worktrees" / "runner-a"
+    worktree_plan = worktree / "docs" / "plan" / "dummy.md"
+    worktree_plan.parent.mkdir(parents=True)
+    worktree_plan.write_text("# dummy\n> 상태: 머지대기\n", encoding="utf-8")
+
+    runner_id = "runner-a"
+    redis_client = _FakeRedis(
+        {
+            f"plan-runner:runners:{runner_id}:canonical_plan_file": str(canonical_plan),
+            f"plan-runner:runners:{runner_id}:worktree_path": str(worktree),
+            f"plan-runner:runners:{runner_id}:test_source": "real_dummy_plan_playwright",
+            f"plan-runner:runners:{runner_id}:test_repo_root": str(repo),
+            f"plan-runner:runners:{runner_id}:test_repo_root_allowed": "1",
+        }
+    )
+
+    resolved = _resolve_post_merge_plan_file(str(worktree_plan), runner_id, redis_client)
+
+    assert resolved == str(canonical_plan)

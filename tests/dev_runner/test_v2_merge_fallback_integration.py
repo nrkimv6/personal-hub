@@ -200,3 +200,63 @@ def test_v2_merge_fallback_preserves_residue_guard_reason(tmp_path, redis_client
     assert kwargs["error_message"] == "reconnect_no_pid fallback done failed: residue_guard"
 
     assert any("residue_guard" in msg for _, msg, _ in pub_calls), "fallback 로그에 residue_guard가 남아야 한다"
+
+
+def test_post_merge_done_test_repo_root_resolves_canonical_main_plan(tmp_path, redis_client):
+    """통합 T3: test_repo_root remap 후처리는 subprocess worktree plan이 아니라 canonical main plan을 완료 처리한다."""
+    repo = _setup_git_repo(tmp_path)
+    plan = repo / "docs" / "plan" / "2026-05-22_test-repo-root-remap.md"
+    plan.parent.mkdir(parents=True, exist_ok=True)
+    plan.write_text(
+        "\n".join(
+            [
+                "# test repo root remap",
+                "",
+                "> 상태: 머지대기",
+                "> 진행률: 4/4 (100%)",
+                "",
+                "## TODO",
+                "- [x] one",
+                "- [x] two",
+                "- [x] three",
+                "- [x] four",
+                "",
+                "*상태: 머지대기 | 진행률: 4/4 (100%)*",
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    _run = lambda *args: subprocess.run(["git", *args], cwd=str(repo), check=True, capture_output=True, text=True)
+    _run("add", str(plan.relative_to(repo)))
+    _run("commit", "-m", "test: add remap plan")
+
+    worktree = repo / ".worktrees" / "integration-runner4"
+    worktree_plan = worktree / "docs" / "plan" / plan.name
+    worktree_plan.parent.mkdir(parents=True, exist_ok=True)
+    worktree_plan.write_text(plan.read_text(encoding="utf-8"), encoding="utf-8")
+
+    runner_id = "integration-runner4"
+    prefix = "plan-runner:runners"
+    redis_client.set(f"{prefix}:{runner_id}:plan_file", str(worktree_plan))
+    redis_client.set(f"{prefix}:{runner_id}:canonical_plan_file", str(plan))
+    redis_client.set(f"{prefix}:{runner_id}:worktree_path", str(worktree))
+    redis_client.set(f"{prefix}:{runner_id}:test_source", "real_dummy_plan_playwright")
+    redis_client.set(f"{prefix}:{runner_id}:test_repo_root", str(repo))
+    redis_client.set(f"{prefix}:{runner_id}:test_repo_root_allowed", "1")
+
+    from _dr_merge import _handle_post_merge_done
+
+    pub_calls = []
+    result = _handle_post_merge_done(str(worktree_plan), runner_id, pub_calls.append, redis_client)
+
+    archive = repo / "docs" / "archive" / plan.name
+    assert result["success"] is True
+    assert result["status"] == "done_called"
+    assert not plan.exists(), "canonical active plan should be archived"
+    assert archive.exists(), "canonical archive plan missing"
+    archive_text = archive.read_text(encoding="utf-8", errors="replace")
+    assert re.search(r">\s*상태:\s*구현완료", archive_text), archive_text[:500]
+    assert re.search(r">\s*진행률:\s*4/4 \(100%\)", archive_text), archive_text[:500]
+    assert "[ ]" not in archive_text
+    assert worktree_plan.exists(), "subprocess worktree plan should not be treated as canonical target"

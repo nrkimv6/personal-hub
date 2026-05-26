@@ -798,6 +798,8 @@ def _do_start_plan_runner(command: Dict, redis_client: redis.Redis):
             plan_file,
             subprocess_plan_file,
         )
+        command["canonical_plan_file"] = plan_file
+        command["subprocess_plan_file"] = subprocess_plan_file
         try:
             effective_worktree_rel = str(worktree_path.relative_to(plan_project_root)).replace("\\", "/")
         except ValueError:
@@ -1305,6 +1307,10 @@ def _launch_plan_runner_process(
                 identity_err,
             )
         redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:plan_file", plan_file or PLAN_FILE_ALL)
+        if command.get("canonical_plan_file"):
+            redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:canonical_plan_file", command["canonical_plan_file"])
+        if command.get("subprocess_plan_file"):
+            redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:subprocess_plan_file", command["subprocess_plan_file"])
         redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:branch", branch or f"runner/{runner_id}")
         redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:start_time", started_at_text)
         redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:execution_count", str(execution_count_text))
