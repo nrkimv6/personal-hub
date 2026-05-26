@@ -17,13 +17,21 @@ def _fulfill_json(route, payload, status: int = 200):
     route.fulfill(status=status, content_type="application/json", body=json.dumps(payload))
 
 
-def _stub_dev_runner_shell(page: Page, runner_id: str, plan_file: str, recent_handler, full_handler=None) -> None:
+def _stub_dev_runner_shell(
+    page: Page,
+    runner_id: str,
+    plan_file: str,
+    recent_handler,
+    full_handler=None,
+    *,
+    running: bool = True,
+) -> None:
     runner_payload = {
         "runner_id": runner_id,
         "plan_file": plan_file,
         "engine": "codex",
-        "status": "running",
-        "running": True,
+        "status": "running" if running else "failed",
+        "running": running,
         "pid": 12345,
         "current_cycle": 1,
         "start_time": "2026-05-04T23:35:00",
@@ -51,7 +59,7 @@ def _stub_dev_runner_shell(page: Page, runner_id: str, plan_file: str, recent_ha
         lambda route: _fulfill_json(
             route,
             {
-                "running": True,
+                "running": running,
                 "listener_alive": True,
                 "redis_connected": True,
                 "pid": 12345,
@@ -178,7 +186,7 @@ def test_managed_live_log_falls_back_to_full_after_empty_recent(
             },
         )
 
-    _stub_dev_runner_shell(page, runner_id, plan_file, handle_recent, handle_full)
+    _stub_dev_runner_shell(page, runner_id, plan_file, handle_recent, handle_full, running=False)
 
     page.goto(f"{frontend_url}/automation?tab=dev-runner&runner={runner_id}")
     page.wait_for_selector("main", timeout=30000)
@@ -213,10 +221,10 @@ def test_managed_live_log_shows_diagnostic_after_recent_and_full_empty(
             },
         )
 
-    _stub_dev_runner_shell(page, runner_id, plan_file, handle_recent, handle_full)
+    _stub_dev_runner_shell(page, runner_id, plan_file, handle_recent, handle_full, running=False)
 
     page.goto(f"{frontend_url}/automation?tab=dev-runner&runner={runner_id}")
     page.wait_for_selector("main", timeout=30000)
 
-    expect(page.get_by_text(f"log source not found runner_id={runner_id}")).to_be_visible(timeout=30000)
+    expect(page.locator(f"text=log source not found runner_id={runner_id}").first).to_be_visible(timeout=30000)
     expect(page.get_by_text("로그 catch-up 재시도 중입니다")).to_have_count(0)
