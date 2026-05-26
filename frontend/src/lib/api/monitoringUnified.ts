@@ -12,6 +12,7 @@ import { getConfigs, toggleConfig } from './kakaoMonitor';
 import { activityApi, formatActivityRegion } from './activity';
 import { eventApi } from './system';
 import type { UnifiedMonitorItem, MonitorStatus, MonitorType } from '$lib/types/monitoring';
+import { buildMonitoringHref } from '$lib/utils/monitoringRouteState';
 
 // ─── 내부 헬퍼 ───────────────────────────────────────────────
 
@@ -50,7 +51,9 @@ export async function fetchNaverItems(): Promise<UnifiedMonitorItem[]> {
 		status: naverRunStatusToMonitorStatus(s.run_status, s.is_enabled),
 		lastChecked: s.updated_at,
 		summary: s.times?.join(', ') ?? undefined,
-		detailHref: '/naver',
+		detailHref: buildMonitoringHref({ type: 'naver', view: 'schedules', id: String(s.id) }),
+		rawId: s.id,
+		detailView: 'schedules',
 		toggleable: true
 	}));
 }
@@ -63,7 +66,9 @@ export async function fetchCoupangItems(): Promise<UnifiedMonitorItem[]> {
 		name: s.item_name ?? `쿠팡 일정 ${s.date}`,
 		status: coupangStatusToMonitorStatus(s.is_enabled, s.is_active),
 		summary: s.business_name ?? undefined,
-		detailHref: '/coupang',
+		detailHref: buildMonitoringHref({ type: 'coupang', view: 'schedules', id: String(s.id) }),
+		rawId: s.id,
+		detailView: 'schedules',
 		toggleable: true
 	}));
 }
@@ -77,7 +82,9 @@ export async function fetchPopplyItems(): Promise<UnifiedMonitorItem[]> {
 		status: popplyStatusToMonitorStatus(s.is_enabled, s.is_active, s.run_status),
 		lastChecked: s.last_check_time ?? undefined,
 		summary: s.last_event_status ?? s.store_id ?? undefined,
-		detailHref: '/popply',
+		detailHref: buildMonitoringHref({ type: 'popply', view: 'schedules', id: String(s.id) }),
+		rawId: s.id,
+		detailView: 'schedules',
 		toggleable: true
 	}));
 }
@@ -90,7 +97,9 @@ export async function fetchKakaoItems(): Promise<UnifiedMonitorItem[]> {
 		name: c.chat_name,
 		status: kakaoStatusToMonitorStatus(c.is_active),
 		summary: `키워드 ${c.keyword_count}개`,
-		detailHref: '/kakao-monitor',
+		detailHref: buildMonitoringHref({ type: 'kakao', view: 'settings', id: String(c.id) }),
+		rawId: c.id,
+		detailView: 'settings',
 		toggleable: true
 	}));
 }
@@ -103,7 +112,9 @@ export async function fetchActivityItems(): Promise<UnifiedMonitorItem[]> {
 		name: c.name,
 		status: 'idle' as MonitorStatus,
 		summary: formatActivityRegion(c),
-		detailHref: '/activity',
+		detailHref: buildMonitoringHref({ type: 'activity', view: 'centers', id: String(c.id) }),
+		rawId: c.id,
+		detailView: 'centers',
 		toggleable: false
 	}));
 }
@@ -117,7 +128,8 @@ export async function fetchEventItems(): Promise<UnifiedMonitorItem[]> {
 			name: '이벤트 모음',
 			status: 'idle' as MonitorStatus,
 			summary: `총 ${result.total}건`,
-			detailHref: '/events',
+			detailHref: buildMonitoringHref({ type: 'event', view: 'summary' }),
+			detailView: 'summary',
 			toggleable: false
 		}
 	];
@@ -139,7 +151,9 @@ export async function fetchEventusItems(): Promise<UnifiedMonitorItem[]> {
 		status: eventusStatusToMonitorStatus(s.is_enabled, s.is_active, s.run_status),
 		lastChecked: s.last_check_time ?? undefined,
 		summary: s.last_event_status ?? s.event_id ?? undefined,
-		detailHref: '/eventus',
+		detailHref: buildMonitoringHref({ type: 'eventus', view: 'schedules', id: String(s.id) }),
+		rawId: s.id,
+		detailView: 'schedules',
 		toggleable: true
 	}));
 }

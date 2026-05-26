@@ -98,6 +98,7 @@ export async function resolvePublicRouteMode(context: RouteModeContext = {}): Pr
 }
 
 export function getLandingPathForMode(mode: PublicRouteMode): PublicLandingPath {
+  // Admin mode lands on the unified monitoring workspace; public preview stays on the events landing.
   return mode === 'admin' ? '/monitoring' : '/events';
 }
 

@@ -27,7 +27,7 @@
 
 	// 현재 경로의 그룹이 접혀있으면 자동 펼침
 	$effect(() => {
-		const activeGroupId = getActiveGroupId($page.url.pathname);
+		const activeGroupId = getActiveGroupId(getNavigationCurrent($page.url));
 		if (!activeGroupId) return;
 		collapsedGroups.expand(activeGroupId);
 	});
@@ -88,9 +88,13 @@
 		return $collapsedGroups.includes(groupId);
 	}
 
+	function getNavigationCurrent(url: URL): string {
+		return `${url.pathname}${url.search}`;
+	}
+
 	// NavGroup에서 활성 항목이 있는지 확인
-	function hasActiveItem(group: NavGroup, pathname: string): boolean {
-		return group.items.some((item) => isActive(item.href, pathname));
+	function hasActiveItem(group: NavGroup, current: string): boolean {
+		return group.items.some((item) => isActive(item.href, current));
 	}
 </script>
 
@@ -126,7 +130,8 @@
 		{#if isNavGroup(entry)}
 			<!-- NavGroup: 아코디언 메뉴 -->
 			{@const groupCollapsed = isGroupCollapsed(entry.id)}
-			{@const groupActive = hasActiveItem(entry, $page.url.pathname)}
+			{@const currentRoute = getNavigationCurrent($page.url)}
+			{@const groupActive = hasActiveItem(entry, currentRoute)}
 
 			{#if !collapsed}
 				<!-- 그룹 헤더 버튼 -->
@@ -165,7 +170,7 @@
 									href={item.href}
 									onclick={handleNavClick}
 									class="flex items-center gap-3 px-3 py-1.5 rounded-lg transition-colors text-sm
-										{isActive(item.href, $page.url.pathname)
+										{isActive(item.href, currentRoute)
 										? 'bg-sidebar-primary text-sidebar-primary-foreground'
 										: 'text-sidebar-foreground hover:bg-sidebar-accent'}"
 								>
@@ -193,6 +198,7 @@
 		{:else}
 			<!-- 단일 메뉴 아이템 (대시보드 등) -->
 			{@const hidden = isHidden(entry.id)}
+			{@const currentRoute = getNavigationCurrent($page.url)}
 
 			{#if editMode || !hidden}
 				<div class="flex items-center group/item {hidden ? 'opacity-40' : ''}">
@@ -201,7 +207,7 @@
 						onclick={handleNavClick}
 						class="flex-1 flex items-center gap-3 px-3 py-2 rounded-lg transition-colors
 							{collapsed ? 'lg:justify-center lg:px-0' : ''}
-							{isActive(entry.href, $page.url.pathname)
+							{isActive(entry.href, currentRoute)
 							? 'bg-sidebar-primary text-sidebar-primary-foreground'
 							: 'text-sidebar-foreground hover:bg-sidebar-accent'}"
 						title={collapsed ? entry.label : ''}

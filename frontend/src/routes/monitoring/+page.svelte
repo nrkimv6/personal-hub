@@ -3,11 +3,15 @@
 	import { goto } from '$app/navigation';
 	import { page } from '$app/stores';
 	import { fetchAllMonitorItems, toggleMonitorItem } from '$lib/api/monitoringUnified';
-	import type { UnifiedMonitorItem } from '$lib/types/monitoring';
+	import type { MonitoringRouteState, UnifiedMonitorItem } from '$lib/types/monitoring';
 	import type { MonitorType, MonitorStatus } from '$lib/types/monitoring';
 	import { MONITOR_TYPE_META } from '$lib/types/monitoring';
+	import { buildMonitoringHref, parseMonitoringRouteState } from '$lib/utils/monitoringRouteState';
 	import { toast } from '$lib/stores/toast';
 	import MonitoringList from './MonitoringList.svelte';
+	import MonitoringTypeTabs from './MonitoringTypeTabs.svelte';
+	import MonitoringViewTabs from './MonitoringViewTabs.svelte';
+	import MonitoringWorkspace from './MonitoringWorkspace.svelte';
 	import NewMonitorTypeSelector from './NewMonitorTypeSelector.svelte';
 	import TabbedPageLayout from '$lib/components/layout/TabbedPageLayout.svelte';
 	import { Button } from '$lib/components/ui';
@@ -21,16 +25,24 @@
 
 	let selectedType: MonitorType | null = $state(null);
 	let selectedStatus: MonitorStatus | null = $state(null);
+	let routeState: MonitoringRouteState = $state({
+		type: null,
+		view: 'list',
+		sub: null,
+		id: null,
+		status: null
+	});
 	let showTypeSelector = $state(false);
 
 	let pollTimer: ReturnType<typeof setInterval> | null = null;
+	let loadSeq = 0;
 
 	// ─── URL 파라미터 동기화 ──────────────────────────────────────
 
 	$effect(() => {
-		const url = $page.url;
-		selectedType = (url.searchParams.get('type') as MonitorType) || null;
-		selectedStatus = (url.searchParams.get('status') as MonitorStatus) || null;
+		routeState = parseMonitoringRouteState($page.url);
+		selectedType = routeState.type;
+		selectedStatus = routeState.status;
 	});
 
 	// ─── 필터링 ──────────────────────────────────────────────────
@@ -46,7 +58,9 @@
 	// ─── 데이터 로드 ─────────────────────────────────────────────
 
 	async function loadData() {
+		const seq = ++loadSeq;
 		const result = await fetchAllMonitorItems(selectedType ? [selectedType] : undefined);
+		if (seq !== loadSeq) return;
 		items = result.items;
 		errors = result.errors;
 		loading = false;
@@ -54,24 +68,12 @@
 
 	// ─── 필터 변경 ───────────────────────────────────────────────
 
-	function setTypeFilter(type: MonitorType | null) {
-		const url = new URL($page.url);
-		if (type) {
-			url.searchParams.set('type', type);
-		} else {
-			url.searchParams.delete('type');
-		}
-		goto(url.toString(), { replaceState: true });
-	}
-
 	function setStatusFilter(status: MonitorStatus | null) {
-		const url = new URL($page.url);
-		if (status) {
-			url.searchParams.set('status', status);
-		} else {
-			url.searchParams.delete('status');
-		}
-		goto(url.toString(), { replaceState: true });
+		goto(buildMonitoringHref({ status }, $page.url), {
+			replaceState: true,
+			keepFocus: true,
+			noScroll: true
+		});
 	}
 
 	// ─── 토글 ────────────────────────────────────────────────────
@@ -103,21 +105,24 @@
 
 	// ─── 상수 ────────────────────────────────────────────────────
 
-	const TYPE_ENTRIES = Object.entries(MONITOR_TYPE_META) as [
-		MonitorType,
-		(typeof MONITOR_TYPE_META)[MonitorType]
-	][];
-
 	const STATUS_OPTIONS: { value: MonitorStatus; label: string }[] = [
 		{ value: 'running', label: '실행중' },
 		{ value: 'idle', label: '대기' },
 		{ value: 'error', label: '오류' },
 		{ value: 'disabled', label: '비활성' }
 	];
+
+	const pageTitle = $derived(
+		routeState.type
+			? `${MONITOR_TYPE_META[routeState.type].label} · ${
+					MONITOR_TYPE_META[routeState.type].views.find((entry) => entry.id === routeState.view)?.label ?? '작업면'
+				}`
+			: '통합 모니터링'
+	);
 </script>
 
 <svelte:head>
-	<title>통합 모니터링</title>
+	<title>{pageTitle}</title>
 </svelte:head>
 
 {#snippet headerActions()}
@@ -129,28 +134,7 @@
 
 {#snippet filterToolbar()}
 	<div class="flex min-w-0 flex-col gap-2">
-		<div class="flex flex-wrap items-center gap-2">
-			<button
-				type="button"
-				class="rounded-full px-3 py-1 text-xs font-medium transition-colors {selectedType === null
-					? 'bg-primary text-primary-foreground'
-					: 'bg-muted text-muted-foreground hover:bg-muted/80'}"
-				onclick={() => setTypeFilter(null)}
-			>
-				전체
-			</button>
-			{#each TYPE_ENTRIES as [type, meta]}
-				<button
-					type="button"
-					class="rounded-full px-3 py-1 text-xs font-medium transition-colors {selectedType === type
-						? 'bg-primary text-primary-foreground'
-						: 'bg-muted text-muted-foreground hover:bg-muted/80'}"
-					onclick={() => setTypeFilter(selectedType === type ? null : type)}
-				>
-					{meta.label}
-				</button>
-			{/each}
-		</div>
+		<MonitoringTypeTabs selectedType={selectedType} />
 		<div class="flex flex-wrap items-center gap-2">
 			<button
 				type="button"
@@ -173,6 +157,7 @@
 				</button>
 			{/each}
 		</div>
+		<MonitoringViewTabs type={routeState.type} view={routeState.view} sub={routeState.sub} />
 	</div>
 {/snippet}
 
@@ -191,9 +176,11 @@
 		</div>
 	{/if}
 
-	<!-- 목록 -->
+	<!-- 목록 / 작업면 -->
 	{#if loading}
 		<div class="py-16 text-center text-muted-foreground">로딩 중...</div>
+	{:else if routeState.view !== 'list' && routeState.type}
+		<MonitoringWorkspace state={routeState} />
 	{:else}
 		<MonitoringList items={filteredItems} onToggle={handleToggle} />
 	{/if}
