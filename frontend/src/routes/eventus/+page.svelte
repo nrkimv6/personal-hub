@@ -485,6 +485,8 @@
 						</thead>
 						<tbody>
 							{#each historyEvents as evt (evt.id)}
+								{@const evtSlots = parseEventusSlots(evt.slots_info ?? [])}
+								{@const evtOpen = getOpenSlots(evtSlots)}
 								<tr class="border-t hover:bg-muted/20">
 									<td class="px-3 py-2">{evt.id}</td>
 									<td class="px-3 py-2 text-xs">{evt.timestamp?.slice(0, 16).replace('T', ' ') ?? '—'}</td>
@@ -494,8 +496,6 @@
 										</span>
 									</td>
 									<td class="px-3 py-2">
-										{@const evtSlots = parseEventusSlots(evt.slots_info ?? [])}
-										{@const evtOpen = getOpenSlots(evtSlots)}
 										{#if evtSlots.length === 0}
 											<span class="text-muted-foreground text-xs">시간대 정보 없음</span>
 										{:else if evtOpen.length === 0}
