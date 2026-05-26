@@ -5,7 +5,7 @@ param(
     [Parameter(Mandatory = $true)]
     [string]$Operation,
 
-    [int]$TimeoutSeconds = 30,
+    [int]$TimeoutSeconds = 300,
 
     [int]$PollMilliseconds = 200,
 
@@ -286,6 +286,37 @@ function Resolve-BackendMode {
     return "File"
 }
 
+function Resolve-EffectiveTimeoutSeconds {
+    param(
+        [int]$RequestedTimeoutSeconds,
+        [bool]$WasExplicit
+    )
+
+    if ($WasExplicit) {
+        return [Math]::Min($RequestedTimeoutSeconds, 3600)
+    }
+
+    if (-not [string]::IsNullOrWhiteSpace($env:PLAN_DOCS_LOCK_TIMEOUT)) {
+        $parsedTimeout = 0
+        if (-not [int]::TryParse($env:PLAN_DOCS_LOCK_TIMEOUT, [ref]$parsedTimeout)) {
+            Fail-WithCode "Invalid PLAN_DOCS_LOCK_TIMEOUT: $env:PLAN_DOCS_LOCK_TIMEOUT" 1
+        }
+        return [Math]::Min([Math]::Max($parsedTimeout, 0), 3600)
+    }
+
+    if (-not [string]::IsNullOrWhiteSpace($env:PLAN_DOCS_LOCK_QUEUE_DEPTH)) {
+        $queueDepth = 0
+        if (-not [int]::TryParse($env:PLAN_DOCS_LOCK_QUEUE_DEPTH, [ref]$queueDepth)) {
+            Fail-WithCode "Invalid PLAN_DOCS_LOCK_QUEUE_DEPTH: $env:PLAN_DOCS_LOCK_QUEUE_DEPTH" 1
+        }
+        if ($queueDepth -gt 0) {
+            return [Math]::Max(60, [Math]::Min($queueDepth * 60, 3600))
+        }
+    }
+
+    return [Math]::Min([Math]::Max($RequestedTimeoutSeconds, 0), 3600)
+}
+
 if ($TimeoutSeconds -lt 0) {
     Fail-WithCode "TimeoutSeconds must be >= 0" 1
 }
@@ -293,6 +324,7 @@ if ($PollMilliseconds -lt 1) {
     Fail-WithCode "PollMilliseconds must be >= 1" 1
 }
 
+$TimeoutSeconds = Resolve-EffectiveTimeoutSeconds -RequestedTimeoutSeconds $TimeoutSeconds -WasExplicit $PSBoundParameters.ContainsKey("TimeoutSeconds")
 $repo = Resolve-RepoRoot -Path $RepoRoot
 $lockPath = Resolve-LockPath -Root $repo
 $backendMode = Resolve-BackendMode
