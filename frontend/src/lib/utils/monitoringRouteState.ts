@@ -39,6 +39,9 @@ export function normalizeMonitoringRouteState(state: MonitoringRouteState): Moni
 	if (!state.type) {
 		return { ...state, type: null, view: 'list', sub: null, id: null };
 	}
+	if (state.view === 'list') {
+		return { ...state, sub: null, id: null };
+	}
 
 	const views = MONITOR_TYPE_META[state.type].views;
 	const view = views.some((candidate) => candidate.id === state.view)
@@ -54,7 +57,7 @@ export function normalizeMonitoringRouteState(state: MonitoringRouteState): Moni
 export function parseMonitoringRouteState(url: URL): MonitoringRouteState {
 	const rawType = url.searchParams.get('type');
 	const type = isMonitorType(rawType) ? rawType : null;
-	const view = (url.searchParams.get('view') as MonitorView | null) ?? getDefaultMonitorView(type);
+	const view = (url.searchParams.get('view') as MonitorView | null) ?? 'list';
 	const rawStatus = url.searchParams.get('status');
 	const status = isMonitorStatus(rawStatus) ? rawStatus : null;
 
