@@ -40,9 +40,10 @@
 	// ─── URL 파라미터 동기화 ──────────────────────────────────────
 
 	$effect(() => {
-		routeState = parseMonitoringRouteState($page.url);
-		selectedType = routeState.type;
-		selectedStatus = routeState.status;
+		const nextRouteState = parseMonitoringRouteState($page.url);
+		routeState = nextRouteState;
+		selectedType = nextRouteState.type;
+		selectedStatus = nextRouteState.status;
 	});
 
 	// ─── 필터링 ──────────────────────────────────────────────────
