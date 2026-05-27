@@ -10,6 +10,9 @@ from app.modules.eventus_reservation.services.http_client import EventusHttpClie
 
 FIXTURE_DIR = Path(__file__).parent / "fixtures"
 CLOSED_HTML = (FIXTURE_DIR / "eventus_126341_closed.html").read_text(encoding="utf-8")
+SOLDOUT_WRAPPER_HTML = (
+    FIXTURE_DIR / "eventus_126341_soldout_bundle_wrapper.html"
+).read_text(encoding="utf-8")
 _SOURCE_URL = "https://event-us.kr/age20scoffee/event/126341"
 
 
@@ -41,6 +44,44 @@ async def test_no_slots_total_available_count_zero():
     adapter = _make_adapter(CLOSED_HTML)
     result = await adapter.check(source_url=_SOURCE_URL, target_bundle_id="bundle_morning_A")
     assert (result.available_count or 0) == 0
+
+
+@pytest.mark.asyncio
+async def test_adapter_soldout_bundle_wrapper_returns_no_slots_RIGHT():
+    """R: timeKey=null/dateLabel=null/label=bundleId wrapper는 available로 세지 않는다."""
+    adapter = _make_adapter(SOLDOUT_WRAPPER_HTML)
+    result = await adapter.check(source_url=_SOURCE_URL, target_bundle_id="52057")
+
+    assert result.error_message is None
+    assert result.available_count == 0
+    assert result.slots
+    assert all(slot.available_count == 0 for slot in result.slots)
+    assert all(slot.raw.get("timeKey") for slot in result.slots)
+
+
+@pytest.mark.asyncio
+async def test_adapter_time_key_null_bundle_label_not_available_BOUNDARY():
+    """B: 시간 label 없는 ui-menu-item은 open sentinel로 승격하지 않는다."""
+    html = """
+    <html><!-- event-us -->
+    <body>
+    <h1>Bundle Wrapper Event</h1>
+    <a href="/regorg/event">RegOrg</a>
+    <div v-if="userSlectedBundle.id === 'bundle_wrapper'">
+      <ui-menu-item>
+        <span>bundle_wrapper</span>
+      </ui-menu-item>
+    </div>
+    <script>var ProjectId = 111;</script>
+    </body>
+    </html>
+    """
+    adapter = _make_adapter(html)
+    result = await adapter.check(source_url=_SOURCE_URL, target_bundle_id="bundle_wrapper")
+
+    assert result.error_message is None
+    assert result.slots == []
+    assert result.available_count == 0
 
 
 # ---------------------------------------------------------------------------

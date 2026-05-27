@@ -528,8 +528,8 @@
 									<dd class="mt-0.5 font-medium text-foreground">{evt.schedule_id}</dd>
 								</div>
 								<div>
-									<dt class="text-muted-foreground">잔여 합계</dt>
-									<dd class="mt-0.5 font-medium text-foreground">{evt.available_count ?? '—'}</dd>
+									<dt class="text-muted-foreground">감지된 열린 옵션</dt>
+									<dd class="mt-0.5 font-medium text-foreground">{evtOpen.length}개</dd>
 								</div>
 							</dl>
 							<div class="mt-3 rounded-md bg-muted/40 p-2 text-xs">
@@ -638,7 +638,6 @@
 			<dl class="text-sm space-y-1">
 				<div class="flex gap-2"><dt class="font-medium w-24">상태:</dt><dd>{selectedEvent.status}</dd></div>
 				<div class="flex gap-2"><dt class="font-medium w-24">시각:</dt><dd>{selectedEvent.timestamp}</dd></div>
-				<div class="flex gap-2"><dt class="font-medium w-24">잔여(합계):</dt><dd>{selectedEvent.available_count}</dd></div>
 				<div class="flex gap-2"><dt class="font-medium w-24">일정 ID:</dt><dd>{selectedEvent.schedule_id}</dd></div>
 			</dl>
 			{#if selectedEvent.slots_info && selectedEvent.slots_info.length > 0}
@@ -646,7 +645,7 @@
 				{@const modalOpen = getOpenSlots(modalSlots)}
 				{@const modalClosed = getClosedSlots(modalSlots)}
 				<div>
-					<p class="font-medium text-sm mb-1">열린 옵션 <span class="text-muted-foreground font-normal">({modalOpen.length}개)</span></p>
+					<p class="font-medium text-sm mb-1">감지된 열린 옵션 <span class="text-muted-foreground font-normal">({modalOpen.length}개)</span></p>
 					{#if modalOpen.length === 0}
 						<p class="text-xs text-muted-foreground">열린 옵션 없음</p>
 					{:else}

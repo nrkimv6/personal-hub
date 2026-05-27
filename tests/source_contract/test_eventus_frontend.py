@@ -161,12 +161,12 @@ def test_eventus_page_imports_eventus_slot_display_helper():
 
 
 # ---------------------------------------------------------------------------
-# T1-5b: eventusSlotDisplay.ts has availableCountKnown / 수량 미확인 text
+# T1-5b: eventusSlotDisplay.ts has availableCountKnown / reservation sentinel text
 # ---------------------------------------------------------------------------
 
 
 def test_eventus_slot_display_ts_has_available_count_known_contract():
-    """S: eventusSlotDisplay.ts에 availableCountKnown 필드와 '수량 미확인' 문구가 있는지 검증한다."""
+    """S: eventusSlotDisplay.ts가 수량 대신 예약 가능 sentinel 문구를 쓰는지 검증한다."""
     slot_display_ts = (
         FRONTEND_ROOT / "lib" / "utils" / "eventusSlotDisplay.ts"
     ).read_text(encoding="utf-8")
@@ -174,9 +174,12 @@ def test_eventus_slot_display_ts_has_available_count_known_contract():
         "eventusSlotDisplay.ts에 availableCountKnown 필드가 없습니다."
         " Eventus는 정확한 좌석 수를 알 수 없으므로 이 필드가 반드시 필요합니다."
     )
-    assert "수량 미확인" in slot_display_ts, (
-        "eventusSlotDisplay.ts에 '수량 미확인' 문구가 없습니다."
-        " availableCountKnown=false인 슬롯에 UI가 오해 없이 표시해야 합니다."
+    assert "예약 가능 감지" in slot_display_ts, (
+        "eventusSlotDisplay.ts에 '예약 가능 감지' 문구가 없습니다."
+        " availableCountKnown=false인 슬롯은 잔여 수량이 아니라 가능 여부만 표시해야 합니다."
+    )
+    assert "열림 (수량 미확인)" not in slot_display_ts, (
+        "eventusSlotDisplay.ts에 기존 '열림 (수량 미확인)' 문구가 남아 있습니다."
     )
 
 
@@ -223,6 +226,15 @@ def test_eventus_page_history_thead_uses_open_option_label():
         "+page.svelte history 표 행에 '{evt.available_count ?? 0}' raw 표시가 남아 있습니다."
         " slot summary로 대체돼야 합니다."
     )
+
+
+def test_eventus_history_does_not_render_raw_available_count_as_remaining():
+    """S: Eventus history는 available_count sentinel을 잔여 수량으로 표시하지 않는다."""
+    eventus_page = read_eventus_surface()
+
+    assert "잔여 합계" not in eventus_page
+    assert "잔여(합계)" not in eventus_page
+    assert "감지된 열린 옵션" in eventus_page
 
 
 def test_eventus_page_button_uses_button_component_click_contract():

@@ -372,6 +372,51 @@ def test_check_now_RIGHT_records_no_slots_event(eventus_http_context, monkeypatc
     assert schedule["last_event_status"] == "no_slots"
 
 
+def test_check_now_RIGHT_soldout_wrapper_records_no_slots_event(eventus_http_context, monkeypatch):
+    """R: bundle wrapper false-positive 방어 결과는 check-now에서 no_slots로 기록된다."""
+    client, _ = eventus_http_context
+    target = _create_target(client)
+    schedule_id = _create_schedule(client, target["id"])
+
+    class FakeAdapter:
+        async def check(self, **kwargs):
+            return AvailabilityCheckResult(
+                source_type="eventus",
+                slots=[
+                    AvailabilitySlot(
+                        source_type="eventus",
+                        available_count=0,
+                        label="52057",
+                        slot_id="52057:",
+                        raw={
+                            "sourceType": "eventus",
+                            "bundleId": "52057",
+                            "timeKey": None,
+                            "dateLabel": None,
+                            "availableCountKnown": False,
+                            "slotCandidate": False,
+                        },
+                    )
+                ],
+                fetch_method="anonymous_html",
+            )
+
+    monkeypatch.setattr(monitor_routes, "_adapter", FakeAdapter())
+
+    response = client.post(f"/api/v1/eventus/schedules/{schedule_id}/check-now")
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "no_slots"
+    assert response.json()["available_count"] == 0
+
+    events = client.get(
+        "/api/v1/monitoring/events",
+        params={"service_type": "eventus", "page": 1, "page_size": 5},
+    ).json()["items"]
+    assert events[0]["status"] == "no_slots"
+    assert events[0]["slots_info"][0]["slotCandidate"] is False
+
+
 def test_check_now_RIGHT_records_available_event(eventus_http_context, monkeypatch):
     """R: check-now → available 이벤트 기록."""
     client, _ = eventus_http_context

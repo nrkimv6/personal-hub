@@ -63,7 +63,7 @@ def _get_slot_status_text(slot: dict) -> str:
     if slot.get("urgencyHint") == "imminent":
         return "마감임박"
     if not slot.get("availableCountKnown"):
-        return "열림 (수량 미확인)"
+        return "예약 가능 감지"
     return "열림"
 
 
@@ -116,15 +116,15 @@ def test_6_open_slots_labels_are_correct():
     )
 
 
-def test_6_open_slots_status_text_is_unknown_count():
-    """R: availableCountKnown=False인 열린 슬롯의 상태 텍스트는 '열림 (수량 미확인)'."""
+def test_6_open_slots_status_text_is_reservation_signal():
+    """R: availableCountKnown=False인 열린 슬롯은 잔여 수량 대신 예약 가능 감지로 표시한다."""
     raw = _make_open_slots(6)
     open_slots = _get_open_slots(_parse_eventus_slots(raw))
 
     for slot in open_slots:
         status = _get_slot_status_text(slot)
-        assert status == "열림 (수량 미확인)", (
-            f"상태 텍스트가 '열림 (수량 미확인)'이 아닙니다: {status!r} (슬롯: {slot['bundleId']})"
+        assert status == "예약 가능 감지", (
+            f"상태 텍스트가 '예약 가능 감지'가 아닙니다: {status!r} (슬롯: {slot['bundleId']})"
         )
 
 
@@ -233,13 +233,13 @@ def test_get_slot_label_falls_back_to_default():
 
 
 def test_button_onclick_contract_reconfirmed():
-    """T3 재확인: Button onclick prop 계약이 +page.svelte에 유지된다.
+    """T3 재확인: Button onclick prop 계약이 Eventus workspace에 유지된다.
 
     기존 test_eventus_page_button_uses_button_component_click_contract의 핵심
     조건을 T3 fixture로 재확인한다.
     """
     eventus_page = (
-        FRONTEND_ROOT / "routes" / "eventus" / "+page.svelte"
+        FRONTEND_ROOT / "routes" / "eventus" / "EventusWorkspace.svelte"
     ).read_text(encoding="utf-8")
 
     button_blocks = re.findall(r"<Button\b.*?(?:</Button>|/>)", eventus_page, re.DOTALL)
@@ -254,5 +254,5 @@ def test_button_onclick_contract_reconfirmed():
     )
     # Also verify that onclick prop is actually used
     assert "onclick" in eventus_page, (
-        "+page.svelte에 onclick prop이 전혀 없습니다. Button click 이벤트가 동작하지 않습니다."
+        "EventusWorkspace.svelte에 onclick prop이 전혀 없습니다. Button click 이벤트가 동작하지 않습니다."
     )

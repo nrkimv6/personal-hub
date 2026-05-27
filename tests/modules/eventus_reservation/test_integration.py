@@ -17,6 +17,9 @@ from app.modules.eventus_reservation.services.http_client import EventusHttpClie
 
 FIXTURE_DIR = Path(__file__).parent / "fixtures"
 CLOSED_HTML = (FIXTURE_DIR / "eventus_126341_closed.html").read_text(encoding="utf-8")
+SOLDOUT_WRAPPER_HTML = (
+    FIXTURE_DIR / "eventus_126341_soldout_bundle_wrapper.html"
+).read_text(encoding="utf-8")
 _SOURCE_URL = "https://event-us.kr/age20scoffee/event/126341"
 
 
@@ -41,6 +44,26 @@ async def test_full_pipeline_closed_html_returns_no_slots_status():
 
     assert isinstance(result, AvailabilityCheckResult)
     assert result.error_message is None
+    status = determine_availability_status(
+        result.slots,
+        available_count=result.available_count,
+        error_message=result.error_message,
+    )
+    assert status == "no_slots"
+
+
+@pytest.mark.asyncio
+async def test_full_pipeline_soldout_bundle_wrapper_returns_no_slots_T3():
+    """T3: sold-out fixture의 bundle-level wrapper는 available 오탐을 만들지 않는다."""
+    adapter = _make_adapter(SOLDOUT_WRAPPER_HTML)
+    result = await adapter.check(
+        source_url=_SOURCE_URL,
+        target_bundle_id="52057",
+    )
+
+    assert result.error_message is None
+    assert result.available_count == 0
+    assert all(slot.available_count == 0 for slot in result.slots)
     status = determine_availability_status(
         result.slots,
         available_count=result.available_count,

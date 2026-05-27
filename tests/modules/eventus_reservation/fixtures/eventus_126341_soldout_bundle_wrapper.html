@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <title>AGE20'S cafe POP-UP | event-us</title>
+</head>
+<body>
+  <h1 class="event-title">AGE20'S cafe POP-UP</h1>
+  <a href="/age20scoffee/event" class="organizer-link">Age20s Coffee</a>
+  <script>
+    var ProjectId = 126341;
+  </script>
+
+  <!--
+    Regression fixture for the 2026-05-27 false positive:
+    Eventus exposes bundle-level ui-menu-item wrappers with only a bundle id.
+    These are not bookable time slots and must not become available_count=1.
+  -->
+  <div class="bundle-selector" v-if="userSlectedBundle.id === '52057'">
+    <ui-menu-item>
+      <span class="bundle-id">52057</span>
+    </ui-menu-item>
+    <ui-menu-item>
+      <span class="bundle-id">52057</span>
+    </ui-menu-item>
+  </div>
+
+  <div class="time-slots" v-if="userSlectedBundle.id === '52057'">
+    <ui-menu-item disabled>
+      <span class="time-label">5/27 12:00~12:50</span>
+      <span class="text-danger-400">모집마감</span>
+    </ui-menu-item>
+    <ui-menu-item disabled>
+      <span class="time-label">5/27 13:00~13:50</span>
+      <span class="text-danger-400">모집마감</span>
+    </ui-menu-item>
+    <ui-menu-item disabled>
+      <span class="time-label">5/27 14:00~14:50</span>
+      <span class="text-danger-400">모집마감</span>
+    </ui-menu-item>
+    <ui-menu-item disabled>
+      <span class="time-label">5/27 15:00~15:50</span>
+      <span class="text-danger-400">모집마감</span>
+    </ui-menu-item>
+  </div>
+</body>
+</html>

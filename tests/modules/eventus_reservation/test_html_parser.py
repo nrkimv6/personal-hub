@@ -11,6 +11,7 @@ from app.modules.eventus_reservation.services.html_parser import (
 
 FIXTURE_DIR = Path(__file__).parent / "fixtures"
 CLOSED_FIXTURE = FIXTURE_DIR / "eventus_126341_closed.html"
+SOLDOUT_WRAPPER_FIXTURE = FIXTURE_DIR / "eventus_126341_soldout_bundle_wrapper.html"
 
 
 def _load_fixture(path: Path) -> str:
@@ -24,6 +25,11 @@ def _load_fixture(path: Path) -> str:
 @pytest.fixture(scope="module")
 def closed_html() -> str:
     return _load_fixture(CLOSED_FIXTURE)
+
+
+@pytest.fixture(scope="module")
+def soldout_wrapper_html() -> str:
+    return _load_fixture(SOLDOUT_WRAPPER_FIXTURE)
 
 
 # ---------------------------------------------------------------------------
@@ -132,6 +138,19 @@ def test_bundle_slot_association(closed_html: str):
     assert len(morning_slots) == 5
     afternoon_slots = [s for s in meta.slots if s.bundle_id == "bundle_afternoon_B"]
     assert len(afternoon_slots) == 5
+
+
+def test_parse_soldout_fixture_ignores_bundle_wrapper_RIGHT(soldout_wrapper_html: str):
+    """R: timeKey/dateLabel 없는 bundle wrapper는 예약 가능 슬롯으로 추출하지 않는다."""
+    meta = parse_event_meta(soldout_wrapper_html)
+
+    assert meta.event_id == "126341"
+    assert meta.bundle_ids == ["52057"]
+    assert len(meta.slots) == 4
+    assert all(s.time_label for s in meta.slots)
+    assert all(s.bundle_id == "52057" for s in meta.slots)
+    assert all(s.is_closed for s in meta.slots)
+    assert all(s.time_label != "52057" for s in meta.slots)
 
 
 # ---------------------------------------------------------------------------

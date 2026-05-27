@@ -27,7 +27,11 @@ logger = logging.getLogger(__name__)
 
 def _slot_to_availability(s: EventusSlot, event_id: Optional[str]) -> AvailabilitySlot:
     """Convert a single EventusSlot to an AvailabilitySlot."""
-    if s.is_closed:
+    is_slot_candidate = bool(s.time_label or s.date_label)
+    if not is_slot_candidate:
+        available_count = 0
+        urgency_hint = None
+    elif s.is_closed:
         available_count = 0
         urgency_hint = None
     elif s.urgency_hint == "imminent":
@@ -51,6 +55,7 @@ def _slot_to_availability(s: EventusSlot, event_id: Optional[str]) -> Availabili
             "closedText": s.closed_text,
             "availableCountKnown": False,
             "urgencyHint": urgency_hint,
+            "slotCandidate": is_slot_candidate,
         },
     )
 

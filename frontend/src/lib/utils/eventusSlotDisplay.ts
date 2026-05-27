@@ -3,7 +3,7 @@
  *
  * `slots_info` 내부 항목은 serialize_slot()이 기록한 camelCase 키를 사용하며,
  * 정확한 좌석 수는 Eventus HTML에서 알 수 없으므로 available_count는
- * 열린 슬롯 sentinel 합계다 (availableCountKnown === false).
+ * 잔여 수량이 아니라 열린 슬롯 sentinel 합계다 (availableCountKnown === false).
  */
 
 export interface EventusHistorySlot {
@@ -88,7 +88,7 @@ export function getSlotLabel(slot: EventusHistorySlot): string {
 
 /**
  * 슬롯의 상태 텍스트를 반환한다.
- * - availableCountKnown === false (Eventus 기본)  → '열림 (수량 미확인)'
+ * - availableCountKnown === false (Eventus 기본)  → '예약 가능 감지'
  * - urgencyHint === 'imminent'                   → '마감임박'
  * - availableCount === 0                         → closedText or '마감'
  * - 그 외                                        → '열림'
@@ -101,7 +101,7 @@ export function getSlotStatusText(slot: EventusHistorySlot): string {
     return '마감임박';
   }
   if (!slot.availableCountKnown) {
-    return '열림 (수량 미확인)';
+    return '예약 가능 감지';
   }
   return '열림';
 }

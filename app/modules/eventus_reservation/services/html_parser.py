@@ -153,6 +153,15 @@ def _parse_slot_block(block: str, bundle_id: str) -> EventusSlot:
     )
 
 
+def _is_bookable_slot_candidate(slot: EventusSlot) -> bool:
+    """Return whether a parsed menu item is a real bookable time slot.
+
+    Eventus pages can contain bundle-level ui-menu-item wrappers whose only
+    text is a bundle id. They are navigation/container rows, not slots.
+    """
+    return bool(slot.time_label or slot.date_label)
+
+
 def _collect_bundle_positions(html: str) -> tuple[list[str], list[tuple[int, str]]]:
     """Return (bundle_ids_ordered, [(html_position, bundle_id)])."""
     seen: list[str] = []
@@ -194,7 +203,10 @@ def _extract_slots(html: str, bundle_ids: list[str], bundle_id_positions: list[t
             block = html[open_start : open_start + 1500]
 
         bundle_id = _nearest_bundle_id(open_start, bundle_id_positions, fallback=bundle_ids[0] if bundle_ids else "")
-        slots.append(_parse_slot_block(block, bundle_id))
+        slot = _parse_slot_block(block, bundle_id)
+        if not _is_bookable_slot_candidate(slot):
+            continue
+        slots.append(slot)
 
     return slots
 
