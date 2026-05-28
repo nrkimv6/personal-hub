@@ -1,10 +1,12 @@
 <script lang="ts">
 	import { Play, RefreshCw, Square } from 'lucide-svelte';
+	import type { DevRunnerReadinessResponse } from '$lib/api';
 
 	type RunAction = 'start' | 'sync' | 'reset' | 'fullReset' | 'stop' | 'forceStop';
 
 	interface Props {
 		status: { redis_connected: boolean; listener_alive: boolean } | null;
+		readiness?: DevRunnerReadinessResponse | null;
 		anyRunning: boolean;
 		activeAction: RunAction | null;
 		mode: 'single' | 'all';
@@ -19,6 +21,7 @@
 
 	let {
 		status,
+		readiness = null,
 		anyRunning,
 		activeAction,
 		mode,
@@ -37,6 +40,7 @@
 	let startDisabled = $derived(
 		actionLoading ||
 			(mode === 'single' && (!selectedPlan || selectedPlanArchived)) ||
+			readiness?.can_start === false ||
 			!status?.redis_connected ||
 			!status?.listener_alive
 	);
@@ -47,13 +51,15 @@
 			? 'Redis 미연결'
 			: !status?.listener_alive
 				? 'Listener 미실행'
-				: actionLoading
-					? '실행 요청 처리 중'
-					: mode === 'single' && !selectedPlan
-						? 'Plan을 선택하세요'
-						: mode === 'single' && selectedPlanArchived
-							? '아카이브된 Plan은 실행할 수 없습니다'
-							: '실행'
+				: readiness?.can_start === false
+					? readiness.items.find((item) => item.severity === 'blocker')?.message ?? 'Readiness 차단 항목이 있습니다'
+					: actionLoading
+						? '실행 요청 처리 중'
+						: mode === 'single' && !selectedPlan
+							? 'Plan을 선택하세요'
+							: mode === 'single' && selectedPlanArchived
+								? '아카이브된 Plan은 실행할 수 없습니다'
+								: '실행'
 	);
 </script>
 

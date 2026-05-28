@@ -10,6 +10,7 @@ from fastapi import APIRouter, HTTPException, Query, Request
 
 from app.modules.dev_runner.schemas import (
     DirectMergeRequest,
+    DevRunnerReadinessResponse,
     MergeHistoryItem,
     MergeQueueItem,
     MergeStatusResponse,
@@ -22,6 +23,7 @@ from app.modules.dev_runner.schemas import (
     RunnerListItem,
 )
 from app.modules.dev_runner.services.executor_service import executor_service
+from app.modules.dev_runner.services.readiness_service import build_dev_runner_readiness
 
 router = APIRouter()
 
@@ -105,6 +107,15 @@ async def stop_run():
 async def get_status():
     """실행 상태 조회 (하위호환 — 첫 번째 active runner)"""
     return await executor_service.get_process_status()
+
+
+@router.get("/readiness", response_model=DevRunnerReadinessResponse)
+async def get_readiness():
+    """실행 시작 전 readiness 요약 조회 (읽기 전용)."""
+    status = await executor_service.get_process_status()
+    from app.modules.dev_runner.routes.plans import _collect_plan_storage_roots_status_sync
+    storage_roots = await asyncio.to_thread(_collect_plan_storage_roots_status_sync)
+    return build_dev_runner_readiness(status, storage_roots)
 
 
 @router.post("/reset-state")

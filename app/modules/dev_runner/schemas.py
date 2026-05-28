@@ -10,6 +10,7 @@ PLAN_ARCHIVE_BLOCKED_PROVIDERS = {"cc-codex"}
 
 RunnerMetadataState = Union[bool, Literal["unknown"]]
 RunnerDisplaySeverity = Literal["info", "warn", "error", "approval", "success", "muted"]
+DevRunnerReadinessSeverity = Literal["ok", "warning", "blocker"]
 
 
 # ========== 스키마 ==========
@@ -109,6 +110,25 @@ class RunStatusResponse(BaseModel):
     merge_reason: Optional[str] = None
     merge_message: Optional[str] = None
     auto_retry_blocked: bool = False
+
+
+class DevRunnerReadinessItem(BaseModel):
+    """Dev Runner 시작 전 readiness 점검 항목."""
+    id: str
+    label: str
+    severity: DevRunnerReadinessSeverity
+    message: str
+    action: Optional[str] = None
+
+
+class DevRunnerReadinessResponse(BaseModel):
+    """Dev Runner 시작 가능 여부를 설명하는 읽기 전용 응답."""
+    checked_at: str
+    severity: DevRunnerReadinessSeverity
+    can_start: bool
+    items: List[DevRunnerReadinessItem] = Field(default_factory=list)
+    blockers: int = 0
+    warnings: int = 0
 
 
 class RunnerListItem(BaseModel):

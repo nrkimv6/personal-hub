@@ -217,6 +217,25 @@ export interface PlanStorageRootStatusResponse {
 	push_needed_count: number;
 }
 
+export type DevRunnerReadinessSeverity = 'ok' | 'warning' | 'blocker';
+
+export interface DevRunnerReadinessItem {
+	id: string;
+	label: string;
+	severity: DevRunnerReadinessSeverity;
+	message: string;
+	action: string | null;
+}
+
+export interface DevRunnerReadinessResponse {
+	checked_at: string;
+	severity: DevRunnerReadinessSeverity;
+	can_start: boolean;
+	items: DevRunnerReadinessItem[];
+	blockers: number;
+	warnings: number;
+}
+
 export interface LogResponse {
 	lines: string[];
 	total_lines: number;
@@ -427,6 +446,8 @@ export const devRunnerRunnerApi = {
 	stopLegacy: () => devRunnerRequest<{ message: string }>('/stop', { method: 'POST' }),
 
 	status: () => devRunnerRequest<RunStatusResponse>('/status'),
+
+	readiness: () => devRunnerRequest<DevRunnerReadinessResponse>('/readiness'),
 
 	commandResult: (commandId: string) =>
 		devRunnerRequest<DevRunnerCommandResult>(`/commands/${commandId}`),

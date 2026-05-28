@@ -4,6 +4,7 @@ import { devRunnerRunnerApi, devRunnerPlanApi, devRunnerEngineApi, devRunnerSett
 import { ApiError } from '$lib/api/dev-runner';
 import type {
 	DevRunnerRunStatusResponse,
+	DevRunnerReadinessResponse,
 	DevRunnerPlanFileResponse,
 	AllEnginesConfig,
 	EngineConfig
@@ -15,6 +16,7 @@ import ExecuteModalShell from '$lib/components/dev-runner/execute-modal/ExecuteM
 import PlanIdentityHeader from '$lib/components/dev-runner/execute-modal/PlanIdentityHeader.svelte';
 import ActionBar from '$lib/components/dev-runner/execute-modal/ActionBar.svelte';
 import ExecutionSettingsForm from '$lib/components/dev-runner/execute-modal/ExecutionSettingsForm.svelte';
+import ReadinessCard from '$lib/components/dev-runner/execute-modal/ReadinessCard.svelte';
 import SummaryProgress from '$lib/components/dev-runner/execute-modal/SummaryProgress.svelte';
 import { confirm } from '$lib/stores/confirm';
 
@@ -76,6 +78,10 @@ import { confirm } from '$lib/stores/confirm';
 	let activeAction = $state<RunAction | null>(null);
 	let actionLoading = $derived(activeAction !== null);
 	let actionError = $state<string | null>(null);
+	let readiness = $state<DevRunnerReadinessResponse | null>(null);
+	let readinessLoading = $state(false);
+	let readinessError = $state<string | null>(null);
+	let readinessRequestId = 0;
 	let syncMessage = $state<string | null>(null);
 	let forceStopNeeded = $state(false);
 	let attachedMessage = $state<string | null>(null);
@@ -257,9 +263,30 @@ const PHASE_PRIORITY = ['plan', 'impl', 'done', 'auto-conflict-resolver', 'auto-
 		}
 	}
 
+	async function refreshReadiness() {
+		const requestId = ++readinessRequestId;
+		readinessLoading = true;
+		readinessError = null;
+		try {
+			const next = await devRunnerRunnerApi.readiness();
+			if (requestId === readinessRequestId) {
+				readiness = next;
+			}
+		} catch (e) {
+			if (requestId === readinessRequestId) {
+				readinessError = e instanceof Error ? e.message : 'readiness 점검 실패';
+			}
+		} finally {
+			if (requestId === readinessRequestId) {
+				readinessLoading = false;
+			}
+		}
+	}
+
 	onMount(() => {
 		fetchEngineConfigs();
 		fetchDefaultEngines();
+		if (open) void refreshReadiness();
 		llmApi.listProfiles().then(d => {
 			profilesData = d;
 			// 현재 선택된 엔진의 선택 프로필로 초기화
@@ -310,6 +337,10 @@ const PHASE_PRIORITY = ['plan', 'impl', 'done', 'auto-conflict-resolver', 'auto-
 	}
 
 	async function handleStart() {
+		if (readiness?.can_start === false) {
+			actionError = readiness.items.find((item) => item.severity === 'blocker')?.message ?? 'Readiness 차단 항목이 있습니다.';
+			return;
+		}
 		if (mode === 'single' && !selectedPlan) {
 			actionError = 'Plan 파일을 선택하세요';
 			return;
@@ -414,6 +445,7 @@ const PHASE_PRIORITY = ['plan', 'impl', 'done', 'auto-conflict-resolver', 'auto-
 		try {
 			const result = await devRunnerPlanApi.sync();
 			onStatusChange();
+			void refreshReadiness();
 			const parts: string[] = [];
 			if (result.added > 0) parts.push(`${result.added}개 추가`);
 			if (result.removed > 0) parts.push(`${result.removed}개 제거`);
@@ -448,6 +480,7 @@ const PHASE_PRIORITY = ['plan', 'impl', 'done', 'auto-conflict-resolver', 'auto-
 			const result = await devRunnerRunnerApi.resetState(fullReset);
 			console.log(`${result.reset_count}개 작업 ${fullReset ? '삭제' : '초기화'}됨`);
 			onStatusChange();
+			void refreshReadiness();
 		} catch (e) {
 			actionError = e instanceof Error ? e.message : '초기화 실패';
 		} finally {
@@ -466,6 +499,10 @@ const PHASE_PRIORITY = ['plan', 'impl', 'done', 'auto-conflict-resolver', 'auto-
 		if (!open) {
 			resetTransientActionState();
 		}
+	});
+
+	$effect(() => {
+		if (open) void refreshReadiness();
 	});
 </script>
 
@@ -562,6 +599,13 @@ const PHASE_PRIORITY = ['plan', 'impl', 'done', 'auto-conflict-resolver', 'auto-
 						onRegenerate={onGenerateSummary ?? (() => {})}
 					/>
 				{/if}
+
+				<ReadinessCard
+					readiness={readiness}
+					loading={readinessLoading}
+					error={readinessError}
+					onRefresh={refreshReadiness}
+				/>
 			{/snippet}
 
 			<div class="min-h-full p-5">
@@ -599,6 +643,7 @@ const PHASE_PRIORITY = ['plan', 'impl', 'done', 'auto-conflict-resolver', 'auto-
 			{#snippet actions()}
 				<ActionBar
 					status={status}
+					readiness={readiness}
 					anyRunning={anyRunning}
 					activeAction={activeAction}
 					mode={mode}
