@@ -20,6 +20,7 @@
 - wtools 내부 `.agents`와 `.claude`는 각 엔진의 독립 primary surface이며 서로 mirror가 아니다. monitor-page의 동일 경로명은 receiver mirror surface로만 취급한다.
 - cross-model surface 변경은 wtools 원본 기준으로 분류한다. 공통 정책/워크플로우 계약은 다른 surface 반영을 검토하고, 모델별 authoring/실행 메커니즘은 해당 surface 한정으로 둔다.
 - mirror surface(`.agents/`, `.agent/`, `.claude/`, `.gemini/`) 직접 수정·로컬 커밋 금지. wtools 원본 수정 후 원격 sync commit을 `git pull --ff-only`로만 수신한다.
+- plan draft scratch는 `.worktrees/drafts/plan/<slug>_draft.md` 단일 파일만 사용한다. `.worktrees/drafts/plan/<session-id>/` 폴더와 `metadata.json` + `draft.md` 세션 형식은 신규 작성 대상이 아니다.
 - backup/restore 브랜치를 main에 반영할 때 source branch에 mirror/skill 변경이 섞여 있는지 먼저 확인한다: `git diff --name-status <base> <source> -- .agents .agent .claude .gemini`. 사용자가 skill 제외를 지시했거나 mirror 변경이 범위 밖이면 병합 입력 단계에서 제외하고, merge 전후 `.agents/.agent/.claude/.gemini` diff가 비어 있지 않으면 완료 처리 금지.
 - root `main`과 `origin/main` 관계는 `git rev-list --left-right --count HEAD...origin/main`으로 분류한다. `behind-only`는 `git pull --ff-only` 수신 후보이고, `diverged`는 즉시 blocker가 아니라 mirror diff와 충돌 가능성을 먼저 보고하는 `명시 merge 결정 필요` 상태다. 단, sync tip을 plain `git pull`이나 push-first local merge로 닫지 않는다.
 - root worktree(`main`/non-main 공통)에서는 구현성 경로를 직접 수정·커밋하지 않는다. 현재 impl worktree 또는 대상 repo worktree로 reroute한다. root branch guard는 `scripts/git-hooks/root-branch-guard.ps1`이며, root checkout이 main 밖으로 이동하면 `.git/root-branch-guard.violation` sentinel을 남긴다.
@@ -46,6 +47,13 @@
 | 브랜치 | `plans` (orphan — main과 공통 조상 없음) |
 
 **활성 안내**: 계획서와 아카이브는 `.worktrees/plans`가 단일 진실원입니다. main에서 `docs/plan/` 또는 `docs/archive/`를 커밋하려 하면 pre-commit hook이 차단합니다.
+
+## Draft Scratch Surface
+
+- 신규 plan 초안은 canonical plans worktree에 바로 만들지 않고, repo root 기준 ignored scratch file `.worktrees/drafts/plan/<slug>_draft.md`에서 작성한다.
+- `.worktrees/drafts/plan/<session-id>/` 하위 폴더와 `metadata.json` + `draft.md` 세션 형식은 legacy draft로만 취급한다. 신규 작성·publish 가능한 입력으로 쓰지 않는다.
+- `<slug>_draft.md`에는 publish 대상 후보, 승인된 요구사항, 미승인 제안, 작성/갱신 시각을 front matter 또는 본문 metadata로 남긴다.
+- stale draft 판단은 `<slug>_draft.md` 파일 mtime 또는 flat metadata `updated_at` 기준 14일 이상으로 한다. 삭제·덮어쓰기는 사용자 확인 후에만 수행한다.
 
 ### 세션 시작 시 ensure 명령
 
