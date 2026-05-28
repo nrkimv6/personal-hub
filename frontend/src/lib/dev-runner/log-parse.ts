@@ -1,4 +1,4 @@
-import type { ParsedLine } from './log-types';
+import type { ParsedLine, StructuredLogEvent } from './log-types';
 
 export const SEPARATOR_PATTERN = '════════════════';
 export const LINE_PATTERN = /^\s*\[?(\d{2}:\d{2}:\d{2})\]?\s*\[(\w+)\]\s*(.*)/;
@@ -22,6 +22,23 @@ export function createLineId(sequence: number, tag: string, timestamp: string, r
 	return `${sequence}-${Math.abs(hash)}`;
 }
 
+export function buildStructuredLogEvent(tag: string, timestamp: string, message: string, raw: string): StructuredLogEvent | undefined {
+	if (tag !== 'TOOL' && tag !== 'RESULT') return undefined;
+	const trimmedMessage = message.trim();
+	const structured: StructuredLogEvent = {
+		schema_version: 1,
+		kind: tag === 'TOOL' ? 'tool_call' : 'tool_result',
+		tag,
+		message: trimmedMessage,
+		raw
+	};
+	if (timestamp) structured.timestamp = timestamp;
+	if (tag === 'TOOL' && trimmedMessage) {
+		structured.name = trimmedMessage.split(/[:\s]/, 1)[0];
+	}
+	return structured;
+}
+
 export function parseLine(text: string, isStale: boolean, createId: LineIdFactory): ParsedLine {
 	const normalizedRaw = normalizeLogText(text);
 	const [head = '', ...tail] = normalizedRaw.split('\n');
@@ -37,7 +54,8 @@ export function parseLine(text: string, isStale: boolean, createId: LineIdFactor
 			tag: finalMatch[2],
 			message,
 			raw: normalizedRaw,
-			isStale
+			isStale,
+			structured: buildStructuredLogEvent(finalMatch[2], finalMatch[1], message, normalizedRaw)
 		};
 	}
 
@@ -50,7 +68,8 @@ export function parseLine(text: string, isStale: boolean, createId: LineIdFactor
 			tag: mergeMatch[1],
 			message,
 			raw: normalizedRaw,
-			isStale
+			isStale,
+			structured: buildStructuredLogEvent(mergeMatch[1], '', message, normalizedRaw)
 		};
 	}
 
@@ -62,7 +81,15 @@ export function parseLine(text: string, isStale: boolean, createId: LineIdFactor
 			const noiseCount = parseInt(diagMatch[2]) || 0;
 			return { id: createId(tag, '', normalizedRaw), timestamp: '', tag, message, raw: normalizedRaw, isStale, noiseCount };
 		}
-		return { id: createId(tag, '', normalizedRaw), timestamp: '', tag, message, raw: normalizedRaw, isStale };
+		return {
+			id: createId(tag, '', normalizedRaw),
+			timestamp: '',
+			tag,
+			message,
+			raw: normalizedRaw,
+			isStale,
+			structured: buildStructuredLogEvent(tag, '', message, normalizedRaw)
+		};
 	}
 
 	return {

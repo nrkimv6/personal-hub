@@ -891,6 +891,9 @@
 						onToggleExpand={() => toggleExpand(line.id)}
 						onExpandKeydown={(e) => handleExpandKeydown(e, line.id)}
 					>
+						{#if line.structured?.name}
+							<span class="mr-1 shrink-0 rounded bg-yellow-500/10 px-1 text-[10px] font-semibold text-yellow-200">{line.structured.name}</span>
+						{/if}
 						{toolCollapsed && !toolExpanded ? getPreviewLines(line.message) : getRenderableText(line.message)}
 					</LogLine>
 				{:else if line.tag === 'RESULT'}

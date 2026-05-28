@@ -11,6 +11,17 @@ export interface ParsedLine {
 	raw: string;
 	isStale: boolean;
 	noiseCount?: number;
+	structured?: StructuredLogEvent;
+}
+
+export interface StructuredLogEvent {
+	schema_version: 1;
+	kind: 'tool_call' | 'tool_result' | 'tagged_log';
+	tag: string;
+	message: string;
+	raw: string;
+	timestamp?: string;
+	name?: string;
 }
 
 export interface ResultSegment {

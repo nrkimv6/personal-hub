@@ -7,7 +7,11 @@ sse_format, build_log_line_payload 순수 함수 검증.
 import json
 import pytest
 
-from app.modules.dev_runner.services.event_sse import sse_format, build_log_line_payload
+from app.modules.dev_runner.services.event_sse import (
+    build_log_line_payload,
+    build_structured_log_event,
+    sse_format,
+)
 
 
 class TestSseFormat:
@@ -53,3 +57,25 @@ class TestBuildLogLinePayload:
         payload = build_log_line_payload("a\nb\nc\nd\ne")
         assert isinstance(payload, dict)
         assert payload["meta"]["line_count"] == 5
+
+    def test_tool_line_returns_structured_payload(self):
+        payload = build_log_line_payload("[12:00:00] [TOOL] shell_command Get-ChildItem")
+        assert isinstance(payload, dict)
+        assert payload["text"] == "[12:00:00] [TOOL] shell_command Get-ChildItem"
+        assert payload["meta"]["multiline"] is False
+        assert payload["structured_event"]["schema_version"] == 1
+        assert payload["structured_event"]["kind"] == "tool_call"
+        assert payload["structured_event"]["tag"] == "TOOL"
+        assert payload["structured_event"]["name"] == "shell_command"
+
+
+class TestStructuredLogEvent:
+    def test_result_line_returns_tool_result_event(self):
+        event = build_structured_log_event("[12:00:01] [RESULT] exit=0")
+        assert event is not None
+        assert event["kind"] == "tool_result"
+        assert event["timestamp"] == "12:00:01"
+        assert event["message"] == "exit=0"
+
+    def test_non_tool_line_has_no_structured_event(self):
+        assert build_structured_log_event("[12:00:01] [INFO] hello") is None
