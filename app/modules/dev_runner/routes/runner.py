@@ -21,11 +21,33 @@ from app.modules.dev_runner.schemas import (
     RunRequest,
     RunStatusResponse,
     RunnerListItem,
+    PlanStorageRootStatusItem,
+    PlanStorageRootStatusResponse,
 )
 from app.modules.dev_runner.services.executor_service import executor_service
 from app.modules.dev_runner.services.readiness_service import build_dev_runner_readiness
 
 router = APIRouter()
+READINESS_STORAGE_ROOT_TIMEOUT_SECONDS = 5
+
+
+def _readiness_storage_roots_timeout_response() -> PlanStorageRootStatusResponse:
+    checked_at = datetime.now().isoformat(timespec="seconds")
+    return PlanStorageRootStatusResponse(
+        checked_at=checked_at,
+        roots=[
+            PlanStorageRootStatusItem(
+                project="plans",
+                repo_root="",
+                worktree_path="",
+                exists=True,
+                status="unknown",
+                checked_at=checked_at,
+                error=f"plan storage root status timed out after {READINESS_STORAGE_ROOT_TIMEOUT_SECONDS}s",
+            )
+        ],
+        total=1,
+    )
 
 
 @router.get("/runners", response_model=list[RunnerListItem])
@@ -114,7 +136,13 @@ async def get_readiness():
     """실행 시작 전 readiness 요약 조회 (읽기 전용)."""
     status = await executor_service.get_process_status()
     from app.modules.dev_runner.routes.plans import _collect_plan_storage_roots_status_sync
-    storage_roots = await asyncio.to_thread(_collect_plan_storage_roots_status_sync)
+    try:
+        storage_roots = await asyncio.wait_for(
+            asyncio.to_thread(_collect_plan_storage_roots_status_sync),
+            timeout=READINESS_STORAGE_ROOT_TIMEOUT_SECONDS,
+        )
+    except asyncio.TimeoutError:
+        storage_roots = _readiness_storage_roots_timeout_response()
     return build_dev_runner_readiness(status, storage_roots)
 
 

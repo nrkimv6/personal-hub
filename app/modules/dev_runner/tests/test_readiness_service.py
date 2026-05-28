@@ -4,6 +4,7 @@ from app.modules.dev_runner.schemas import (
     RunStatusResponse,
 )
 from app.modules.dev_runner.services.readiness_service import build_dev_runner_readiness
+from app.modules.dev_runner.routes.runner import _readiness_storage_roots_timeout_response
 
 
 def _status(*, redis_connected: bool = True, listener_alive: bool = True) -> RunStatusResponse:
@@ -77,4 +78,17 @@ def test_readiness_warns_but_allows_dirty_plan_storage():
     assert response.warnings == 1
     plan_storage = next(item for item in response.items if item.id == "plan-storage")
     assert "dirty 1개" in plan_storage.message
+
+
+def test_readiness_storage_timeout_degrades_to_warning():
+    response = build_dev_runner_readiness(
+        _status(),
+        _readiness_storage_roots_timeout_response(),
+    )
+
+    assert response.can_start is True
+    assert response.severity == "warning"
+    plan_storage = next(item for item in response.items if item.id == "plan-storage")
+    assert plan_storage.severity == "warning"
+    assert "확정할 수 없습니다" in plan_storage.message
 
