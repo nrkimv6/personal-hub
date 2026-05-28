@@ -82,6 +82,7 @@ import { confirm } from '$lib/stores/confirm';
 	let readinessLoading = $state(false);
 	let readinessError = $state<string | null>(null);
 	let readinessRequestId = 0;
+	let readinessLoadedForOpen = $state(false);
 	let syncMessage = $state<string | null>(null);
 	let forceStopNeeded = $state(false);
 	let attachedMessage = $state<string | null>(null);
@@ -286,7 +287,6 @@ const PHASE_PRIORITY = ['plan', 'impl', 'done', 'auto-conflict-resolver', 'auto-
 	onMount(() => {
 		fetchEngineConfigs();
 		fetchDefaultEngines();
-		if (open) void refreshReadiness();
 		llmApi.listProfiles().then(d => {
 			profilesData = d;
 			// 현재 선택된 엔진의 선택 프로필로 초기화
@@ -497,12 +497,16 @@ const PHASE_PRIORITY = ['plan', 'impl', 'done', 'auto-conflict-resolver', 'auto-
 
 	$effect(() => {
 		if (!open) {
+			readinessLoadedForOpen = false;
 			resetTransientActionState();
+			return;
 		}
-	});
-
-	$effect(() => {
-		if (open) void refreshReadiness();
+		if (!readinessLoadedForOpen) {
+			readinessLoadedForOpen = true;
+			queueMicrotask(() => {
+				void refreshReadiness();
+			});
+		}
 	});
 </script>
 
