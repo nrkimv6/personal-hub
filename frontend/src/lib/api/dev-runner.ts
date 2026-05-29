@@ -218,11 +218,12 @@ export interface PlanStorageRootStatusResponse {
 }
 
 export type DevRunnerReadinessSeverity = 'ok' | 'warning' | 'blocker';
+export type DevRunnerReadinessItemSeverity = 'info' | 'warning' | 'blocker';
 
 export interface DevRunnerReadinessItem {
 	id: string;
 	label: string;
-	severity: DevRunnerReadinessSeverity;
+	severity: DevRunnerReadinessItemSeverity;
 	message: string;
 	action: string | null;
 }

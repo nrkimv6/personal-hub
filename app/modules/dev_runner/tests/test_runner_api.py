@@ -112,6 +112,56 @@ class TestGetStatus:
         assert data["display_label"] == "승인 필요"
         assert data["display_severity"] == "approval"
 
+    async def test_get_readiness_aggregates_status_storage_engines_and_quota(self, client, mock_executor_redis, monkeypatch):
+        from app.modules.dev_runner.routes import plans as plans_route
+        from app.modules.dev_runner.routes import runner as runner_route
+        from app.modules.dev_runner.schemas import PlanStorageRootStatusItem, PlanStorageRootStatusResponse
+
+        fake_async = mock_executor_redis["async"]
+        await fake_async.set("plan-runner:listener:heartbeat", "2026-05-28T10:00:00")
+
+        checked_at = "2026-05-28T10:00:00"
+        storage_response = PlanStorageRootStatusResponse(
+            checked_at=checked_at,
+            roots=[
+                PlanStorageRootStatusItem(
+                    project="monitor-page",
+                    repo_root="D:/repo",
+                    worktree_path="D:/repo/.worktrees/plans",
+                    exists=True,
+                    status="clean",
+                    dirty_count=0,
+                    checked_at=checked_at,
+                )
+            ],
+            total=1,
+        )
+
+        monkeypatch.setattr(plans_route, "_collect_plan_storage_roots_status_sync", lambda: storage_response)
+        monkeypatch.setattr(
+            runner_route,
+            "_readiness_load_engine_config",
+            lambda: ({"claude": {"default_model": "sonnet", "models": {"impl": "sonnet"}}}, None),
+        )
+        monkeypatch.setattr(
+            runner_route,
+            "_readiness_load_quota_snapshot",
+            lambda: ({"claude/sonnet": {"weekly_used_pct": 10, "short_cooldown_until": None}}, None),
+        )
+        monkeypatch.setattr(
+            runner_route.settings_service,
+            "get",
+            lambda: SimpleNamespace(default_engine="claude", default_fix_engine="claude"),
+        )
+
+        response = await client.get("/api/v1/dev-runner/readiness")
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["severity"] == "ok"
+        assert data["can_start"] is True
+        assert {item["id"] for item in data["items"]} >= {"redis", "listener", "runner", "plan-storage", "engine-config", "quota"}
+
     async def test_status_after_cleanup(self, client, mock_executor_redis):
         """TC-R (Right): 정상 종료 후 _cleanup_redis_state() → running=False"""
         from unittest.mock import patch

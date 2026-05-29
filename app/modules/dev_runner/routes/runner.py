@@ -26,6 +26,7 @@ from app.modules.dev_runner.schemas import (
 )
 from app.modules.dev_runner.services.executor_service import executor_service
 from app.modules.dev_runner.services.readiness_service import build_dev_runner_readiness
+from app.modules.dev_runner.services.settings_service import settings_service
 
 router = APIRouter()
 READINESS_STORAGE_ROOT_TIMEOUT_SECONDS = 5
@@ -48,6 +49,39 @@ def _readiness_storage_roots_timeout_response() -> PlanStorageRootStatusResponse
         ],
         total=1,
     )
+
+
+def _readiness_load_engine_config() -> tuple[dict | None, str | None]:
+    from app.modules.dev_runner.routes.engines import get_engines_json_path
+
+    try:
+        engines_path = get_engines_json_path()
+        if not engines_path.exists():
+            return None, "engines.json file not found"
+        payload = json.loads(engines_path.read_text(encoding="utf-8-sig"))
+        if not isinstance(payload, dict):
+            return None, "engines.json payload is not an object"
+        return payload, None
+    except Exception as exc:
+        return None, str(exc)
+
+
+def _readiness_load_quota_snapshot() -> tuple[dict | None, str | None]:
+    try:
+        from app.shared.llm_registry import load_quota_state
+
+        state = load_quota_state()
+        if not state:
+            return None, None
+        return {
+            key: {
+                "weekly_used_pct": quota.weekly_used_pct,
+                "short_cooldown_until": quota.short_cooldown_until.isoformat() if quota.short_cooldown_until else None,
+            }
+            for key, quota in state.items()
+        }, None
+    except Exception as exc:
+        return None, str(exc)
 
 
 @router.get("/runners", response_model=list[RunnerListItem])
@@ -143,7 +177,19 @@ async def get_readiness():
         )
     except asyncio.TimeoutError:
         storage_roots = _readiness_storage_roots_timeout_response()
-    return build_dev_runner_readiness(status, storage_roots)
+    engine_config, engine_config_error = await asyncio.to_thread(_readiness_load_engine_config)
+    quota_snapshot, quota_error = await asyncio.to_thread(_readiness_load_quota_snapshot)
+    settings = await asyncio.to_thread(settings_service.get)
+    return build_dev_runner_readiness(
+        status,
+        storage_roots,
+        engine_config=engine_config,
+        engine_config_error=engine_config_error,
+        quota_snapshot=quota_snapshot,
+        quota_error=quota_error,
+        default_engine=settings.default_engine,
+        default_fix_engine=settings.default_fix_engine,
+    )
 
 
 @router.post("/reset-state")

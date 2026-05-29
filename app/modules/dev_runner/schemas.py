@@ -11,6 +11,7 @@ PLAN_ARCHIVE_BLOCKED_PROVIDERS = {"cc-codex"}
 RunnerMetadataState = Union[bool, Literal["unknown"]]
 RunnerDisplaySeverity = Literal["info", "warn", "error", "approval", "success", "muted"]
 DevRunnerReadinessSeverity = Literal["ok", "warning", "blocker"]
+DevRunnerReadinessItemSeverity = Literal["info", "warning", "blocker"]
 
 
 # ========== 스키마 ==========
@@ -116,7 +117,7 @@ class DevRunnerReadinessItem(BaseModel):
     """Dev Runner 시작 전 readiness 점검 항목."""
     id: str
     label: str
-    severity: DevRunnerReadinessSeverity
+    severity: DevRunnerReadinessItemSeverity
     message: str
     action: Optional[str] = None
 
