@@ -3,7 +3,9 @@ param(
     [string]$CurrentMain,
     [Parameter(Mandatory = $true)]
     [string]$CandidateTip,
-    [string]$BaseRef = ""
+    [string]$BaseRef = "",
+    [ValidateSet("Receive", "PostMergeRepair")]
+    [string]$Mode = "Receive"
 )
 
 $ErrorActionPreference = "Stop"
@@ -103,6 +105,7 @@ if ($overlap.Count -gt 0) {
 }
 
 $mergeParents = @()
+$repairableMergeCommits = @()
 foreach ($mergeCommit in $mergeCommits) {
     $parentLine = Invoke-GitOne @("show", "-s", "--format=%P", $mergeCommit)
     $parents = @($parentLine -split "\s+" | Where-Object { $_ })
@@ -118,12 +121,24 @@ foreach ($mergeCommit in $mergeCommits) {
         commit = $mergeCommit
         parents = @($parentSummary)
     }
+    if ($Mode -eq "PostMergeRepair" -and $parents.Count -eq 2) {
+        $firstParent = $parents[0]
+        $candidateParent = $parents[1]
+        if ($firstParent -eq $current -and (Test-Ancestor $current $candidateParent)) {
+            $repairableMergeCommits += [pscustomobject]@{
+                commit = $mergeCommit
+                base_parent = $firstParent
+                candidate_parent = $candidateParent
+                repair = "linearize_to_candidate_parent"
+            }
+        }
+    }
 }
 
 $blockers = @()
 if (-not $currentMainIsAncestor) { $blockers += "stale_ancestry_blocked" }
 if ($duplicates.Count -gt 0) { $blockers += "duplicate_patch_blocked" }
-if ($mergeCommits.Count -gt 0) { $blockers += "incoming_merge_commit_blocked" }
+if ($Mode -eq "Receive" -and $mergeCommits.Count -gt 0) { $blockers += "incoming_merge_commit_blocked" }
 
 [pscustomobject]@{
     current_main = $current
@@ -134,6 +149,8 @@ if ($mergeCommits.Count -gt 0) { $blockers += "incoming_merge_commit_blocked" }
     incoming_count = $incomingCommits.Count
     merge_commits = @($mergeCommits)
     merge_parents = @($mergeParents)
+    repairable_merge_commits = @($repairableMergeCommits)
+    mode = $Mode
     changed_paths = @($changedPaths)
     mirror_paths = @($mirrorPaths)
     duplicates = @($duplicates)

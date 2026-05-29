@@ -413,7 +413,7 @@ class WorktreeManager:
                 stashed = stash_r.returncode == 0 and "No local changes to save" not in stash_r.stdout
                 logger.info(f"[WorktreeManager] pre-merge stash: rc={stash_r.returncode}, stashed={stashed}")
             result = _run_git(
-                ["merge", branch, "--no-ff", "-m", f"merge: {branch}"],
+                ["merge", "--ff-only", branch],
                 cwd=str(project_root), capture_output=True, text=True, encoding="utf-8"
             )
             if result.returncode == 0:
@@ -443,7 +443,7 @@ class WorktreeManager:
                         cwd=str(project_root), capture_output=True
                     )
                     result = _run_git(
-                        ["merge", branch, "--no-ff", "-m", f"merge: {branch}"],
+                        ["merge", "--ff-only", branch],
                         cwd=str(project_root), capture_output=True, text=True, encoding="utf-8"
                     )
                     if result.returncode == 0:
@@ -466,6 +466,8 @@ class WorktreeManager:
                 # CONFLICT 以꾨쭔 異붿텧?섏뿬 message???ы븿 (resolve?먯꽌 而⑦뀓?ㅽ듃濡??쒖슜)
                 conflict_lines = [l.strip() for l in result.stdout.splitlines() if l.strip().startswith("CONFLICT")]
                 detail = "\n".join(conflict_lines) if conflict_lines else (result.stderr.strip() + "\n" + result.stdout.strip()).strip()[:500]
+                if "Not possible to fast-forward" in detail:
+                    detail = f"rebuild_needed: branch is not a fast-forward of main; raw merge was not attempted. {detail}"
                 if not repo_git_path.exists():
                     detail = f"failed to restore main branch: {detail}"
                 # ??긽 abort ??stash pop

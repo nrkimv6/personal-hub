@@ -51,7 +51,9 @@ def test_receiver_policy_requires_guarded_candidate_tip_receive() -> None:
 
     required = (
         "scripts/services/pull-main-guarded.ps1",
+        "scripts/services/receive-main-candidate.ps1",
         "scripts/diagnostics/check-candidate-tip.ps1",
+        "incoming_merge_commit_blocked",
         "duplicate_patch_blocked",
         "stale_ancestry_blocked",
         "ROOT_GUARD_ALLOW_MAIN_REBASE",

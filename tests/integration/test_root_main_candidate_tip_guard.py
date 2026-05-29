@@ -50,6 +50,7 @@ def _copy_candidate_scripts(repo: Path) -> None:
     services.mkdir(parents=True, exist_ok=True)
     shutil.copy2(REPO_ROOT / "scripts" / "diagnostics" / "check-candidate-tip.ps1", diagnostics / "check-candidate-tip.ps1")
     shutil.copy2(REPO_ROOT / "scripts" / "services" / "pull-main-guarded.ps1", services / "pull-main-guarded.ps1")
+    shutil.copy2(REPO_ROOT / "scripts" / "services" / "receive-main-candidate.ps1", services / "receive-main-candidate.ps1")
 
 
 def _check_candidate(repo: Path, current: str = "main", candidate: str = "impl/stale") -> dict:
@@ -130,3 +131,29 @@ def test_pull_main_guarded_blocks_duplicate_origin_tip(tmp_path: Path) -> None:
     assert result.returncode != 0
     assert "candidate_tip_guard_blocked" in output
     assert "duplicate_patch_blocked" in output
+
+
+def test_candidate_tip_receive_mode_keeps_incoming_merge_commit_blocker(tmp_path: Path) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _run(["git", "init", "-b", "main"], repo)
+    _run(["git", "config", "user.name", "candidate-tip"], repo)
+    _run(["git", "config", "user.email", "candidate-tip@example.com"], repo)
+    (repo / "base.txt").write_text("base\n", encoding="utf-8")
+    _run(["git", "add", "base.txt"], repo)
+    _run(["git", "commit", "-m", "base"], repo)
+    _run(["git", "switch", "-c", "side-a"], repo)
+    (repo / "a.txt").write_text("a\n", encoding="utf-8")
+    _run(["git", "add", "a.txt"], repo)
+    _run(["git", "commit", "-m", "a"], repo)
+    _run(["git", "switch", "main"], repo)
+    _run(["git", "switch", "-c", "side-b"], repo)
+    (repo / "b.txt").write_text("b\n", encoding="utf-8")
+    _run(["git", "add", "b.txt"], repo)
+    _run(["git", "commit", "-m", "b"], repo)
+    _run(["git", "merge", "--no-ff", "side-a", "-m", "merge side-a"], repo)
+
+    payload = _check_candidate(repo, current="main", candidate="side-b")
+
+    assert payload["merge_commits"]
+    assert "incoming_merge_commit_blocked" in payload["blockers"]

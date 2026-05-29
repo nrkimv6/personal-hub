@@ -331,8 +331,8 @@ class TestWorktreeManagerMergeToMain:
         WorktreeManager.merge_to_main("mergechk", base_dir, repo)
         assert (repo / "check_file.py").exists()
 
-    def test_error_conflict(self, worktrees_dir):
-        """TC-Error: conflict detected"""
+    def test_error_diverged_branch_does_not_raw_merge(self, worktrees_dir):
+        """TC-Error: diverged branch is blocked instead of creating a merge commit"""
         base_dir, repo = worktrees_dir
         WorktreeManager.create("conflict1", base_dir)
         wt1 = base_dir / "conflict1"
@@ -351,7 +351,8 @@ class TestWorktreeManagerMergeToMain:
         subprocess.run(["git", "commit", "-m", "main change"], cwd=str(repo), capture_output=True)
         result = WorktreeManager.merge_to_main("conflict2", base_dir, repo)
         assert result.success is False
-        assert result.conflict is True
+        assert result.conflict is False
+        assert "fast-forward" in result.message
 
     def test_merge_to_main_branch_param_priority(self, worktrees_dir):
         """TC-Right: branch parameter priority in merge_to_main"""
@@ -387,8 +388,8 @@ class TestWorktreeManagerMergeToMain:
         result = WorktreeManager.merge_to_main(runner_id, base_dir, repo, plan_file=None, branch=None)
         assert result.success is True
 
-    def test_correct_cardinality_one_merge_commit(self, worktrees_dir):
-        """TC-CORRECT-Cardinality: exactly one merge commit created"""
+    def test_correct_cardinality_fast_forward_no_merge_commit(self, worktrees_dir):
+        """TC-CORRECT-Cardinality: fast-forward receive creates no merge commit"""
         base_dir, repo = worktrees_dir
         log_before = subprocess.run(
             ["git", "log", "--oneline"],
@@ -406,7 +407,12 @@ class TestWorktreeManagerMergeToMain:
             capture_output=True, text=True, cwd=str(repo)
         ).stdout.strip().split("\n")
         count_after = len([l for l in log_after if l])
-        assert count_after == count_before + 2
+        assert count_after == count_before + 1
+        merges = subprocess.run(
+            ["git", "rev-list", "--merges", "HEAD~1..HEAD"],
+            capture_output=True, text=True, cwd=str(repo)
+        ).stdout.strip()
+        assert merges == ""
 
 
 # ── list_worktrees() ──────────────────────────────────────────────────────────
@@ -502,8 +508,8 @@ class TestMergeToMainStash:
         assert result.success is True
         assert result.stash_pop_conflict is True
 
-    def test_RIGHT_case_b_conflict_abort_pop(self, git_repo_with_main):
-        """R: merge CONFLICT -> abort + pop"""
+    def test_RIGHT_case_b_diverged_branch_blocks_without_raw_merge(self, git_repo_with_main):
+        """R: diverged branch blocks without raw merge"""
         repo = git_repo_with_main
         (repo / "shared.txt").write_text("main line")
         subprocess.run(["git", "add", "shared.txt"], capture_output=True, cwd=str(repo))
@@ -518,7 +524,8 @@ class TestMergeToMainStash:
         subprocess.run(["git", "commit", "-m", "main conflict"], capture_output=True, cwd=str(repo))
         result = WorktreeManager.merge_to_main("feat3", repo / ".wt", repo, branch="runner/feat3")
         assert result.success is False
-        assert result.conflict is True
+        assert result.conflict is False
+        assert "fast-forward" in result.message
         assert result.overwritten is False
         status = subprocess.run(["git", "status", "--porcelain"], capture_output=True, text=True, cwd=str(repo))
         assert "<<<" not in status.stdout
@@ -538,7 +545,7 @@ class TestMergeToMainStash:
         import subprocess as sp_module
         original_run = sp_module.run
         def mock_run(cmd, **kwargs):
-            if isinstance(cmd, list) and "merge" in cmd and "--no-ff" in cmd:
+            if isinstance(cmd, list) and "merge" in cmd and "--ff-only" in cmd:
                 class FakeResult:
                     returncode = 1
                     stdout = ""
@@ -580,7 +587,7 @@ class TestMergeToMainStash:
         import subprocess as sp_module
         original_run = sp_module.run
         def mock_run_raise(cmd, **kwargs):
-            if isinstance(cmd, list) and len(cmd) > 1 and cmd[0] == "git" and "merge" in cmd and "--no-ff" in cmd:
+            if isinstance(cmd, list) and len(cmd) > 1 and cmd[0] == "git" and "merge" in cmd and "--ff-only" in cmd:
                 raise RuntimeError("mock merge failure")
             return original_run(cmd, **kwargs)
         monkeypatch.setattr(sp_module, "run", mock_run_raise)

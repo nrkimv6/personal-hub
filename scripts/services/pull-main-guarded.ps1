@@ -1,9 +1,17 @@
 param(
     [string]$Remote = "origin",
-    [string]$Branch = "main"
+    [string]$Branch = "main",
+    [switch]$Help
 )
 
 $ErrorActionPreference = "Stop"
+
+if ($Help) {
+    Write-Output "Usage: pull-main-guarded.ps1 [-Remote origin] [-Branch main]"
+    Write-Output "Receives a remote FETCH_HEAD candidate into root main with candidate-tip checks and git merge --ff-only."
+    Write-Output "Use receive-main-candidate.ps1 for local branch or commit candidates."
+    exit 0
+}
 
 $repoRoot = (git rev-parse --show-toplevel).Trim()
 $currentBranch = (git rev-parse --abbrev-ref HEAD).Trim()

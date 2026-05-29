@@ -77,3 +77,38 @@ def test_stale_ancestry_merge_preflight_hard_blocks_even_when_behind_warn_would_
     assert snapshot is None
     assert result["reason"] == "stale_ancestry_blocked"
     assert result["candidate_tip"]["blockers"] == ["stale_ancestry_blocked"]
+
+
+def test_candidate_tip_repairable_merge_is_not_hard_blocker():
+    mod = _import_dr_merge()
+    fake = _FakeRedis()
+    evidence = {
+        "blockers": [],
+        "warnings": [],
+        "duplicates": [],
+        "path_overlap_ratio": 0.0,
+        "repairable_merge_commits": [
+            {
+                "commit": "merge123",
+                "base_parent": "base123",
+                "candidate_parent": "candidate123",
+                "repair": "linearize_to_candidate_parent",
+            }
+        ],
+    }
+
+    with patch("plan_worktree_helpers.get_branch_divergence", return_value=(0, 1)), \
+         patch("plan_worktree_helpers.classify_merge_risk", return_value="PASS"), \
+         patch.object(mod, "_candidate_tip_evidence", return_value=evidence), \
+         patch.object(mod, "_write_pre_merge_snapshot", return_value="snapshot.json"):
+        result, snapshot = mod._check_stale_merge_gate(  # noqa: SLF001
+            "runner-repairable-preflight",
+            fake,
+            "impl/repairable",
+            lambda _msg: None,
+        )
+
+    assert result is None
+    assert snapshot == "snapshot.json"
+    persisted = fake.store["plan-runner:runners:runner-repairable-preflight:candidate_tip_evidence"]
+    assert "repairable_merge_commits" in persisted

@@ -11,6 +11,7 @@
 - 환경: **Windows + PowerShell 기준** (bash 문법 사용 금지)
 - `.git` 보호: 삭제/강제 초기화/일괄 되돌리기 금지
 - 파괴적 git 금지: `git clean -fd`, `git reset --hard`, `git checkout .`, `git restore .`
+- post-merge repair도 `git reset --hard`를 사용하지 않는다. 선형화 가능성이 reset-hard 없이 증명되지 않으면 자동 복구 대신 `repair_required` evidence를 남긴다.
 - 서비스 충돌 방지: `run.ps1`, `stop.ps1` 직접 실행 금지 (NSSM과 충돌)
 - frontend verify 경계: `implement`/worktree 단계에서는 `frontend verify(sync/check/build)` 금지, `/merge-test` + main에서만 허용한다. 예시로 `npm run build`, `npm run check`, `npm run check:watch`, `svelte-kit sync`, `svelte-check`, `vite build`, `node ... svelte-kit.js sync`가 모두 포함된다.
 - `_build_worktree.ps1`는 setup 전용 helper 예외이며, implement 중 임의 probe 근거로 사용하면 안 된다.
@@ -23,6 +24,7 @@
 - plan draft scratch는 `.worktrees/drafts/plan/<slug>_draft.md` 단일 파일만 사용한다. `.worktrees/drafts/plan/<session-id>/` 폴더와 `metadata.json` + `draft.md` 세션 형식은 신규 작성 대상이 아니다.
 - backup/restore 브랜치를 main에 반영할 때 source branch에 mirror/skill 변경이 섞여 있는지 먼저 확인한다: `git diff --name-status <base> <source> -- .agents .agent .claude .gemini`. 사용자가 skill 제외를 지시했거나 mirror 변경이 범위 밖이면 병합 입력 단계에서 제외하고, merge 전후 `.agents/.agent/.claude/.gemini` diff가 비어 있지 않으면 완료 처리 금지.
 - root `main`과 `origin/main` 관계는 `git rev-list --left-right --count HEAD...origin/main`으로 분류한다. `behind-only`는 `git pull --ff-only` 수신 후보이고, `diverged`는 즉시 blocker가 아니라 mirror diff와 충돌 가능성을 먼저 보고하는 `명시 merge 결정 필요` 상태다. 단, sync tip을 plain `git pull`이나 push-first local merge로 닫지 않는다.
+- receiver/root `main`에 local branch나 commit candidate를 반영할 때 raw `git merge`를 직접 실행하지 않는다. `scripts/services/receive-main-candidate.ps1 -Candidate <ref>`를 사용해 candidate-tip check와 `merge --ff-only` receive를 통과시킨다.
 - root worktree(`main`/non-main 공통)에서는 구현성 경로를 직접 수정·커밋하지 않는다. 현재 impl worktree 또는 대상 repo worktree로 reroute한다. root branch guard는 `scripts/git-hooks/root-branch-guard.ps1`이며, root checkout이 main 밖으로 이동하면 `.git/root-branch-guard.violation` sentinel을 남긴다.
 
 ## Receiver Mirror Scope
@@ -33,6 +35,7 @@
 - mirror sync routing은 `git fetch origin` 후 `git rev-list --left-right --count HEAD...origin/main` tuple을 기준으로 한다. `git status --short --branch`는 display evidence다.
 - `behind-only`(`left=0,right>0`)는 `git pull --ff-only` 수신 후보다.
 - `ahead-only`(`left>0,right=0`)만 owner가 `git push origin main`으로 origin을 정렬한 뒤 `git pull --ff-only`를 retry할 수 있다.
+- local candidate receive는 root `main`이 `origin/main` 대비 `equal` 또는 `ahead-only`일 때만 `receive-main-candidate.ps1`로 진행한다. `behind-only`는 guarded remote receive를 먼저 수행하고, `diverged`는 명시 merge 결정 상태로 보고한다.
 - `diverged`(`left>0,right>0`)는 push-first 금지다. mirror path가 관련되면 자동화된 wtools sync 재생성, wtools source owner flow, sync worker, 또는 GitHub Actions `sync-skills.yml` evidence를 확보한 뒤 downstream read-back으로 닫는다. mirror path가 없고 사용자가 명시 승인한 일반 divergence만 fetch/rev-list/mirror diff read-back 후 충돌 없는 merge decision으로 진행할 수 있다.
 - 세부 절차: [`docs/dev-guide/root-branch-guard.md`](docs/dev-guide/root-branch-guard.md)
 
