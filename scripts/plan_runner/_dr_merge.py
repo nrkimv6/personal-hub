@@ -40,6 +40,7 @@ from _dr_merge_state import (
     MERGED,
     MERGING,
     QUEUED,
+    PUSH_REQUIRED,
     RESIDUE_BLOCKED,
     RESOLVING,
     TERMINAL_STATUSES,
@@ -901,6 +902,164 @@ def _extract_post_merge_done_failure(done_result) -> tuple[bool, str]:
     return True, str(reason)
 
 
+def _remote_tuple_relation(left: int, right: int) -> str:
+    if left == 0 and right == 0:
+        return "equal"
+    if left > 0 and right == 0:
+        return "ahead-only"
+    if left == 0 and right > 0:
+        return "behind-only"
+    if left > 0 and right > 0:
+        return "diverged"
+    return "unknown"
+
+
+def _remote_closeout_status(evidence: dict) -> str:
+    if not evidence.get("available"):
+        return "remote_ref_unavailable"
+    left = int(evidence.get("left") or 0)
+    right = int(evidence.get("right") or 0)
+    if left == 0 and right == 0:
+        return "remote_aligned"
+    if left > 0 and right == 0:
+        return "push_required"
+    if left == 0 and right > 0:
+        return "remote_receive_required"
+    if left > 0 and right > 0:
+        return "remote_diverged"
+    return "remote_alignment_unknown"
+
+
+def _collect_origin_main_alignment(project_root: Path) -> dict:
+    evidence = {
+        "remote_ref": "origin/main",
+        "available": False,
+        "left": None,
+        "right": None,
+        "relation": "unavailable",
+        "fetch_returncode": None,
+        "fetch_error": "",
+        "error": "",
+    }
+    try:
+        fetch = subprocess.run(
+            ["git", "fetch", "origin", "main"],
+            cwd=str(project_root),
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=60,
+        )
+        evidence["fetch_returncode"] = fetch.returncode
+        if fetch.returncode != 0:
+            evidence["fetch_error"] = (fetch.stderr or fetch.stdout or "").strip()[:500]
+    except Exception as exc:
+        evidence["fetch_error"] = str(exc)
+
+    try:
+        verify = subprocess.run(
+            ["git", "rev-parse", "--verify", "origin/main"],
+            cwd=str(project_root),
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=15,
+        )
+        if verify.returncode != 0:
+            evidence["error"] = (verify.stderr or verify.stdout or "origin/main unavailable").strip()[:500]
+            evidence["closeout_status"] = _remote_closeout_status(evidence)
+            return evidence
+
+        result = subprocess.run(
+            ["git", "rev-list", "--left-right", "--count", "HEAD...origin/main"],
+            cwd=str(project_root),
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=15,
+        )
+        if result.returncode != 0:
+            evidence["error"] = (result.stderr or result.stdout or "rev-list failed").strip()[:500]
+            evidence["closeout_status"] = _remote_closeout_status(evidence)
+            return evidence
+        parts = result.stdout.strip().split()
+        left, right = int(parts[0]), int(parts[1])
+        evidence.update(
+            {
+                "available": True,
+                "left": left,
+                "right": right,
+                "relation": _remote_tuple_relation(left, right),
+            }
+        )
+    except Exception as exc:
+        evidence["error"] = str(exc)
+    evidence["closeout_status"] = _remote_closeout_status(evidence)
+    return evidence
+
+
+def _post_merge_remote_alignment(runner_id: str, redis_client: redis.Redis) -> dict:
+    try:
+        target_project_root = read_runner_test_repo_root(
+            redis_client,
+            runner_id,
+            project_root=PROJECT_ROOT,
+        ) or PROJECT_ROOT
+    except Exception:
+        target_project_root = PROJECT_ROOT
+    return _collect_origin_main_alignment(Path(target_project_root))
+
+
+def _remote_alignment_blocker_result(
+    runner_id: str,
+    redis_client: redis.Redis,
+    action_name: str,
+    evidence: dict,
+    pub_fn,
+) -> dict | None:
+    closeout_status = str(evidence.get("closeout_status") or "")
+    if closeout_status == "remote_aligned" or closeout_status == "remote_ref_unavailable":
+        return None
+
+    reason = "push_required" if closeout_status == "push_required" else closeout_status or "remote_alignment_required"
+    message = (
+        "merge succeeded but root main is ahead of origin/main; "
+        "push and read-back are required before closeout"
+        if reason == "push_required"
+        else f"merge succeeded but remote alignment is not closed: {reason}"
+    )
+    try:
+        redis_client.set(
+            f"{RUNNER_KEY_PREFIX}:{runner_id}:remote_alignment_evidence",
+            json.dumps(evidence, ensure_ascii=False, sort_keys=True),
+        )
+        redis_client.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:closeout_status", closeout_status)
+    except Exception:
+        pass
+    _transition_merge_status(
+        runner_id,
+        redis_client,
+        PUSH_REQUIRED if reason == "push_required" else ERROR,
+        reason=reason,
+        message=message,
+        action_name=action_name,
+    )
+    pub_fn(f"{reason}: {message}; evidence={json.dumps(evidence, ensure_ascii=False, sort_keys=True)}")
+    return {
+        "success": False,
+        "message": message,
+        "merge_status": PUSH_REQUIRED if reason == "push_required" else ERROR,
+        "action": action_name,
+        "reason": reason,
+        "closeout_status": closeout_status,
+        "push_required": reason == "push_required",
+        "remote_alignment": evidence,
+    }
+
+
 def _compose_merge_result_with_done(
     runner_id: str,
     redis_client: redis.Redis,
@@ -984,6 +1143,16 @@ def _handle_merge_success(runner_id: str, redis_client: redis.Redis, plan_file, 
             },
             pub_fn=pub_fn,
         )
+    remote_alignment = _post_merge_remote_alignment(runner_id, redis_client)
+    remote_blocker = _remote_alignment_blocker_result(
+        runner_id,
+        redis_client,
+        action_name,
+        remote_alignment,
+        pub_fn,
+    )
+    if remote_blocker is not None:
+        return remote_blocker
     try:
         _transition_merge_status(runner_id, redis_client, MERGED, message="merged", action_name=action_name)
     except Exception:

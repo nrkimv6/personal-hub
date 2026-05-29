@@ -13,7 +13,7 @@ import shutil
 import subprocess
 import logging
 from pathlib import Path
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Optional
 
 logger = logging.getLogger(__name__)
@@ -142,6 +142,129 @@ class MergeResult:
     stash_pop_conflict: bool = False
     overwritten: bool = False
     exception: str = ""
+    remote_alignment: dict = field(default_factory=dict)
+    remote_aligned: bool = False
+    push_required: bool = False
+    push_required_reason: str = ""
+    closeout_status: str = ""
+
+
+def _remote_relation(left: int, right: int) -> str:
+    if left == 0 and right == 0:
+        return "equal"
+    if left > 0 and right == 0:
+        return "ahead-only"
+    if left == 0 and right > 0:
+        return "behind-only"
+    if left > 0 and right > 0:
+        return "diverged"
+    return "unknown"
+
+
+def _remote_closeout_status(evidence: dict) -> str:
+    if not evidence.get("available"):
+        return "remote_ref_unavailable"
+    left = int(evidence.get("left") or 0)
+    right = int(evidence.get("right") or 0)
+    if left == 0 and right == 0:
+        return "remote_aligned"
+    if left > 0 and right == 0:
+        return "push_required"
+    if left == 0 and right > 0:
+        return "remote_receive_required"
+    if left > 0 and right > 0:
+        return "remote_diverged"
+    return "remote_alignment_unknown"
+
+
+def _collect_remote_alignment(project_root: Path, remote_ref: str = "origin/main") -> dict:
+    evidence = {
+        "remote_ref": remote_ref,
+        "available": False,
+        "left": None,
+        "right": None,
+        "relation": "unavailable",
+        "fetch_returncode": None,
+        "fetch_error": "",
+        "error": "",
+    }
+    try:
+        fetch = _run_git(
+            ["fetch", "origin", "main"],
+            cwd=str(project_root),
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+        )
+        evidence["fetch_returncode"] = fetch.returncode
+        if fetch.returncode != 0:
+            evidence["fetch_error"] = (fetch.stderr or fetch.stdout or "").strip()[:500]
+    except Exception as exc:
+        evidence["fetch_error"] = str(exc)
+
+    try:
+        verify = _run_git(
+            ["rev-parse", "--verify", remote_ref],
+            cwd=str(project_root),
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+        )
+        if verify.returncode != 0:
+            evidence["error"] = (verify.stderr or verify.stdout or f"{remote_ref} unavailable").strip()[:500]
+            evidence["closeout_status"] = _remote_closeout_status(evidence)
+            return evidence
+
+        result = _run_git(
+            ["rev-list", "--left-right", "--count", f"HEAD...{remote_ref}"],
+            cwd=str(project_root),
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+        )
+        if result.returncode != 0:
+            evidence["error"] = (result.stderr or result.stdout or "rev-list failed").strip()[:500]
+            evidence["closeout_status"] = _remote_closeout_status(evidence)
+            return evidence
+
+        parts = result.stdout.strip().split()
+        left, right = int(parts[0]), int(parts[1])
+        evidence.update(
+            {
+                "available": True,
+                "left": left,
+                "right": right,
+                "relation": _remote_relation(left, right),
+            }
+        )
+    except Exception as exc:
+        evidence["error"] = str(exc)
+    evidence["closeout_status"] = _remote_closeout_status(evidence)
+    return evidence
+
+
+def _merge_result_success(
+    *,
+    message: str,
+    already_merged: bool = False,
+    stash_pop_conflict: bool = False,
+    remote_alignment: Optional[dict] = None,
+) -> MergeResult:
+    evidence = remote_alignment or {}
+    closeout_status = str(evidence.get("closeout_status") or "")
+    push_required = closeout_status == "push_required"
+    return MergeResult(
+        success=True,
+        conflict=False,
+        already_merged=already_merged,
+        stash_pop_conflict=stash_pop_conflict,
+        message=message,
+        remote_alignment=evidence,
+        remote_aligned=closeout_status == "remote_aligned",
+        push_required=push_required,
+        push_required_reason="main_ahead_of_origin_main" if push_required else "",
+        closeout_status=closeout_status,
+    )
 
 
 class WorktreeManager:
@@ -399,7 +522,11 @@ class WorktreeManager:
             )
             if ancestor_check.returncode == 0:
                 logger.info(f"[WorktreeManager] ?대? 癒몄?????skip: {branch}")
-                return MergeResult(success=True, conflict=False, already_merged=True, message="?대? 癒몄?????skip")
+                return _merge_result_success(
+                    message="?대? 癒몄?????skip",
+                    already_merged=True,
+                    remote_alignment=_collect_remote_alignment(project_root),
+                )
             # pre-merge stash: dirty working tree 媛먯?
             status_r = _run_git(
                 ["status", "--porcelain"],
@@ -430,7 +557,11 @@ class WorktreeManager:
                         _run_git(["stash", "drop"], cwd=str(project_root), capture_output=True)
                     stashed = False
                 logger.info(f"[WorktreeManager] 癒몄? ?깃났: {branch}")
-                return MergeResult(success=True, conflict=False, stash_pop_conflict=stash_pop_conflict, message="癒몄? ?깃났")
+                return _merge_result_success(
+                    message="癒몄? ?깃났",
+                    stash_pop_conflict=stash_pop_conflict,
+                    remote_alignment=_collect_remote_alignment(project_root),
+                )
             else:
                 conflict = "CONFLICT" in result.stdout or "CONFLICT" in result.stderr
                 overwritten = "would be overwritten" in result.stderr or "would be overwritten" in result.stdout
@@ -459,7 +590,11 @@ class WorktreeManager:
                                 _run_git(["stash", "drop"], cwd=str(project_root), capture_output=True)
                             stashed = False
                         logger.info(f"[WorktreeManager] 癒몄? ?깃났 (auto-commit ??retry): {branch}")
-                        return MergeResult(success=True, conflict=False, stash_pop_conflict=stash_pop_conflict, message="癒몄? ?깃났 (auto-commit ??retry)")
+                        return _merge_result_success(
+                            message="癒몄? ?깃났 (auto-commit ??retry)",
+                            stash_pop_conflict=stash_pop_conflict,
+                            remote_alignment=_collect_remote_alignment(project_root),
+                        )
                     # retry???ㅽ뙣 ???꾨옒 conflict/error 泥섎━ 怨꾩냽
                     conflict = "CONFLICT" in result.stdout or "CONFLICT" in result.stderr
                     overwritten = "would be overwritten" in result.stderr or "would be overwritten" in result.stdout

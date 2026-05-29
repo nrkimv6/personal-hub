@@ -320,6 +320,30 @@ class TestWorktreeManagerMergeToMain:
         assert result.success is True
         assert result.conflict is False
 
+    def test_merge_to_main_records_push_required_when_main_ahead_of_origin(self, worktrees_dir, tmp_path):
+        """R: ff-only merge success keeps origin/main alignment evidence."""
+        base_dir, repo = worktrees_dir
+        remote = tmp_path / "origin.git"
+        subprocess.run(["git", "init", "--bare", str(remote)], capture_output=True, cwd=str(tmp_path))
+        subprocess.run(["git", "remote", "add", "origin", str(remote)], capture_output=True, cwd=str(repo))
+        subprocess.run(["git", "push", "-u", "origin", "main"], capture_output=True, cwd=str(repo))
+        WorktreeManager.create("pushreq", base_dir)
+        wt = base_dir / "pushreq"
+        (wt / "push_required.py").write_text("x = 1")
+        subprocess.run(["git", "add", "-A"], cwd=str(wt), capture_output=True)
+        subprocess.run(["git", "commit", "-m", "feat: push required"], cwd=str(wt), capture_output=True)
+
+        result = WorktreeManager.merge_to_main("pushreq", base_dir, repo)
+
+        assert result.success is True
+        assert result.push_required is True
+        assert result.push_required_reason == "main_ahead_of_origin_main"
+        assert result.closeout_status == "push_required"
+        assert result.remote_alignment["remote_ref"] == "origin/main"
+        assert result.remote_alignment["left"] == 1
+        assert result.remote_alignment["right"] == 0
+        assert result.remote_alignment["relation"] == "ahead-only"
+
     def test_right_changes_reflected_in_main(self, worktrees_dir):
         """TC-Right: changes reflected in main branch after merge"""
         base_dir, repo = worktrees_dir
@@ -602,6 +626,11 @@ class TestMergeToMainStash:
         assert r.stash_pop_conflict is False
         assert r.overwritten is False
         assert r.exception == ""
+        assert r.remote_alignment == {}
+        assert r.remote_aligned is False
+        assert r.push_required is False
+        assert r.push_required_reason == ""
+        assert r.closeout_status == ""
 
 
 # ── validate() ───────────────────────────────────────────────────────────────

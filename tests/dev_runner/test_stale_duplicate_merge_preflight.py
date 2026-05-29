@@ -19,6 +19,10 @@ class _FakeRedis:
         self.store[key] = value
         return True
 
+    def delete(self, key: str):
+        self.store.pop(key, None)
+        return 1
+
 
 def _git(cwd: Path, *args: str) -> str:
     result = subprocess.run(
@@ -161,3 +165,39 @@ def test_candidate_tip_evidence_marks_linearizable_merge_commit(tmp_path):
             "repair": "linearize_to_candidate_parent",
         }
     ]
+
+
+def test_merge_success_records_push_required_before_merged_handoff():
+    mod = _import_dr_merge()
+    fake = _FakeRedis()
+    runner_id = "runner-push-required"
+    messages: list[str] = []
+    evidence = {
+        "remote_ref": "origin/main",
+        "available": True,
+        "left": 1,
+        "right": 0,
+        "relation": "ahead-only",
+        "closeout_status": "push_required",
+    }
+
+    with patch.object(mod, "_check_post_merge_residue", return_value={"success": True}), \
+         patch.object(mod, "_post_merge_remote_alignment", return_value=evidence), \
+         patch.object(mod, "_handle_post_merge_done") as done_mock:
+        result = mod._handle_merge_success(  # noqa: SLF001
+            runner_id,
+            fake,
+            "plan.md",
+            messages.append,
+        )
+
+    assert result["success"] is False
+    assert result["merge_status"] == "push_required"
+    assert result["reason"] == "push_required"
+    assert result["push_required"] is True
+    assert result["remote_alignment"] == evidence
+    assert fake.store[f"plan-runner:runners:{runner_id}:merge_status"] == "push_required"
+    assert fake.store[f"plan-runner:runners:{runner_id}:merge_reason"] == "push_required"
+    assert "push_required" in fake.store[f"plan-runner:runners:{runner_id}:remote_alignment_evidence"]
+    assert any("push_required" in message for message in messages)
+    done_mock.assert_not_called()

@@ -25,6 +25,7 @@ TESTING = "testing"
 FIXING = "fixing"
 PENDING_MERGE = "pending_merge"
 PRE_MERGE = "pre_merge"
+PUSH_REQUIRED = "push_required"
 
 
 TERMINAL_STATUSES = frozenset(
@@ -37,6 +38,7 @@ TERMINAL_STATUSES = frozenset(
         PRECHECK_FAILED,
         NEEDS_RESOLVE_CONTINUATION,
         RESIDUE_BLOCKED,
+        PUSH_REQUIRED,
     }
 )
 """Statuses that represent an executor outcome or a user-action wait state."""
@@ -50,7 +52,7 @@ APPROVAL_STATUSES = frozenset({APPROVAL_REQUIRED})
 """Statuses requiring an explicit user approval action before retry."""
 
 RETRYABLE_STATUSES = frozenset(
-    {APPROVAL_REQUIRED, CONFLICT, TEST_FAILED, PRECHECK_FAILED, NEEDS_RESOLVE_CONTINUATION, ERROR}
+    {APPROVAL_REQUIRED, CONFLICT, TEST_FAILED, PRECHECK_FAILED, NEEDS_RESOLVE_CONTINUATION, ERROR, PUSH_REQUIRED}
 )
 """Terminal statuses that a user-commanded retry may intentionally replace."""
 

@@ -78,8 +78,110 @@ def test_receive_main_candidate_fast_forwards_local_branch(tmp_path: Path) -> No
     assert result.returncode == 0, result.stdout + result.stderr
     payload = json.loads(result.stdout)
     assert payload["status"] == "push_ready"
+    assert payload["closeout_status"] == "push_required"
+    assert payload["push_required"] is True
+    assert payload["remote_aligned"] is False
+    assert payload["post_receive_fetch_head"]["left"] == 1
+    assert payload["post_receive_fetch_head"]["right"] == 0
+    assert payload["post_receive_fetch_head"]["relation"] == "ahead-only"
+    assert payload["remote_left"] == 1
+    assert payload["remote_right"] == 0
+    assert payload["remote_relation"] == "ahead-only"
     assert payload["head"] == feature_tip
     assert _run(["git", "rev-list", "--merges", "HEAD~1..HEAD"], repo).stdout.strip() == ""
+
+
+def test_receive_main_candidate_reports_origin_main_alignment(tmp_path: Path) -> None:
+    repo = _init_repo(tmp_path)
+    remote = tmp_path / "origin.git"
+    _run(["git", "init", "--bare", str(remote)], tmp_path)
+    _run(["git", "remote", "add", "origin", str(remote)], repo)
+    _run(["git", "push", "-u", "origin", "main"], repo)
+    _run(["git", "switch", "-c", "feature"], repo)
+    (repo / "feature.txt").write_text("feature\n", encoding="utf-8")
+    _run(["git", "add", "feature.txt"], repo)
+    _run(["git", "commit", "-m", "feature"], repo)
+    _run(["git", "switch", "main"], repo)
+
+    result = subprocess.run(
+        [
+            "powershell.exe",
+            "-NoProfile",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-File",
+            str(repo / "scripts" / "services" / "receive-main-candidate.ps1"),
+            "-Candidate",
+            "feature",
+            "-Remote",
+            "origin",
+            "-Branch",
+            "main",
+        ],
+        cwd=str(repo),
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+    )
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    payload = json.loads(result.stdout)
+    assert payload["closeout_status"] == "push_required"
+    assert payload["push_required"] is True
+    assert payload["origin_main"]["available"] is True
+    assert payload["origin_main"]["left"] == 1
+    assert payload["origin_main"]["right"] == 0
+    assert payload["origin_main"]["relation"] == "ahead-only"
+
+
+def test_receive_main_candidate_push_required_prevents_late_mirror_closeout(tmp_path: Path) -> None:
+    repo = _init_repo(tmp_path)
+    remote = tmp_path / "origin.git"
+    mirror = tmp_path / "mirror"
+    _run(["git", "init", "--bare", str(remote)], tmp_path)
+    _run(["git", "remote", "add", "origin", str(remote)], repo)
+    _run(["git", "push", "-u", "origin", "main"], repo)
+    _run(["git", "switch", "-c", "feature"], repo)
+    (repo / "feature.txt").write_text("feature\n", encoding="utf-8")
+    _run(["git", "add", "feature.txt"], repo)
+    _run(["git", "commit", "-m", "feature"], repo)
+    _run(["git", "switch", "main"], repo)
+
+    result = subprocess.run(
+        [
+            "powershell.exe",
+            "-NoProfile",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-File",
+            str(repo / "scripts" / "services" / "receive-main-candidate.ps1"),
+            "-Candidate",
+            "feature",
+            "-Remote",
+            "origin",
+            "-Branch",
+            "main",
+        ],
+        cwd=str(repo),
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert json.loads(result.stdout)["push_required"] is True
+
+    _run(["git", "clone", "-b", "main", str(remote), str(mirror)], tmp_path)
+    _run(["git", "config", "user.name", "mirror-sync"], mirror)
+    _run(["git", "config", "user.email", "mirror-sync@example.com"], mirror)
+    (mirror / "mirror.txt").write_text("mirror\n", encoding="utf-8")
+    _run(["git", "add", "mirror.txt"], mirror)
+    _run(["git", "commit", "-m", "mirror sync"], mirror)
+    _run(["git", "push", "origin", "main"], mirror)
+    _run(["git", "fetch", "origin", "main"], repo)
+
+    assert _run(["git", "rev-list", "--left-right", "--count", "HEAD...origin/main"], repo).stdout.strip() == "1\t1"
 
 
 def test_receive_main_candidate_refuses_raw_merge_path(tmp_path: Path) -> None:
