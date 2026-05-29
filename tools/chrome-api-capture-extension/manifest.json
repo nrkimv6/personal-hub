@@ -1,0 +1,43 @@
+{
+  "manifest_version": 3,
+  "name": "Chrome API Capture Test Extension",
+  "version": "0.1.0",
+  "description": "Load-unpacked test extension for observing page API traffic without chrome.debugger.",
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "API Capture"
+  },
+  "background": {
+    "service_worker": "background.js"
+  },
+  "permissions": [
+    "activeTab",
+    "downloads",
+    "storage",
+    "webRequest"
+  ],
+  "host_permissions": [
+    "https://new.land.naver.com/*"
+  ],
+  "content_scripts": [
+    {
+      "matches": [
+        "https://new.land.naver.com/*"
+      ],
+      "js": [
+        "content-script.js"
+      ],
+      "run_at": "document_start"
+    }
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": [
+        "injected.js"
+      ],
+      "matches": [
+        "https://new.land.naver.com/*"
+      ]
+    }
+  ]
+}

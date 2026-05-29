@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <title>Chrome API Capture Local Fixture</title>
+  </head>
+  <body>
+    <h1>Chrome API Capture Local Fixture</h1>
+    <p>This fixture triggers manual fetch and XHR calls against browser-safe local endpoints.</p>
+    <button id="fetchGet" type="button">fetch GET</button>
+    <button id="fetchPost" type="button">fetch POST</button>
+    <button id="xhrGet" type="button">XHR GET</button>
+    <pre id="output"></pre>
+
+    <script>
+      const output = document.getElementById("output");
+      function log(line) {
+        output.textContent += `${new Date().toISOString()} ${line}\n`;
+      }
+
+      document.getElementById("fetchGet").addEventListener("click", async () => {
+        const response = await fetch("./local-api.html?fixture=fetch-get", {
+          headers: { "x-fixture": "fetch-get" }
+        });
+        log(`fetch GET ${response.status}`);
+      });
+
+      document.getElementById("fetchPost").addEventListener("click", async () => {
+        const response = await fetch("./local-api.html?fixture=fetch-post", {
+          method: "POST",
+          headers: { "content-type": "application/json", "x-fixture": "fetch-post" },
+          body: JSON.stringify({ fixture: "chrome-api-capture" })
+        });
+        log(`fetch POST ${response.status}`);
+      });
+
+      document.getElementById("xhrGet").addEventListener("click", () => {
+        const xhr = new XMLHttpRequest();
+        xhr.open("GET", "./local-api.html?fixture=xhr-get");
+        xhr.setRequestHeader("x-fixture", "xhr-get");
+        xhr.addEventListener("loadend", () => log(`XHR GET ${xhr.status}`));
+        xhr.send();
+      });
+    </script>
+  </body>
+</html>
