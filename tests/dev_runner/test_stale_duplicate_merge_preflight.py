@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import subprocess
 import sys
 from pathlib import Path
 from unittest.mock import patch
@@ -17,6 +18,19 @@ class _FakeRedis:
         self.set_calls.append((key, value))
         self.store[key] = value
         return True
+
+
+def _git(cwd: Path, *args: str) -> str:
+    result = subprocess.run(
+        ["git", *args],
+        cwd=str(cwd),
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        check=True,
+    )
+    return result.stdout.strip()
 
 
 def _import_dr_merge():
@@ -112,3 +126,38 @@ def test_candidate_tip_repairable_merge_is_not_hard_blocker():
     assert snapshot == "snapshot.json"
     persisted = fake.store["plan-runner:runners:runner-repairable-preflight:candidate_tip_evidence"]
     assert "repairable_merge_commits" in persisted
+
+
+def test_candidate_tip_evidence_marks_linearizable_merge_commit(tmp_path):
+    mod = _import_dr_merge()
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _git(repo, "init", "-b", "main")
+    _git(repo, "config", "user.email", "test@example.com")
+    _git(repo, "config", "user.name", "Test User")
+    (repo / "base.txt").write_text("base\n", encoding="utf-8")
+    _git(repo, "add", "base.txt")
+    _git(repo, "commit", "-m", "base")
+
+    _git(repo, "checkout", "-b", "feature")
+    (repo / "feature.txt").write_text("feature\n", encoding="utf-8")
+    _git(repo, "add", "feature.txt")
+    _git(repo, "commit", "-m", "feature")
+    feature_tip = _git(repo, "rev-parse", "HEAD")
+
+    _git(repo, "checkout", "-b", "accidental-merge", "main")
+    _git(repo, "merge", "--no-ff", "feature", "-m", "merge feature")
+    merge_tip = _git(repo, "rev-parse", "HEAD")
+
+    evidence = mod._candidate_tip_evidence(repo, "main", "accidental-merge")  # noqa: SLF001
+
+    assert evidence["blockers"] == []
+    assert evidence["merge_commits"] == [merge_tip]
+    assert evidence["repairable_merge_commits"] == [
+        {
+            "commit": merge_tip,
+            "base_parent": _git(repo, "rev-parse", "main"),
+            "candidate_parent": feature_tip,
+            "repair": "linearize_to_candidate_parent",
+        }
+    ]

@@ -1399,6 +1399,7 @@ def _candidate_tip_evidence(project_root: Path, base: str, branch: str) -> dict:
         if re.match(r"^(\.agents|\.agent|\.claude|\.gemini)/", path)
     ]
     merge_parents = []
+    repairable_merge_commits = []
     for merge_commit in merge_commits:
         parent_line = _git_one(project_root, ["show", "-s", "--format=%P", merge_commit])
         parents = []
@@ -1411,6 +1412,32 @@ def _candidate_tip_evidence(project_root: Path, base: str, branch: str) -> dict:
                 }
             )
         merge_parents.append({"commit": merge_commit, "parents": parents})
+        if len(parents) == 2:
+            base_parent = next(
+                (
+                    parent
+                    for parent in parents
+                    if parent["commit"] == current or parent["parent_is_ancestor_of_current_main"]
+                ),
+                None,
+            )
+            candidate_parent = next(
+                (
+                    parent
+                    for parent in parents
+                    if parent is not base_parent and parent["current_main_is_ancestor"]
+                ),
+                None,
+            )
+            if base_parent is not None and candidate_parent is not None:
+                repairable_merge_commits.append(
+                    {
+                        "commit": merge_commit,
+                        "base_parent": base_parent["commit"],
+                        "candidate_parent": candidate_parent["commit"],
+                        "repair": "linearize_to_candidate_parent",
+                    }
+                )
 
     blockers = []
     if not current_is_ancestor:
@@ -1430,6 +1457,7 @@ def _candidate_tip_evidence(project_root: Path, base: str, branch: str) -> dict:
         "incoming_commits": incoming_commits,
         "merge_commits": merge_commits,
         "merge_parents": merge_parents,
+        "repairable_merge_commits": repairable_merge_commits,
         "duplicates": duplicates,
         "mirror_paths": mirror_paths,
         "path_overlap_ratio": overlap_ratio,
