@@ -70,6 +70,190 @@ function Resolve-LockPath {
     return [System.IO.Path]::GetFullPath((Join-Path $Root $path))
 }
 
+function Resolve-IndexLockPath {
+    param([string]$Root)
+
+    $fallback = Join-Path $Root ".git\index.lock"
+    $path = Invoke-GitSingleLine -Root $Root -GitArgs @("rev-parse", "--git-path", "index.lock") -Fallback $fallback
+    if ([System.IO.Path]::IsPathRooted($path)) {
+        return [System.IO.Path]::GetFullPath($path)
+    }
+    return [System.IO.Path]::GetFullPath((Join-Path $Root $path))
+}
+
+function Get-StaleIndexLockSeconds {
+    if ([string]::IsNullOrWhiteSpace($env:PLAN_DOCS_STALE_INDEX_LOCK_SECONDS)) {
+        return 300
+    }
+
+    $parsed = 0
+    if (-not [int]::TryParse($env:PLAN_DOCS_STALE_INDEX_LOCK_SECONDS, [ref]$parsed)) {
+        Fail-WithCode "Invalid PLAN_DOCS_STALE_INDEX_LOCK_SECONDS: $env:PLAN_DOCS_STALE_INDEX_LOCK_SECONDS" 1
+    }
+    return $parsed
+}
+
+function Test-GitIndexLockState {
+    param(
+        [string]$Root,
+        [int]$StaleSeconds
+    )
+
+    $path = Resolve-IndexLockPath -Root $Root
+    $result = [ordered]@{
+        state = "absent"
+        path = $path
+        mtimeUtc = ""
+        ageSeconds = $null
+        sizeBytes = $null
+        holderCheck = "absent"
+    }
+
+    if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
+        return $result
+    }
+
+    $item = Get-Item -LiteralPath $path
+    $ageSeconds = [Math]::Max(0, ([DateTime]::UtcNow - $item.LastWriteTimeUtc).TotalSeconds)
+    $result.mtimeUtc = $item.LastWriteTimeUtc.ToString("o")
+    $result.ageSeconds = [Math]::Round($ageSeconds, 3)
+    $result.sizeBytes = $item.Length
+
+    if ($StaleSeconds -le 0) {
+        $result.state = "disabled"
+        $result.holderCheck = "disabled"
+        return $result
+    }
+
+    $stream = $null
+    try {
+        $stream = [System.IO.FileStream]::new($path, [System.IO.FileMode]::Open, [System.IO.FileAccess]::ReadWrite, [System.IO.FileShare]::None)
+        $result.holderCheck = "free"
+    } catch [System.IO.FileNotFoundException] {
+        $result.state = "absent"
+        $result.holderCheck = "absent"
+        return $result
+    } catch [System.IO.IOException] {
+        $result.state = "held_live"
+        $result.holderCheck = "held"
+        return $result
+    } finally {
+        if ($stream) {
+            $stream.Dispose()
+        }
+    }
+
+    if ($ageSeconds -lt $StaleSeconds) {
+        $result.state = "too_fresh"
+    } else {
+        $result.state = "removable"
+    }
+    return $result
+}
+
+function Write-IndexLockEvidence {
+    param(
+        [string]$Action,
+        [System.Collections.IDictionary]$State,
+        [int]$WaitedMs
+    )
+
+    $stateName = if ($State -and $State.Contains("state")) { $State.state } else { "" }
+    $age = if ($State -and $State.Contains("ageSeconds") -and $null -ne $State.ageSeconds) { $State.ageSeconds } else { "" }
+    $holder = if ($State -and $State.Contains("holderCheck")) { $State.holderCheck } else { "" }
+    $path = if ($State -and $State.Contains("path")) { $State.path } else { "" }
+    [Console]::Error.WriteLine("PLAN_DOCS_INDEX_LOCK action=$Action state=$stateName ageSeconds=$age holderCheck=$holder waitedMs=$WaitedMs path=$path")
+}
+
+function Resolve-BlockingGitIndexLock {
+    param(
+        [string]$Root,
+        [int]$StaleSeconds,
+        [int]$WaitSeconds,
+        [int]$PollMilliseconds
+    )
+
+    $started = [DateTime]::UtcNow
+    $deadline = $started.AddSeconds([Math]::Max(0, $WaitSeconds))
+    $lastState = $null
+
+    while ($true) {
+        $waitedMs = [int]([DateTime]::UtcNow - $started).TotalMilliseconds
+        $state = Test-GitIndexLockState -Root $Root -StaleSeconds $StaleSeconds
+        $lastState = $state
+
+        switch ($state.state) {
+            "absent" {
+                Write-IndexLockEvidence -Action "absent" -State $state -WaitedMs $waitedMs
+                return [ordered]@{
+                    action = "absent"
+                    path = $state.path
+                    mtimeUtc = $state.mtimeUtc
+                    ageSeconds = $state.ageSeconds
+                    sizeBytes = $state.sizeBytes
+                    holderCheck = $state.holderCheck
+                    waitedMs = $waitedMs
+                }
+            }
+            "disabled" {
+                Write-IndexLockEvidence -Action "disabled" -State $state -WaitedMs $waitedMs
+                return [ordered]@{
+                    action = "disabled"
+                    path = $state.path
+                    mtimeUtc = $state.mtimeUtc
+                    ageSeconds = $state.ageSeconds
+                    sizeBytes = $state.sizeBytes
+                    holderCheck = $state.holderCheck
+                    waitedMs = $waitedMs
+                }
+            }
+            "removable" {
+                $confirm = Test-GitIndexLockState -Root $Root -StaleSeconds $StaleSeconds
+                $lastState = $confirm
+                if ($confirm.state -eq "removable") {
+                    try {
+                        Remove-Item -LiteralPath $confirm.path -Force
+                        $waitedMs = [int]([DateTime]::UtcNow - $started).TotalMilliseconds
+                        Write-IndexLockEvidence -Action "removed" -State $confirm -WaitedMs $waitedMs
+                        return [ordered]@{
+                            action = "removed"
+                            path = $confirm.path
+                            mtimeUtc = $confirm.mtimeUtc
+                            ageSeconds = $confirm.ageSeconds
+                            sizeBytes = $confirm.sizeBytes
+                            holderCheck = $confirm.holderCheck
+                            waitedMs = $waitedMs
+                        }
+                    } catch [System.IO.IOException] {
+                        Write-IndexLockEvidence -Action "held_live" -State $confirm -WaitedMs $waitedMs
+                    }
+                } else {
+                    Write-IndexLockEvidence -Action $confirm.state -State $confirm -WaitedMs $waitedMs
+                }
+            }
+            default {
+                Write-IndexLockEvidence -Action $state.state -State $state -WaitedMs $waitedMs
+            }
+        }
+
+        if ([DateTime]::UtcNow -ge $deadline) {
+            $waitedMs = [int]([DateTime]::UtcNow - $started).TotalMilliseconds
+            Write-IndexLockEvidence -Action "timeout" -State $lastState -WaitedMs $waitedMs
+            return [ordered]@{
+                action = "timeout"
+                path = $lastState.path
+                mtimeUtc = $lastState.mtimeUtc
+                ageSeconds = $lastState.ageSeconds
+                sizeBytes = $lastState.sizeBytes
+                holderCheck = $lastState.holderCheck
+                waitedMs = $waitedMs
+            }
+        }
+
+        Start-Sleep -Milliseconds $PollMilliseconds
+    }
+}
+
 function Write-LockMetadata {
     param(
         [System.IO.FileStream]$Stream,
@@ -150,6 +334,12 @@ function Invoke-WithFileLock {
         try {
             $stream = [System.IO.FileStream]::new($LockPath, [System.IO.FileMode]::OpenOrCreate, [System.IO.FileAccess]::ReadWrite, [System.IO.FileShare]::None)
             Write-LockMetadata -Stream $stream -Root $Root -GitDir $gitDir -Op $Operation
+            $staleSeconds = Get-StaleIndexLockSeconds
+            $waitSeconds = [Math]::Min(3600, [Math]::Max($TimeoutSeconds, $staleSeconds + 60))
+            $indexLockResult = Resolve-BlockingGitIndexLock -Root $Root -StaleSeconds $staleSeconds -WaitSeconds $waitSeconds -PollMilliseconds $PollMilliseconds
+            if ($indexLockResult.action -eq "timeout") {
+                Fail-WithCode ("PLAN_DOCS_INDEX_LOCK_TIMEOUT: state={0} ageSeconds={1} holderCheck={2} waitedMs={3} path={4}" -f $indexLockResult.action, $indexLockResult.ageSeconds, $indexLockResult.holderCheck, $indexLockResult.waitedMs, $indexLockResult.path) 7
+            }
             $oldHeldRepo = $env:PLAN_DOCS_LOCK_HELD_REPO
             $oldHeldPath = $env:PLAN_DOCS_LOCK_HELD_PATH
             try {
