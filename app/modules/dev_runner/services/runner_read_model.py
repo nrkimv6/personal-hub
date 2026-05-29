@@ -33,6 +33,7 @@ class RunnerReadModel:
     merge_evidence_missing: bool = False
     auto_retry_blocked: bool = False
     git: RunnerGitMetadata | None = None
+    outcome_summary: dict | None = None
 
     @property
     def is_approval_required(self) -> bool:
@@ -62,6 +63,7 @@ def build_runner_read_model(
     redis_worktree_exists: object = "unknown",
     remaining_post_merge_tasks: int | None = None,
     merge_evidence_missing: bool | None = None,
+    outcome_summary: dict | None = None,
     repo_cwd: str | None = None,
 ) -> RunnerReadModel:
     """Build the shared read model used by list, single-runner, and SSE surfaces."""
@@ -84,4 +86,5 @@ def build_runner_read_model(
         merge_evidence_missing=bool(merge_evidence_missing),
         auto_retry_blocked=bool(auto_retry_blocked),
         git=git,
+        outcome_summary=outcome_summary,
     )

@@ -30,6 +30,7 @@ from app.modules.dev_runner.services.plan_item_state import (
     task_key,
     task_text_hash,
 )
+from app.modules.dev_runner.services.outcome_service import parse_plan_outcome_summary
 from app.modules.dev_runner.services._plan_header_utils import validate_done_preconditions, update_plan_headers
 from app.modules.dev_runner.services.archive_service import archive_plan_bundle, resolve_archive_target_or_raise
 from app.modules.dev_runner.services.git_commit_roots import commit_files_by_git_root
@@ -899,6 +900,7 @@ class PlanService:
             phases=phases,
             progress=progress,
             summary=summary,
+            outcome_summary=parse_plan_outcome_summary(path, content),
         )
 
     # ========== done 처리 (Python 네이티브) ==========

@@ -12,6 +12,7 @@ RunnerMetadataState = Union[bool, Literal["unknown"]]
 RunnerDisplaySeverity = Literal["info", "warn", "error", "approval", "success", "muted"]
 DevRunnerReadinessSeverity = Literal["ok", "warning", "blocker"]
 DevRunnerReadinessItemSeverity = Literal["info", "warning", "blocker"]
+OutcomeSummaryStatus = Literal["absent", "pending", "satisfied", "failed", "blocked"]
 
 
 # ========== 스키마 ==========
@@ -111,6 +112,7 @@ class RunStatusResponse(BaseModel):
     merge_reason: Optional[str] = None
     merge_message: Optional[str] = None
     auto_retry_blocked: bool = False
+    outcome_summary: Optional[dict[str, Any]] = None
 
 
 class DevRunnerReadinessItem(BaseModel):
@@ -130,6 +132,23 @@ class DevRunnerReadinessResponse(BaseModel):
     items: List[DevRunnerReadinessItem] = Field(default_factory=list)
     blockers: int = 0
     warnings: int = 0
+
+
+class OutcomeVerifierResponse(BaseModel):
+    """Plan outcome verifier entry."""
+    name: str
+    status: str = "pending"
+    evidence: Optional[str] = None
+
+
+class OutcomeSummaryResponse(BaseModel):
+    """Plan outcome/evaluation read model."""
+    status: OutcomeSummaryStatus = "absent"
+    outcome: Optional[str] = None
+    verifiers: List[OutcomeVerifierResponse] = Field(default_factory=list)
+    evidence: List[str] = Field(default_factory=list)
+    rollback_signal: Optional[str] = None
+    updated_at: Optional[str] = None
 
 
 class RunnerListItem(BaseModel):
@@ -171,6 +190,7 @@ class RunnerListItem(BaseModel):
     runtime_source_root: Optional[str] = None
     runtime_source_commit: Optional[str] = None
     auto_retry_blocked: bool = False
+    outcome_summary: Optional[OutcomeSummaryResponse] = None
 
 
 class OrphanRunnerCandidate(BaseModel):
@@ -333,6 +353,7 @@ class PlanDetailResponse(BaseModel):
     phases: List[PlanPhaseResponse]
     progress: PlanProgressResponse
     summary: Optional[str] = None
+    outcome_summary: OutcomeSummaryResponse = Field(default_factory=OutcomeSummaryResponse)
 
 
 class DoneResponse(BaseModel):
@@ -1593,6 +1614,8 @@ __all__ = [
     'ReattachRunnerRequest',
     'ReattachRunnerResponse',
     'PlanFileResponse',
+    'OutcomeVerifierResponse',
+    'OutcomeSummaryResponse',
     'PlanProgressResponse',
     'RegisteredPathResponse',
     'LogResponse',

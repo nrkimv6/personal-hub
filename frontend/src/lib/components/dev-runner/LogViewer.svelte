@@ -56,11 +56,16 @@
 		worktreePath?: string | null;
 		branch?: string | null;
 		executionCount?: number | null;
+		outcomeSummary?: {
+			status: 'absent' | 'pending' | 'satisfied' | 'failed' | 'blocked';
+			outcome?: string | null;
+			rollback_signal?: string | null;
+		} | null;
 		onBatchPlansChange?: (plans: BatchPlanItem[]) => void;
 		onMergeCompleted?: (reason?: string, status?: string) => void;
 	}
 
-	let { runnerId, planFile, currentPlanName, running = false, mergeStatus = null, mergeReason = null, mergeMessage = null, trigger = null, mode = 'standalone', engine = null, worktreePath = null, branch = null, executionCount = null, onBatchPlansChange, onMergeCompleted }: Props = $props();
+	let { runnerId, planFile, currentPlanName, running = false, mergeStatus = null, mergeReason = null, mergeMessage = null, trigger = null, mode = 'standalone', engine = null, worktreePath = null, branch = null, executionCount = null, outcomeSummary = null, onBatchPlansChange, onMergeCompleted }: Props = $props();
 	let isCodexEngine = $derived((engine ?? '').toLowerCase() === 'codex');
 
 	// 머지 진행 중 상태 판별
@@ -834,6 +839,15 @@
 		<div class={exitDisplay.bannerClass}>
 			<span>{exitDisplay.bannerText}</span>
 		</div>
+		{#if outcomeSummary && outcomeSummary.status !== 'absent'}
+			<div class="px-3 py-1.5 border-b border-cyan-800/60 bg-cyan-950/40 text-[11px] text-cyan-100 font-mono" data-testid="dev-runner-outcome-summary">
+				<span class="font-semibold">[OUTCOME]</span>
+				<span>{outcomeSummary.status}</span>
+				{#if outcomeSummary.outcome}
+					<span class="ml-1">{outcomeSummary.outcome}</span>
+				{/if}
+			</div>
+		{/if}
 	{/if}
 
 	{#if failureBanner?.show}
