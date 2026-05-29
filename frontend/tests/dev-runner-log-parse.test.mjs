@@ -29,13 +29,29 @@ test("log-types exposes a structured tool event envelope", () => {
   );
   assert.match(types, /export interface StructuredLogEvent/);
   assert.match(types, /schema_version: 1/);
-  assert.match(types, /kind: 'tool_call' \| 'tool_result' \| 'tagged_log'/);
+  assert.match(types, /export type StructuredLogKind/);
+  assert.match(types, /'tool_call' \| 'tool_result' \| 'phase' \| 'failure' \| 'tagged_log'/);
+  assert.match(types, /event_id\?: string/);
+  assert.match(types, /failure\?: \{/);
+  assert.match(types, /artifact\?: StructuredArtifact \| null/);
   assert.match(types, /structured\?: StructuredLogEvent/);
 });
 
 test("LogViewer keeps line sequence ownership while delegating parsing", () => {
   assert.match(logViewer, /return createParsedLineId\(lineSequence, tag, timestamp, raw\)/);
-  assert.match(logViewer, /return parseRawLine\(text, isStale, createLineId\)/);
+  assert.match(logViewer, /const parsed = parseRawLine\(text, isStale, createLineId\)/);
   assert.match(logViewer, /buildParsedSessionSeparator\(identity, createLineId\)/);
   assert.match(logViewer, /line\.structured\?\.name/);
+  assert.match(logViewer, /payload\.structured_event/);
+});
+
+test("structured event parser covers failure classification and artifact policy", () => {
+  assert.match(source, /export function classifyStructuredFailure/);
+  assert.match(source, /approval_required/);
+  assert.match(source, /retryable/);
+  assert.match(source, /environment/);
+  assert.match(source, /product/);
+  assert.match(source, /export function normalizeStructuredArtifact/);
+  assert.match(source, /\.tmp\/codex\//);
+  assert.match(source, /disallowed_artifact_root/);
 });

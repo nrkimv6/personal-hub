@@ -24,6 +24,7 @@
 	import { encodePathToBase64 } from '$lib/utils/encoding';
 	import { normalizeExitReason } from '$lib/utils/dev-runner-exit-reason';
 	import { shouldSkipInjectedLine } from '$lib/dev-runner/log-dedup.js';
+	import type { EventLinePayload } from '$lib/dev-runner/log-types';
 	import type {
 		DevRunnerRunStatusResponse,
 		DevRunnerPlanFileResponse,
@@ -142,7 +143,7 @@
 
 	// SSE 로그 이벤트 라우팅용 LogViewer ref Map
 	interface LogViewerRef {
-		injectLine: (text: string | { text: string; meta?: Record<string, unknown> }) => void;
+		injectLine: (text: EventLinePayload) => void;
 		injectCompleted: (reason?: string) => void;
 		injectMergeCompleted: (reason?: string, status?: string) => void;
 		catchUp?: () => Promise<void>;
@@ -345,7 +346,6 @@
 		};
 	}
 
-	type EventLinePayload = string | { text: string; meta?: Record<string, unknown> };
 	type CompletionEventSource = 'log_completed' | 'merge_log_completed';
 
 	interface CompletionUpdatePayload {
@@ -577,7 +577,7 @@
 	function injectRunnerLine(runnerId: string, payload: EventLinePayload) {
 		const normalizedLine = normalizeEventLine(payload);
 		if (shouldSkipInjectedLine(injectedLineFingerprints, runnerId, normalizedLine, INJECT_LINE_DEDUP_LIMIT)) return;
-		logRefs.get(runnerId)?.injectLine(normalizedLine);
+		logRefs.get(runnerId)?.injectLine(payload);
 	}
 
 	async function syncRunnerTabs(opts: { selectActive?: boolean } = {}): Promise<RunnerSource[]> {

@@ -6,6 +6,20 @@ export const DIAG_PATTERN = /^\[(\w+)\]\s*(.*)/;
 export const MERGE_TAG_PATTERN = /^\[MERGE\]\[(\w+)\]\s*(.*)/;
 export const WRAPPER_PREFIX_PATTERN = /^\[(PR|PS):[^\]]+\]\s*/;
 export const HEADER_ONLY_TAGS = new Set(['DIAG', 'TRIGGER', 'RUN_META', 'ENV', 'START']);
+const STRUCTURED_TAGS = new Set(['TOOL', 'RESULT', 'PHASE', 'FAILURE', 'HOLD']);
+const ALLOWED_ARTIFACT_PREFIXES = [
+	'.tmp/codex/',
+	'.tmp/codex-browser-artifacts/',
+	'logs/'
+] as const;
+const ARTIFACT_PATTERN =
+	/((?:[A-Za-z]:)?[\\/\.]?(?:[\w.-]+[\\/])+[\w .()-]+\.(?:png|jpe?g|webp|gif|jsonl?|log|txt|md))/gi;
+const FAILURE_KEYWORDS: Array<[NonNullable<StructuredLogEvent['failure']>['classification'], string[]]> = [
+	['approval_required', ['approval_required', 'approval required', 'manual approval', 'explicit approval']],
+	['retryable', ['rate_limited', 'rate limit', 'timeout', 'timed out', 'connection reset', 'temporarily unavailable', '429', 'redis disconnected']],
+	['environment', ['not recognized', 'positional parameter', 'permission denied', 'no such file', 'enoent', 'file in use', 'build lock', 'port already']],
+	['product', ['traceback', 'assertionerror', 'test failed', 'failed test', '[error]', 'exception', 'os error']]
+];
 
 export type LineIdFactory = (tag: string, timestamp: string, raw: string) => string;
 
@@ -22,20 +36,119 @@ export function createLineId(sequence: number, tag: string, timestamp: string, r
 	return `${sequence}-${Math.abs(hash)}`;
 }
 
+function createEventId(raw: string): string {
+	let hash = 0;
+	for (let i = 0; i < raw.length; i++) {
+		hash = ((hash << 5) - hash + raw.charCodeAt(i)) | 0;
+	}
+	return `log_${Math.abs(hash).toString(16)}`;
+}
+
+function countLines(text: string): number {
+	return text ? text.split('\n').length : 1;
+}
+
+export function classifyStructuredFailure(message: string, tag?: string): StructuredLogEvent['failure'] | undefined {
+	const lower = normalizeLogText(message).toLowerCase();
+	if (tag === 'FAILURE') {
+		for (const [classification, tokens] of FAILURE_KEYWORDS) {
+			if (tokens.some((token) => lower.includes(token))) return { classification };
+		}
+		return { classification: 'product' };
+	}
+	if (tag === 'HOLD') return { classification: 'approval_required' };
+	for (const [classification, tokens] of FAILURE_KEYWORDS) {
+		if (tokens.some((token) => lower.includes(token))) return { classification };
+	}
+	return undefined;
+}
+
+function classifyResultStatus(message: string, failure?: StructuredLogEvent['failure']): 'success' | 'failure' | 'unknown' {
+	const lower = message.toLowerCase();
+	if (/\b(?:exit|code|status)\s*[:=]\s*0\b/.test(lower) || lower.includes('success')) return 'success';
+	if (failure || /\b(?:exit|code|status)\s*[:=]\s*[1-9]\d*\b/.test(lower)) return 'failure';
+	return 'unknown';
+}
+
+function artifactDisplayPath(normalizedPath: string): string {
+	const lower = normalizedPath.toLowerCase();
+	for (const prefix of ALLOWED_ARTIFACT_PREFIXES) {
+		const index = lower.indexOf(prefix);
+		if (index >= 0) return normalizedPath.slice(index);
+	}
+	return normalizedPath;
+}
+
+export function normalizeStructuredArtifact(path: string | null | undefined): StructuredLogEvent['artifact'] {
+	const rawPath = String(path ?? '').trim().replace(/^[`"'<>]+|[`"'<>.,;)]+$/g, '');
+	if (!rawPath) return null;
+	const normalizedPath = rawPath.replace(/\\/g, '/');
+	const lower = normalizedPath.toLowerCase();
+	const allowed =
+		ALLOWED_ARTIFACT_PREFIXES.some((prefix) => lower.startsWith(prefix)) ||
+		ALLOWED_ARTIFACT_PREFIXES.some((prefix) => lower.includes(`/${prefix}`));
+	return {
+		path: rawPath,
+		display_path: allowed ? artifactDisplayPath(normalizedPath) : normalizedPath.split('/').pop() ?? normalizedPath,
+		allowed,
+		reason: allowed ? 'allowed_evidence_root' : 'disallowed_artifact_root'
+	};
+}
+
+function extractStructuredArtifacts(raw: string): NonNullable<StructuredLogEvent['artifacts']> {
+	const artifacts: NonNullable<StructuredLogEvent['artifacts']> = [];
+	const seen = new Set<string>();
+	for (const match of raw.matchAll(ARTIFACT_PATTERN)) {
+		const artifact = normalizeStructuredArtifact(match[1]);
+		if (!artifact) continue;
+		const key = artifact.path.toLowerCase();
+		if (seen.has(key)) continue;
+		seen.add(key);
+		artifacts.push(artifact);
+	}
+	return artifacts;
+}
+
 export function buildStructuredLogEvent(tag: string, timestamp: string, message: string, raw: string): StructuredLogEvent | undefined {
-	if (tag !== 'TOOL' && tag !== 'RESULT') return undefined;
+	if (!STRUCTURED_TAGS.has(tag)) return undefined;
 	const trimmedMessage = message.trim();
+	const failure = classifyStructuredFailure(trimmedMessage, tag);
+	const artifacts = extractStructuredArtifacts(raw);
 	const structured: StructuredLogEvent = {
 		schema_version: 1,
-		kind: tag === 'TOOL' ? 'tool_call' : 'tool_result',
+		event_id: createEventId(raw),
+		kind: tag === 'TOOL' ? 'tool_call' : tag === 'RESULT' ? 'tool_result' : tag === 'PHASE' ? 'phase' : tag === 'FAILURE' || tag === 'HOLD' ? 'failure' : 'tagged_log',
+		source: 'ui_parser',
+		severity: failure ? 'error' : 'info',
 		tag,
 		message: trimmedMessage,
-		raw
+		raw,
+		line_count: countLines(raw),
+		artifact: artifacts[0] ?? null,
+		artifacts,
+		display: { compact: true },
+		replay: { eligible: false, reason: 'ui_log_event' }
 	};
 	if (timestamp) structured.timestamp = timestamp;
 	if (tag === 'TOOL' && trimmedMessage) {
-		structured.name = trimmedMessage.split(/[:\s]/, 1)[0];
+		const [name, ...rest] = trimmedMessage.split(/[:\s]/);
+		structured.name = name;
+		const argsSummary = rest.join(' ').trim();
+		if (argsSummary) structured.args_summary = argsSummary.length > 180 ? `${argsSummary.slice(0, 180)}...` : argsSummary;
 	}
+	if (tag === 'RESULT') {
+		const status = classifyResultStatus(trimmedMessage, failure);
+		structured.result = {
+			status,
+			output_schema: {
+				format: 'text',
+				line_count: countLines(trimmedMessage),
+				empty: trimmedMessage.length === 0
+			}
+		};
+		if (status === 'failure') structured.severity = 'error';
+	}
+	if (failure) structured.failure = failure;
 	return structured;
 }
 

@@ -582,6 +582,78 @@ class TestStreamEventsFileFallback:
         await gen.aclose()
 
     @pytest.mark.asyncio
+    async def test_structured_event_cross_sse_history_payload_match(
+        self,
+        event_service,
+        async_redis,
+        sync_redis,
+        tmp_path,
+    ):
+        """T3: pubsub SSE와 log file tail fallback이 같은 classification/artifact policy를 보존한다."""
+        runner_id = "fb-structured-01"
+        line = "[12:00:01] [RESULT] exit=1 timeout artifact=.tmp/codex/schema/evidence.json"
+        log_file = tmp_path / "runner-structured.log"
+        log_file.write_text("boot\n", encoding="utf-8")
+
+        sync_redis.sadd("plan-runner:active_runners", runner_id)
+        sync_redis.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:status", "running")
+        sync_redis.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:trigger", "user")
+        sync_redis.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:plan_file", "AGENTS.md")
+        sync_redis.set(f"{RUNNER_KEY_PREFIX}:{runner_id}:stream_log_path", str(log_file))
+
+        emit_pubsub = True
+
+        async def log_get_message(**kwargs):
+            nonlocal emit_pubsub
+            if emit_pubsub:
+                emit_pubsub = False
+                return {
+                    "type": "pmessage",
+                    "channel": f"plan-runner:logs:{runner_id}",
+                    "pattern": LOG_CHANNEL_PATTERN,
+                    "data": line,
+                }
+            return None
+
+        self._install_idle_dual_pubsub(async_redis, log_get_message=log_get_message)
+        event_service._async = async_redis
+        event_service._file_poll_timeout = 0.0
+        event_service._file_poll_interval_sec = 0.0
+
+        gen = event_service.stream_events()
+        _ = await gen.__anext__()  # connected
+        _ = await gen.__anext__()  # status
+
+        pubsub_event = await asyncio.wait_for(gen.__anext__(), timeout=2.0)
+        await gen.aclose()
+
+        self._install_idle_dual_pubsub(async_redis)
+        event_service._async = async_redis
+        event_service._log_tailer.drop_tail_state(runner_id)
+        gen = event_service.stream_events()
+        _ = await gen.__anext__()  # connected
+        _ = await gen.__anext__()  # status
+        with open(log_file, "a", encoding="utf-8") as handle:
+            handle.write(f"{line}\n")
+        fallback_events = await _collect_events(gen, 5, timeout=1.2)
+        await gen.aclose()
+
+        payloads = [
+            json.loads(event.split("data: ")[1].split("\n")[0])
+            for event in [pubsub_event, *fallback_events]
+            if event.startswith("event: log\n")
+        ]
+        structured = [
+            payload["line"]["structured_event"]
+            for payload in payloads
+            if isinstance(payload.get("line"), dict)
+        ]
+        assert len(structured) >= 2
+        assert {event["failure"]["classification"] for event in structured} == {"retryable"}
+        assert {event["artifact"]["allowed"] for event in structured} == {True}
+        assert {event["artifact"]["display_path"] for event in structured} == {".tmp/codex/schema/evidence.json"}
+
+    @pytest.mark.asyncio
     async def test_stream_events_log_completed_cleans_tail_state(
         self,
         event_service,

@@ -30,7 +30,12 @@
 	} from '$lib/dev-runner/log-render';
 	import { LogStream } from '$lib/dev-runner/log-stream.svelte';
 	import { FILTERABLE_TAGS, getTagStyle } from '$lib/dev-runner/log-tags';
-	import type { BatchPlanItem, ParsedLine } from '$lib/dev-runner/log-types';
+	import type {
+		BatchPlanItem,
+		EventLinePayload,
+		ParsedLine,
+		StructuredLogEvent
+	} from '$lib/dev-runner/log-types';
 	import { getExitReasonDisplay } from '$lib/utils/dev-runner-exit-reason';
 	import { shouldShowMergeCompletionBanner } from '$lib/utils/dev-runner-merge-banner';
 	import LogLine from './LogLine.svelte';
@@ -141,8 +146,28 @@
 		return createParsedLineId(lineSequence, tag, timestamp, raw);
 	}
 
-	function parseLine(text: string, isStale: boolean): ParsedLine {
-		return parseRawLine(text, isStale, createLineId);
+	function isStructuredLogEvent(value: unknown): value is StructuredLogEvent {
+		return Boolean(
+			value &&
+			typeof value === 'object' &&
+			(value as { schema_version?: unknown }).schema_version === 1 &&
+			typeof (value as { kind?: unknown }).kind === 'string' &&
+			typeof (value as { raw?: unknown }).raw === 'string'
+		);
+	}
+
+	function normalizeEventLinePayload(payload: EventLinePayload): { text: string; structured?: StructuredLogEvent } {
+		if (typeof payload === 'string') return { text: payload };
+		const text = typeof payload?.text === 'string' ? payload.text : '';
+		const structured = isStructuredLogEvent(payload?.structured_event) ? payload.structured_event : undefined;
+		return { text, structured };
+	}
+
+	function parseLine(payload: EventLinePayload, isStale: boolean): ParsedLine {
+		const { text, structured } = normalizeEventLinePayload(payload);
+		const parsed = parseRawLine(text, isStale, createLineId);
+		if (!structured) return parsed;
+		return { ...parsed, structured };
 	}
 
 	function shouldCollapseMessage(message: string): boolean {
@@ -245,8 +270,8 @@
 		}
 	}
 
-	function addLine(text: string, isStale: boolean) {
-		const parsed = parseLine(text, isStale);
+	function addLine(payload: EventLinePayload, isStale: boolean) {
+		const parsed = parseLine(payload, isStale);
 		const context: LinePipelineContext = {
 			isStale,
 			hasSeparator: isSeparator,
@@ -301,6 +326,24 @@
 
 	function hasLoadedLogContent(): boolean {
 		return lines.some((line) => !HEADER_ONLY_TAGS.has(line.tag));
+	}
+
+	function getStructuredFailureLabel(line: ParsedLine): string | null {
+		const classification = line.structured?.failure?.classification;
+		if (!classification) return null;
+		return classification.replace(/_/g, ' ');
+	}
+
+	function getStructuredResultLabel(line: ParsedLine): string | null {
+		const status = line.structured?.result?.status;
+		if (!status || status === 'unknown') return null;
+		return status.toUpperCase();
+	}
+
+	function getStructuredArtifactLabel(line: ParsedLine): string | null {
+		const artifact = line.structured?.artifact;
+		if (!artifact) return null;
+		return artifact.allowed ? artifact.display_path : `blocked:${artifact.display_path}`;
 	}
 
 	let emptyLogMessage = $derived.by(() => {
@@ -592,16 +635,16 @@
 
 	let _catchUpInProgress = false;
 	let _catchUpPromise: Promise<void> | null = null;
-	let _pendingInjectBuffer: string[] = [];
+	let _pendingInjectBuffer: EventLinePayload[] = [];
 
-	export function injectLine(payload: string | { text: string; meta?: Record<string, unknown> }) {
+	export function injectLine(payload: EventLinePayload) {
 		const text = typeof payload === 'string' ? payload : payload?.text;
 		if (typeof text !== 'string') return;
 		if (_catchUpInProgress) {
-			_pendingInjectBuffer.push(text);
+			_pendingInjectBuffer.push(payload);
 			return;
 		}
-		addLine(text, false);
+		addLine(payload, false);
 	}
 
 	export async function catchUp(): Promise<void> {
@@ -616,7 +659,8 @@
 					const lastFileLine = lines.length > 0 ? lines[lines.length - 1].raw : null;
 					let startIdx = 0;
 					if (lastFileLine) {
-						const matchIdx = _pendingInjectBuffer.lastIndexOf(lastFileLine);
+						const pendingTexts = _pendingInjectBuffer.map((item) => normalizeEventLinePayload(item).text);
+						const matchIdx = pendingTexts.lastIndexOf(lastFileLine);
 						if (matchIdx >= 0) startIdx = matchIdx + 1;
 					}
 					for (let i = startIdx; i < _pendingInjectBuffer.length; i++) {
@@ -894,6 +938,12 @@
 						{#if line.structured?.name}
 							<span class="mr-1 shrink-0 rounded bg-yellow-500/10 px-1 text-[10px] font-semibold text-yellow-200">{line.structured.name}</span>
 						{/if}
+						{#if line.structured?.args_summary}
+							<span class="mr-1 rounded bg-gray-800 px-1 text-[10px] text-gray-400">{line.structured.args_summary}</span>
+						{/if}
+						{#if getStructuredArtifactLabel(line)}
+							<span class="mr-1 rounded bg-cyan-500/10 px-1 text-[10px] text-cyan-200">{getStructuredArtifactLabel(line)}</span>
+						{/if}
 						{toolCollapsed && !toolExpanded ? getPreviewLines(line.message) : getRenderableText(line.message)}
 					</LogLine>
 				{:else if line.tag === 'RESULT'}
@@ -903,8 +953,11 @@
 					{@const resultBody = resultMatch ? resultMatch.text : line.message}
 					{@const resultExpanded = isExpanded(line.id)}
 					{@const resultCollapsed = shouldCollapseMessage(resultBody)}
-					{@const resultIsFailure = isFailureResultBody(resultBody)}
+					{@const resultIsFailure = isFailureResultBody(resultBody) || Boolean(line.structured?.failure) || line.structured?.result?.status === 'failure'}
 					{@const resultInfo = getLogLineVariant(line, { resultFailure: resultIsFailure })}
+					{@const resultStatusLabel = getStructuredResultLabel(line)}
+					{@const resultFailureLabel = getStructuredFailureLabel(line)}
+					{@const resultArtifactLabel = getStructuredArtifactLabel(line)}
 					<LogLine
 						{line}
 						{style}
@@ -924,16 +977,26 @@
 							<span class="flex-1 min-w-0 flex items-baseline bg-gray-900/60 rounded px-1 font-mono">
 								<span class="shrink-0 w-[28px] text-right pr-1.5 text-gray-600 tabular-nums select-none text-[10px]">{resultMatch.num}</span>
 								<span class="text-gray-500 select-none text-[10px] pr-1">→</span>
-								{#if resultIsFailure}
-									<span class="shrink-0 mr-1 rounded bg-red-500/20 px-1 text-[10px] font-semibold text-red-200">FAIL</span>
+								{#if resultIsFailure || resultFailureLabel}
+									<span class="shrink-0 mr-1 rounded bg-red-500/20 px-1 text-[10px] font-semibold text-red-200">{resultFailureLabel ?? 'FAIL'}</span>
+								{:else if resultStatusLabel}
+									<span class="shrink-0 mr-1 rounded bg-emerald-500/15 px-1 text-[10px] font-semibold text-emerald-200">{resultStatusLabel}</span>
+								{/if}
+								{#if resultArtifactLabel}
+									<span class="shrink-0 mr-1 rounded bg-cyan-500/10 px-1 text-[10px] text-cyan-200">{resultArtifactLabel}</span>
 								{/if}
 								<span class="flex-1 min-w-0 break-all whitespace-pre-wrap {resultIsFailure ? 'text-red-200' : 'text-emerald-300/80'} text-[11px]">
 									{resultCollapsed && !resultExpanded ? getPreviewLines(resultBody) : getRenderableText(resultBody)}
 								</span>
 							</span>
 						{:else}
-							{#if resultIsFailure}
-								<span class="shrink-0 mx-1 rounded bg-red-500/20 px-1 text-[10px] font-semibold text-red-200">FAIL</span>
+							{#if resultIsFailure || resultFailureLabel}
+								<span class="shrink-0 mx-1 rounded bg-red-500/20 px-1 text-[10px] font-semibold text-red-200">{resultFailureLabel ?? 'FAIL'}</span>
+							{:else if resultStatusLabel}
+								<span class="shrink-0 mx-1 rounded bg-emerald-500/15 px-1 text-[10px] font-semibold text-emerald-200">{resultStatusLabel}</span>
+							{/if}
+							{#if resultArtifactLabel}
+								<span class="shrink-0 mr-1 rounded bg-cyan-500/10 px-1 text-[10px] text-cyan-200">{resultArtifactLabel}</span>
 							{/if}
 							<span class="flex-1 min-w-0 break-all whitespace-pre-wrap {resultIsFailure ? 'text-red-200' : 'text-gray-400'} text-xs">
 								{resultCollapsed && !resultExpanded ? getPreviewLines(resultBody) : getRenderableText(resultBody)}
@@ -959,6 +1022,12 @@
 						onToggleExpand={() => toggleExpand(line.id)}
 						onExpandKeydown={(e) => handleExpandKeydown(e, line.id)}
 					>
+						{#if getStructuredFailureLabel(line)}
+							<span class="mr-1 rounded bg-red-500/20 px-1 text-[10px] font-semibold text-red-200">{getStructuredFailureLabel(line)}</span>
+						{/if}
+						{#if getStructuredArtifactLabel(line)}
+							<span class="mr-1 rounded bg-cyan-500/10 px-1 text-[10px] text-cyan-200">{getStructuredArtifactLabel(line)}</span>
+						{/if}
 						{lineCollapsed && !lineExpanded ? getPreviewLines(line.message) : getRenderableText(line.message)}
 					</LogLine>
 				{:else}

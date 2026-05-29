@@ -5,9 +5,10 @@
 	import LogViewer from './LogViewer.svelte';
 	import { getExitReasonDisplay } from '$lib/utils/dev-runner-exit-reason';
 	import { confirm } from '$lib/stores/confirm';
+	import type { EventLinePayload } from '$lib/dev-runner/log-types';
 
 	interface LogViewerRef {
-		injectLine: (text: string | { text: string; meta?: Record<string, unknown> }) => void;
+		injectLine: (text: EventLinePayload) => void;
 		injectCompleted: (reason?: string) => void;
 		injectMergeCompleted: (reason?: string, status?: string) => void;
 		catchUp?: () => Promise<void>;
@@ -61,7 +62,7 @@
 
 	let logViewer:
 		| {
-				injectLine: (t: string | { text: string; meta?: Record<string, unknown> }) => void;
+				injectLine: (t: EventLinePayload) => void;
 				injectCompleted: (reason?: string) => void;
 				injectMergeCompleted: (reason?: string, status?: string) => void;
 				catchUp?: () => Promise<void>;

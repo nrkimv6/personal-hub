@@ -33,3 +33,17 @@ test("LogViewer delegates stream UI state and reconnect methods to LogStream", (
   assert.match(logViewer, /void stream\.reconnectForModeSwitch/);
   assert.match(logViewer, /stream\.complete\(reason\)/);
 });
+
+test("managed SSE object payload keeps structured_event through LogViewer injection", () => {
+  const devRunnerTab = readFileSync(
+    new URL("../src/routes/automation/DevRunnerTab.svelte", import.meta.url),
+    "utf8",
+  );
+  assert.match(source, /import type \{ EventLinePayload \} from '\.\/log-types'/);
+  assert.match(source, /addLine: \(text: EventLinePayload, isStale: boolean\) => void/);
+  assert.match(devRunnerTab, /import type \{ EventLinePayload \} from '\$lib\/dev-runner\/log-types'/);
+  assert.match(devRunnerTab, /logRefs\.get\(runnerId\)\?\.injectLine\(payload\)/);
+  assert.doesNotMatch(devRunnerTab, /injectLine\(normalizedLine\)/);
+  assert.match(logViewer, /isStructuredLogEvent/);
+  assert.match(logViewer, /return \{ \.\.\.parsed, structured \}/);
+});

@@ -1,6 +1,7 @@
 import { devRunnerLogApi } from '$lib/api';
 import { apiGate } from '$lib/stores/apiGate.svelte';
 import { createBackoff } from './backoff';
+import type { EventLinePayload } from './log-types';
 
 type LogViewerMode = 'standalone' | 'managed';
 
@@ -12,7 +13,7 @@ interface LogStreamOptions {
 	getSinceLine: () => number;
 	shouldLoadRecentBeforeReconnect: () => boolean;
 	loadRecent: () => Promise<void>;
-	addLine: (text: string, isStale: boolean) => void;
+	addLine: (text: EventLinePayload, isStale: boolean) => void;
 	clearNoiseTimer: () => void;
 	hasExitBanner: () => boolean;
 	clearExitBanner: () => void;
