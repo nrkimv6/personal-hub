@@ -11,16 +11,16 @@
 		{ isbn: '9788970127999', title: '변신', author: '프란츠 카프카', duplicateHint: false }
 	];
 
-	let state = $state<ScanState>({ kind: 'idle' });
+	let scanState: ScanState = $state({ kind: 'idle' });
 	let continuous = $state(false);
-	let timer: ReturnType<typeof window.setTimeout> | null = null;
+	let timer: number | null = null;
 
 	function startScan() {
 		if (timer) window.clearTimeout(timer);
-		state = { kind: 'scanning' };
+		scanState = { kind: 'scanning' };
 		timer = window.setTimeout(() => {
 			const pick = mocks[Math.floor(Math.random() * mocks.length)];
-			state = {
+			scanState = {
 				kind: 'result',
 				isbn: pick.isbn,
 				title: pick.title,
@@ -32,7 +32,7 @@
 	}
 
 	function closeResult(andContinue = false) {
-		state = { kind: 'idle' };
+		scanState = { kind: 'idle' };
 		if (andContinue || continuous) startScan();
 	}
 
@@ -54,16 +54,16 @@
 				<span class="absolute -right-1 -top-1 h-4 w-4 border-r-2 border-t-2 border-primary"></span>
 				<span class="absolute -bottom-1 -left-1 h-4 w-4 border-b-2 border-l-2 border-primary"></span>
 				<span class="absolute -bottom-1 -right-1 h-4 w-4 border-b-2 border-r-2 border-primary"></span>
-				{#if state.kind === 'scanning'}<div class="absolute left-0 right-0 top-1/2 h-0.5 -translate-y-1/2 animate-pulse bg-primary"></div>{/if}
+				{#if scanState.kind === 'scanning'}<div class="absolute left-0 right-0 top-1/2 h-0.5 -translate-y-1/2 animate-pulse bg-primary"></div>{/if}
 			</div>
 		</div>
-		<p class="absolute bottom-4 left-0 right-0 text-center text-xs text-white/80">{state.kind === 'scanning' ? '스캔 중...' : 'ISBN 바코드를 사각형 안에 비춰주세요'}</p>
+		<p class="absolute bottom-4 left-0 right-0 text-center text-xs text-white/80">{scanState.kind === 'scanning' ? '스캔 중...' : 'ISBN 바코드를 사각형 안에 비춰주세요'}</p>
 		<div class="absolute right-3 top-3 inline-flex items-center gap-1.5 rounded-full bg-white/10 px-2 py-1 text-[10px] text-white"><Camera class="h-3 w-3" /> 목업</div>
 	</div>
 
-	<button type="button" onclick={startScan} disabled={state.kind === 'scanning'} class="w-full rounded-lg bg-primary py-3 text-sm font-semibold text-primary-foreground shadow-sm disabled:opacity-60">
+	<button type="button" onclick={startScan} disabled={scanState.kind === 'scanning'} class="w-full rounded-lg bg-primary py-3 text-sm font-semibold text-primary-foreground shadow-sm disabled:opacity-60">
 		<ScanLine class="mr-1 inline h-4 w-4" />
-		{state.kind === 'scanning' ? '스캔 중...' : '스캔 시작'}
+		{scanState.kind === 'scanning' ? '스캔 중...' : '스캔 시작'}
 	</button>
 
 	<label class="flex items-center justify-between rounded-md border border-border bg-card px-3 py-2 text-sm">
@@ -72,23 +72,23 @@
 	</label>
 </div>
 
-{#if state.kind === 'result'}
+{#if scanState.kind === 'result'}
 	<button class="fixed inset-0 z-50 bg-foreground/30" aria-label="스캔 결과 닫기" onclick={() => closeResult(false)}></button>
 	<div class="fixed bottom-0 left-1/2 z-50 w-full max-w-md -translate-x-1/2 space-y-4 rounded-t-lg border border-border bg-card p-5 shadow-xl">
-		{#if state.duplicate}
+		{#if scanState.duplicate}
 			<div class="flex items-center gap-2 rounded-md bg-warning-light p-2 text-xs text-warning-foreground"><AlertCircle class="h-4 w-4" /> 이미 소장 중인 책입니다.</div>
 		{/if}
 		<div class="flex gap-3">
-			<CoverImage title={state.title} class="h-24 w-16 shrink-0" />
+			<CoverImage title={scanState.title} class="h-24 w-16 shrink-0" />
 			<div class="min-w-0 flex-1">
-				<h3 class="font-semibold">{state.title}</h3>
-				<p class="text-xs text-muted-foreground">{state.author}</p>
-				<p class="mt-1 text-[10px] text-muted-foreground">ISBN {state.isbn}</p>
+				<h3 class="font-semibold">{scanState.title}</h3>
+				<p class="text-xs text-muted-foreground">{scanState.author}</p>
+				<p class="mt-1 text-[10px] text-muted-foreground">ISBN {scanState.isbn}</p>
 			</div>
 		</div>
 		<div class="flex gap-2">
 			<button type="button" onclick={() => closeResult(true)} class="flex-1 rounded-md border border-border bg-card py-2 text-sm hover:bg-accent">다시 스캔</button>
-			<button type="button" onclick={() => closeResult(false)} disabled={state.duplicate} class="flex-1 rounded-md bg-primary py-2 text-sm font-medium text-primary-foreground disabled:opacity-50"><Plus class="mr-1 inline h-4 w-4" /> {state.duplicate ? '이미 있음' : '추가'}</button>
+			<button type="button" onclick={() => closeResult(false)} disabled={scanState.duplicate} class="flex-1 rounded-md bg-primary py-2 text-sm font-medium text-primary-foreground disabled:opacity-50"><Plus class="mr-1 inline h-4 w-4" /> {scanState.duplicate ? '이미 있음' : '추가'}</button>
 		</div>
 	</div>
 {/if}

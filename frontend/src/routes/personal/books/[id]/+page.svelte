@@ -13,7 +13,7 @@
 
 	let confirmText = $state<string | null>(null);
 	let pending = $state<Disposal | null>(null);
-	const book = $derived(booksState.getBook($page.params.id));
+	const book = $derived(booksState.getBook($page.params.id ?? ''));
 	const stale = $derived(book?.lastCheckedAt ? Math.floor((Date.now() - new Date(book.lastCheckedAt).getTime()) / (1000 * 60 * 60 * 24)) > 30 : false);
 
 	function requestDisposal(disposal: string) {

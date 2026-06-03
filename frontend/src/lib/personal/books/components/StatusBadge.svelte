@@ -1,13 +1,18 @@
 <script lang="ts">
 	import type { Disposal } from '../types';
 
-	let { status, size = 'sm', variant = 'soft', prefix = '', class: className = '' } = $props<{
+	const props = $props<{
 		status: Disposal;
 		size?: 'sm' | 'md';
 		variant?: 'soft' | 'outline';
 		prefix?: string;
 		class?: string;
 	}>();
+	let status: Disposal = $derived(props.status);
+	let size: 'sm' | 'md' = $derived(props.size ?? 'sm');
+	let variant: 'soft' | 'outline' = $derived(props.variant ?? 'soft');
+	let prefix: string = $derived(props.prefix ?? '');
+	let className: string = $derived(props.class ?? '');
 
 	const labels: Record<Disposal, string> = {
 		undecided: '미정',

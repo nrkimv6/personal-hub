@@ -46,9 +46,10 @@
 	<nav class="fixed bottom-0 left-0 right-0 z-40 border-t border-border bg-card/95 backdrop-blur md:hidden">
 		<ul class="mx-auto flex max-w-screen-md items-stretch justify-around">
 			{#each items as item}
+				{@const Icon = item.icon}
 				<li class="flex-1">
 					<a href={item.href} class="flex flex-col items-center gap-0.5 py-2 text-[10px] {active($page.url.pathname, item.href) ? 'text-primary' : 'text-muted-foreground'}">
-						<svelte:component this={item.icon} class="h-5 w-5" />
+						<Icon class="h-5 w-5" />
 						<span>{item.short}</span>
 					</a>
 				</li>
