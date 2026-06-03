@@ -9,6 +9,8 @@ REQUIRED_BOOTSTRAP_TABLES = {
     "notes_archive",
     "note_tags",
     "note_histories",
+    "books",
+    "book_highlights",
     "git_repos",
     "git_operation_logs",
     "writing_batches",
@@ -35,6 +37,7 @@ def load_all_models():
     import app.models as models  # noqa: F401
     import app.modules.claude_worker.models.llm_request  # noqa: F401
     import app.modules.notes.models  # noqa: F401
+    import app.modules.books.models  # noqa: F401
     import app.modules.git_repos.models  # noqa: F401
 
     ensure_bootstrap_tables_loaded()

@@ -156,6 +156,151 @@
   --animate-slide-in-right: slide-in-right 0.3s ease-out;
 }
 
+@layer components {
+  .book-shell {
+    --book-status-undecided-bg: var(--color-muted);
+    --book-status-undecided-fg: var(--color-muted-foreground);
+    --book-status-undecided-border: var(--color-border);
+    --book-status-keep-bg: var(--color-primary-light);
+    --book-status-keep-fg: var(--color-primary);
+    --book-status-keep-border: var(--color-primary-muted);
+    --book-status-sell-bg: var(--color-success-light);
+    --book-status-sell-fg: var(--color-success);
+    --book-status-sell-border: var(--color-success-muted);
+    --book-status-scan-bg: var(--color-info-light);
+    --book-status-scan-fg: var(--color-info);
+    --book-status-scan-border: var(--color-info-muted);
+    --book-status-discard-bg: var(--color-error-light);
+    --book-status-discard-fg: var(--color-error);
+    --book-status-discard-border: var(--color-error-muted);
+    --book-status-review-bg: var(--color-warning-light);
+    --book-status-review-fg: var(--color-warning-foreground);
+    --book-status-review-border: var(--color-warning-muted);
+    --book-action-keep: var(--color-primary);
+    --book-action-sell: var(--color-success);
+    --book-action-scan: var(--color-info);
+    --book-action-discard: var(--color-error);
+    --book-action-later: var(--color-warning);
+  }
+
+  .book-status {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.25rem;
+    border: 1px solid var(--book-status-undecided-border);
+    border-radius: 9999px;
+    font-weight: 500;
+    white-space: nowrap;
+  }
+
+  .book-status.sm {
+    padding: 0.125rem 0.5rem;
+    font-size: 0.75rem;
+    line-height: 1rem;
+  }
+
+  .book-status.md {
+    padding: 0.25rem 0.625rem;
+    font-size: 0.875rem;
+    line-height: 1.25rem;
+  }
+
+  .book-status.outline {
+    background: transparent;
+    color: var(--color-foreground);
+    border-color: currentColor;
+  }
+
+  .book-status-undecided.soft {
+    background: var(--book-status-undecided-bg);
+    color: var(--book-status-undecided-fg);
+    border-color: var(--book-status-undecided-border);
+  }
+
+  .book-status-keep.soft {
+    background: var(--book-status-keep-bg);
+    color: var(--book-status-keep-fg);
+    border-color: var(--book-status-keep-border);
+  }
+
+  .book-status-sell.soft {
+    background: var(--book-status-sell-bg);
+    color: var(--book-status-sell-fg);
+    border-color: var(--book-status-sell-border);
+  }
+
+  .book-status-scan.soft {
+    background: var(--book-status-scan-bg);
+    color: var(--book-status-scan-fg);
+    border-color: var(--book-status-scan-border);
+  }
+
+  .book-status-discard.soft {
+    background: var(--book-status-discard-bg);
+    color: var(--book-status-discard-fg);
+    border-color: var(--book-status-discard-border);
+  }
+
+  .book-status-review.soft {
+    background: var(--book-status-review-bg);
+    color: var(--book-status-review-fg);
+    border-color: var(--book-status-review-border);
+  }
+
+  .book-access {
+    display: inline-flex;
+    align-items: center;
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-md);
+    white-space: nowrap;
+  }
+
+  .book-access.sm {
+    padding: 0.125rem 0.375rem;
+    font-size: 0.625rem;
+    line-height: 0.875rem;
+  }
+
+  .book-access.md {
+    padding: 0.125rem 0.5rem;
+    font-size: 0.75rem;
+    line-height: 1rem;
+  }
+
+  .book-access-library,
+  .book-access-ebook {
+    background: var(--color-info-light);
+    color: var(--color-info);
+    border-color: var(--color-info-muted);
+  }
+
+  .book-access-millie,
+  .book-access-used {
+    background: var(--color-success-light);
+    color: var(--color-success);
+    border-color: var(--color-success-muted);
+  }
+
+  .book-access-check {
+    background: var(--color-warning-light);
+    color: var(--color-warning-foreground);
+    border-color: var(--color-warning-muted);
+  }
+
+  .book-access-no {
+    background: var(--color-muted);
+    color: var(--color-muted-foreground);
+    border-color: var(--color-border);
+  }
+
+  .book-cover {
+    color: var(--color-primary);
+    background:
+      linear-gradient(135deg, color-mix(in srgb, var(--color-primary-light) 85%, white), var(--color-card));
+    border: 1px solid var(--color-border);
+  }
+}
+
 /* ===================================
    Monitoring Dashboard Design System
    - Muted, eye-friendly colors
