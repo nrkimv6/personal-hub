@@ -2,7 +2,7 @@
 
 from datetime import datetime
 
-from sqlalchemy import Column, DateTime, ForeignKey, Integer, String, Text
+from sqlalchemy import Column, DateTime, ForeignKey, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import relationship
 
 from app.database import Base
@@ -57,6 +57,13 @@ class Book(Base):
         lazy="selectin",
         order_by="Highlight.created_at.asc()",
     )
+    buyback_quotes = relationship(
+        "BookBuybackQuote",
+        back_populates="book",
+        cascade="all, delete-orphan",
+        lazy="selectin",
+        order_by="BookBuybackQuote.grade.asc()",
+    )
 
 
 class Highlight(Base):
@@ -75,4 +82,28 @@ class Highlight(Base):
     created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
 
     book = relationship("Book", back_populates="highlights")
+
+
+class BookBuybackQuote(Base):
+    """Provider buyback quote for a book condition grade."""
+
+    __tablename__ = "book_buyback_quotes"
+    __table_args__ = (
+        UniqueConstraint("book_id", "provider", "grade", name="uq_book_buyback_quote_grade"),
+    )
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    book_id = Column(Integer, ForeignKey("books.id", ondelete="CASCADE"), nullable=False, index=True)
+    provider = Column(String(40), nullable=False, default="aladin")
+    grade = Column(String(20), nullable=False)
+    price = Column(Integer, nullable=True)
+    currency = Column(String(8), nullable=False, default="KRW")
+    availability = Column(String(20), nullable=False, default="yes")
+    raw_status = Column(String(40), nullable=False, default="ok")
+    message = Column(Text, nullable=True)
+    checked_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+    updated_at = Column(DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    book = relationship("Book", back_populates="buyback_quotes")
 

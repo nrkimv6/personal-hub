@@ -5,6 +5,27 @@ export type AccessState = 'yes' | 'no' | 'check';
 export type SellStatus = 'none' | 'ready' | 'listed' | 'sold' | 'canceled' | 'unsellable';
 export type ScanStatus = 'none' | 'ready' | 'in_progress' | 'done' | 'canceled';
 export type DiscardStatus = 'none' | 'ready' | 'discarded' | 'canceled';
+export type BuybackGrade = '최상' | '상' | '중';
+export type BuybackAvailability = 'yes' | 'no' | 'check' | 'error';
+
+export interface BuybackQuote {
+	id?: string | null;
+	provider: string;
+	grade: BuybackGrade;
+	price?: number | null;
+	currency: string;
+	availability: BuybackAvailability;
+	rawStatus: string;
+	message?: string | null;
+	checkedAt?: string | null;
+}
+
+export interface BuybackRecommendation {
+	grade?: BuybackGrade | null;
+	price?: number | null;
+	action: 'sell' | 'user_review' | 'no_buyback' | 'unknown';
+	message: string;
+}
 
 export interface Highlight {
 	id: string;
@@ -41,6 +62,8 @@ export interface Book {
 	usedBuyback: AccessState;
 	usedBuybackPrice?: number | null;
 	lastCheckedAt?: string | null;
+	buybackQuotes?: BuybackQuote[];
+	buybackRecommendation?: BuybackRecommendation | null;
 	recommendation: Recommendation;
 	disposal: Disposal;
 	sellStatus: SellStatus;
@@ -57,5 +80,12 @@ export interface BookListResult {
 	total: number;
 	offset: number;
 	limit: number;
+}
+
+export interface BuybackRefreshResult {
+	book: Book;
+	quotes: BuybackQuote[];
+	availability: BuybackAvailability;
+	message?: string | null;
 }
 

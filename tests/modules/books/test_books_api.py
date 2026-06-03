@@ -7,14 +7,15 @@ from sqlalchemy.orm import sessionmaker
 
 from app.database import Base, get_db
 from app.main import app
-from app.modules.books.models import Book, Highlight
+from app.modules.books.aladin_buyback import AladinBuybackQuote, AladinBuybackResult
+from app.modules.books.models import Book, BookBuybackQuote, Highlight
 
 
 @pytest.fixture()
 def db_bundle(tmp_path):
     engine = create_engine(f"sqlite:///{tmp_path / 'books_api.db'}", connect_args={"check_same_thread": False})
     SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
-    tables = [Book.__table__, Highlight.__table__]
+    tables = [Book.__table__, Highlight.__table__, BookBuybackQuote.__table__]
     Base.metadata.create_all(bind=engine, tables=tables)
     session = SessionLocal()
     try:
@@ -166,3 +167,48 @@ def test_list_books_filter_by_disposal_integration(client):
     items = response.json()["items"]
     assert len(items) == 1
     assert items[0]["disposal"] == "sell"
+
+
+def test_refresh_aladin_buyback_R_returns_quotes(client, monkeypatch):
+    from app.modules.books import services as svc
+
+    book_id = create_book(client, isbn="9788937460449", condition="good")
+    monkeypatch.setattr(
+        svc,
+        "fetch_aladin_buyback",
+        lambda isbn: AladinBuybackResult(
+            isbn=isbn,
+            availability="yes",
+            quotes=[
+                AladinBuybackQuote("최상", 3000),
+                AladinBuybackQuote("상", 2700),
+                AladinBuybackQuote("중", 2400),
+            ],
+        ),
+    )
+
+    response = client.post(f"/api/v1/books/{book_id}/buyback/aladin/refresh")
+
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["availability"] == "yes"
+    assert {quote["grade"]: quote["price"] for quote in body["quotes"]} == {"최상": 3000, "상": 2700, "중": 2400}
+    assert body["book"]["used_buyback_price"] == 2700
+
+
+def test_refresh_aladin_buyback_E_error_keeps_book_row(client, monkeypatch):
+    from app.modules.books import services as svc
+
+    book_id = create_book(client, isbn="9788937460448", used_buyback_price=1200, accessibility_used_buyback="yes")
+    monkeypatch.setattr(
+        svc,
+        "fetch_aladin_buyback",
+        lambda isbn: AladinBuybackResult(isbn=isbn, availability="error", raw_status="timeout", message="timeout"),
+    )
+
+    response = client.post(f"/api/v1/books/{book_id}/buyback/aladin/refresh")
+
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["availability"] == "error"
+    assert body["book"]["used_buyback_price"] == 1200

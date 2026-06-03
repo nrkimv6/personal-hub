@@ -12,6 +12,8 @@ SellStatus = Literal["none", "ready", "listed", "sold", "canceled", "unsellable"
 ScanStatus = Literal["none", "ready", "in_progress", "done", "canceled"]
 DiscardStatus = Literal["none", "ready", "discarded", "canceled"]
 ScanPurpose = Literal["guillotine", "non_destructive"]
+BuybackGrade = Literal["최상", "상", "중"]
+BuybackAvailability = Literal["yes", "no", "check", "error"]
 
 
 class HighlightCreate(BaseModel):
@@ -29,6 +31,25 @@ class HighlightResponse(HighlightCreate):
     created_at: datetime
 
     model_config = {"from_attributes": True}
+
+
+class BuybackQuoteResponse(BaseModel):
+    id: int | None = None
+    provider: str = "aladin"
+    grade: BuybackGrade
+    price: int | None = Field(None, ge=0)
+    currency: str = "KRW"
+    availability: BuybackAvailability = "check"
+    raw_status: str = "unknown"
+    message: str | None = None
+    checked_at: datetime | None = None
+
+
+class BuybackRecommendation(BaseModel):
+    grade: BuybackGrade | None = None
+    price: int | None = Field(None, ge=0)
+    action: Literal["sell", "user_review", "no_buyback", "unknown"] = "unknown"
+    message: str
 
 
 class BookCreate(BaseModel):
@@ -137,6 +158,8 @@ class BookResponse(BaseModel):
     scan_purpose: ScanPurpose | None
     review_date: str | None
     highlights: list[HighlightResponse] = []
+    buyback_quotes: list[BuybackQuoteResponse] = Field(default_factory=list)
+    buyback_recommendation: BuybackRecommendation | None = None
     created_at: datetime
     updated_at: datetime
 
@@ -146,4 +169,11 @@ class BookListResponse(BaseModel):
     total: int
     offset: int
     limit: int
+
+
+class BuybackRefreshResponse(BaseModel):
+    book: BookResponse
+    quotes: list[BuybackQuoteResponse] = Field(default_factory=list)
+    availability: BuybackAvailability
+    message: str | None = None
 

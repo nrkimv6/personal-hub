@@ -12,6 +12,12 @@ const daysFromNow = (n: number) => {
 	return d.toISOString().slice(0, 10);
 };
 
+const aladinQuotes = (best: number, good: number, fair: number, checkedAt: string) => [
+	{ provider: 'aladin', grade: '최상' as const, price: best, currency: 'KRW', availability: 'yes' as const, rawStatus: 'ok', checkedAt },
+	{ provider: 'aladin', grade: '상' as const, price: good, currency: 'KRW', availability: 'yes' as const, rawStatus: 'ok', checkedAt },
+	{ provider: 'aladin', grade: '중' as const, price: fair, currency: 'KRW', availability: 'yes' as const, rawStatus: 'ok', checkedAt }
+];
+
 export const sampleBooks: Book[] = [
 	{
 		id: 'b1',
@@ -34,6 +40,7 @@ export const sampleBooks: Book[] = [
 		usedBuyback: 'yes',
 		usedBuybackPrice: 1200,
 		lastCheckedAt: daysAgo(5),
+		buybackQuotes: aladinQuotes(1500, 1200, 900, daysAgo(5)),
 		recommendation: 'keep',
 		disposal: 'keep',
 		sellStatus: 'none',
@@ -69,6 +76,7 @@ export const sampleBooks: Book[] = [
 		usedBuyback: 'yes',
 		usedBuybackPrice: 4500,
 		lastCheckedAt: daysAgo(10),
+		buybackQuotes: aladinQuotes(5200, 4800, 4500, daysAgo(10)),
 		recommendation: 'sell',
 		disposal: 'sell',
 		sellStatus: 'ready',
@@ -95,6 +103,7 @@ export const sampleBooks: Book[] = [
 		usedBuyback: 'yes',
 		usedBuybackPrice: 5800,
 		lastCheckedAt: daysAgo(45),
+		buybackQuotes: aladinQuotes(6800, 6200, 5800, daysAgo(45)),
 		recommendation: 'scan',
 		disposal: 'scan',
 		sellStatus: 'none',

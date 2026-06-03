@@ -25,6 +25,8 @@ class BooksState {
 	loaded = $state(false);
 	loading = $state(false);
 	error = $state<string | null>(null);
+	buybackRefreshing = $state<Record<string, boolean>>({});
+	buybackErrors = $state<Record<string, string | null>>({});
 
 	getBook(id: string): Book | undefined {
 		return this.books.find((book) => book.id === id);
@@ -63,6 +65,23 @@ class BooksState {
 			this.books = this.books.map((book) => (book.id === id ? updated : book));
 		} catch (error) {
 			this.error = error instanceof Error ? error.message : '도서 수정 실패';
+		}
+	}
+
+	async refreshAladinBuyback(id: string): Promise<void> {
+		if (!isApiId(id) || this.buybackRefreshing[id]) return;
+		this.buybackRefreshing = { ...this.buybackRefreshing, [id]: true };
+		this.buybackErrors = { ...this.buybackErrors, [id]: null };
+		try {
+			const result = await booksApi.refreshAladinBuyback(id);
+			this.books = this.books.map((book) => (book.id === id ? result.book : book));
+			if (result.availability === 'error') {
+				this.buybackErrors = { ...this.buybackErrors, [id]: result.message ?? '알라딘 매입가 확인 실패' };
+			}
+		} catch (error) {
+			this.buybackErrors = { ...this.buybackErrors, [id]: error instanceof Error ? error.message : '알라딘 매입가 확인 실패' };
+		} finally {
+			this.buybackRefreshing = { ...this.buybackRefreshing, [id]: false };
 		}
 	}
 

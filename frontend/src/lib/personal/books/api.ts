@@ -1,5 +1,5 @@
 import { request } from '$lib/api/client';
-import type { Book, BookListResult, Highlight } from './types';
+import type { Book, BookListResult, BuybackQuote, BuybackRefreshResult, Highlight } from './types';
 
 interface ApiHighlight {
 	id: number;
@@ -36,6 +36,8 @@ interface ApiBook {
 	accessibility_used_buyback: Book['usedBuyback'];
 	used_buyback_price?: number | null;
 	last_checked_at?: string | null;
+	buyback_quotes?: ApiBuybackQuote[];
+	buyback_recommendation?: Book['buybackRecommendation'];
 	recommendation: Book['recommendation'];
 	disposal: Book['disposal'];
 	sell_status: Book['sellStatus'];
@@ -47,11 +49,30 @@ interface ApiBook {
 	created_at: string;
 }
 
+interface ApiBuybackQuote {
+	id?: number | null;
+	provider: string;
+	grade: BuybackQuote['grade'];
+	price?: number | null;
+	currency: string;
+	availability: BuybackQuote['availability'];
+	raw_status: string;
+	message?: string | null;
+	checked_at?: string | null;
+}
+
 interface ApiBookList {
 	items: ApiBook[];
 	total: number;
 	offset: number;
 	limit: number;
+}
+
+interface ApiBuybackRefreshResult {
+	book: ApiBook;
+	quotes: ApiBuybackQuote[];
+	availability: BuybackRefreshResult['availability'];
+	message?: string | null;
 }
 
 function toBook(book: ApiBook): Book {
@@ -79,6 +100,8 @@ function toBook(book: ApiBook): Book {
 		usedBuyback: book.accessibility_used_buyback,
 		usedBuybackPrice: book.used_buyback_price,
 		lastCheckedAt: book.last_checked_at,
+		buybackQuotes: (book.buyback_quotes ?? []).map(toBuybackQuote),
+		buybackRecommendation: book.buyback_recommendation ?? null,
 		recommendation: book.recommendation,
 		disposal: book.disposal,
 		sellStatus: book.sell_status,
@@ -88,6 +111,20 @@ function toBook(book: ApiBook): Book {
 		reviewDate: book.review_date,
 		highlights: book.highlights.map(toHighlight),
 		addedAt: book.created_at?.slice(0, 10)
+	};
+}
+
+function toBuybackQuote(quote: ApiBuybackQuote): BuybackQuote {
+	return {
+		id: quote.id == null ? null : String(quote.id),
+		provider: quote.provider,
+		grade: quote.grade,
+		price: quote.price,
+		currency: quote.currency,
+		availability: quote.availability,
+		rawStatus: quote.raw_status,
+		message: quote.message,
+		checkedAt: quote.checked_at
 	};
 }
 
@@ -135,6 +172,17 @@ export const booksApi = {
 			body: JSON.stringify(toApiPatch(patch))
 		});
 		return toBook(result);
+	},
+	async refreshAladinBuyback(id: string): Promise<BuybackRefreshResult> {
+		const result = await request<ApiBuybackRefreshResult>(`/books/${id}/buyback/aladin/refresh`, {
+			method: 'POST'
+		});
+		return {
+			book: toBook(result.book),
+			quotes: result.quotes.map(toBuybackQuote),
+			availability: result.availability,
+			message: result.message
+		};
 	}
 };
 

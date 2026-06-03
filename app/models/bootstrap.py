@@ -11,6 +11,7 @@ REQUIRED_BOOTSTRAP_TABLES = {
     "note_histories",
     "books",
     "book_highlights",
+    "book_buyback_quotes",
     "git_repos",
     "git_operation_logs",
     "writing_batches",

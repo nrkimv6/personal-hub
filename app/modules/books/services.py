@@ -7,7 +7,8 @@ from fastapi import HTTPException
 from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
-from app.modules.books.models import Book, Highlight
+from app.modules.books.aladin_buyback import ALADIN_GRADES, AladinBuybackResult, fetch_aladin_buyback, normalize_isbn
+from app.modules.books.models import Book, BookBuybackQuote, Highlight
 from app.modules.books.schemas import BookCreate, BookUpdate, HighlightCreate
 
 
@@ -48,6 +49,49 @@ def _highlight_to_dict(highlight: Highlight) -> dict:
     }
 
 
+def _quote_to_dict(quote: BookBuybackQuote) -> dict:
+    return {
+        "id": quote.id,
+        "provider": quote.provider,
+        "grade": quote.grade,
+        "price": quote.price,
+        "currency": quote.currency,
+        "availability": quote.availability,
+        "raw_status": quote.raw_status,
+        "message": quote.message,
+        "checked_at": quote.checked_at,
+    }
+
+
+def latest_buyback_quotes(book: Book) -> list[BookBuybackQuote]:
+    by_grade = {quote.grade: quote for quote in book.buyback_quotes if quote.provider == "aladin" and quote.grade in ALADIN_GRADES}
+    return [by_grade[grade] for grade in ALADIN_GRADES if grade in by_grade]
+
+
+def grade_for_condition(condition: str) -> str | None:
+    return {
+        "mint": "최상",
+        "good": "상",
+        "fair": "중",
+    }.get(condition)
+
+
+def buyback_recommendation(book: Book) -> dict:
+    grade = grade_for_condition(book.condition)
+    if grade is None:
+        return {
+            "grade": None,
+            "price": None,
+            "action": "user_review",
+            "message": "현재 책 상태는 알라딘 중고 매입 가능 여부를 사용자가 확인해야 합니다.",
+        }
+    quotes = {quote.grade: quote for quote in latest_buyback_quotes(book)}
+    quote = quotes.get(grade)
+    if not quote or quote.price is None:
+        return {"grade": grade, "price": None, "action": "unknown", "message": "상태에 맞는 알라딘 매입가가 아직 없습니다."}
+    return {"grade": grade, "price": quote.price, "action": "sell", "message": f"현재 상태 기준 {grade} 매입가"}
+
+
 def book_to_dict(book: Book) -> dict:
     return {
         "id": book.id,
@@ -81,6 +125,8 @@ def book_to_dict(book: Book) -> dict:
         "scan_purpose": book.scan_purpose,
         "review_date": book.review_date,
         "highlights": [_highlight_to_dict(item) for item in book.highlights],
+        "buyback_quotes": [_quote_to_dict(item) for item in latest_buyback_quotes(book)],
+        "buyback_recommendation": buyback_recommendation(book),
         "created_at": book.created_at,
         "updated_at": book.updated_at,
     }
@@ -188,4 +234,68 @@ def create_highlight(db: Session, book_id: int, data: HighlightCreate) -> Highli
     db.commit()
     db.refresh(highlight)
     return highlight
+
+
+def _upsert_aladin_quotes(db: Session, book: Book, result: AladinBuybackResult) -> None:
+    now = result.checked_at
+    existing = {
+        quote.grade: quote
+        for quote in db.query(BookBuybackQuote)
+        .filter(BookBuybackQuote.book_id == book.id, BookBuybackQuote.provider == "aladin")
+        .all()
+    }
+    for result_quote in result.quotes:
+        current = existing.get(result_quote.grade)
+        if current and current.checked_at and current.checked_at > now:
+            continue
+        if current is None:
+            current = BookBuybackQuote(book_id=book.id, provider="aladin", grade=result_quote.grade)
+            db.add(current)
+        current.price = result_quote.price
+        current.currency = "KRW"
+        current.availability = "yes"
+        current.raw_status = result.raw_status
+        current.message = result.message
+        current.checked_at = now
+        current.updated_at = datetime.utcnow()
+
+
+def _apply_buyback_summary(book: Book, result: AladinBuybackResult) -> None:
+    today = result.checked_at.date().isoformat()
+    book.last_checked_at = today
+    if result.availability == "yes":
+        book.accessibility_used_buyback = "yes"
+        grade = grade_for_condition(book.condition)
+        prices = {quote.grade: quote.price for quote in result.quotes}
+        book.used_buyback_price = prices.get(grade) if grade else None
+        return
+    if result.availability == "no" and book.used_buyback_price is None:
+        book.accessibility_used_buyback = "no"
+    elif result.availability == "error":
+        book.accessibility_used_buyback = "check"
+
+
+def refresh_aladin_buyback(db: Session, book_id: int, fetcher=None) -> dict:
+    book = get_book(db, book_id)
+    if not book:
+        raise HTTPException(status_code=404, detail="책을 찾을 수 없습니다.")
+    isbn = normalize_isbn(book.isbn)
+    if not isbn:
+        raise HTTPException(status_code=400, detail="ISBN이 없어 알라딘 매입가를 조회할 수 없습니다.")
+
+    fetch = fetcher or fetch_aladin_buyback
+    result = fetch(isbn)
+    if result.availability == "yes":
+        _upsert_aladin_quotes(db, book, result)
+    _apply_buyback_summary(book, result)
+    book.updated_at = datetime.utcnow()
+    db.commit()
+    db.refresh(book)
+    quotes = [_quote_to_dict(item) for item in latest_buyback_quotes(book)]
+    return {
+        "book": book_to_dict(book),
+        "quotes": quotes,
+        "availability": result.availability,
+        "message": result.message,
+    }
 

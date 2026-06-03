@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { page } from '$app/stores';
-	import { AlertTriangle, ArrowLeft, Lock } from 'lucide-svelte';
+	import { AlertTriangle, ArrowLeft, Lock, RefreshCw } from 'lucide-svelte';
 	import AccessBadges from '$lib/personal/books/components/AccessBadges.svelte';
 	import CoverImage from '$lib/personal/books/components/CoverImage.svelte';
 	import SegmentedControl from '$lib/personal/books/components/SegmentedControl.svelte';
@@ -15,6 +15,8 @@
 	let pending = $state<Disposal | null>(null);
 	const book = $derived(booksState.getBook($page.params.id ?? ''));
 	const stale = $derived(book?.lastCheckedAt ? Math.floor((Date.now() - new Date(book.lastCheckedAt).getTime()) / (1000 * 60 * 60 * 24)) > 30 : false);
+	const buybackLoading = $derived(book ? (booksState.buybackRefreshing[book.id] ?? false) : false);
+	const buybackError = $derived(book ? booksState.buybackErrors[book.id] : null);
 
 	function requestDisposal(disposal: string) {
 		if (!book) return;
@@ -103,8 +105,32 @@
 					{/if}
 				</div>
 				<AccessBadges library={book.library} millie={book.millie} ebook={book.ebook} used={book.usedBuyback} size="md" />
-				<div class="grid grid-cols-[88px_minmax(0,1fr)] items-start gap-2 text-sm"><span class="pt-1 text-xs text-muted-foreground">예상 매입가</span><span>{book.usedBuybackPrice ? `${book.usedBuybackPrice.toLocaleString()}원` : '-'}</span></div>
+				<div class="grid grid-cols-[88px_minmax(0,1fr)] items-start gap-2 text-sm"><span class="pt-1 text-xs text-muted-foreground">추천 매입가</span><span>{book.usedBuybackPrice ? `${book.usedBuybackPrice.toLocaleString()}원` : '-'}</span></div>
+				<div class="grid grid-cols-[88px_minmax(0,1fr)] items-start gap-2 text-sm">
+					<span class="pt-1 text-xs text-muted-foreground">알라딘</span>
+					<div class="space-y-2">
+						<div class="grid grid-cols-3 gap-1">
+							{#each ['최상', '상', '중'] as grade}
+								{@const quote = (book.buybackQuotes ?? []).find((item) => item.grade === grade)}
+								<div class="rounded-md border border-border bg-background px-2 py-1">
+									<div class="text-[10px] text-muted-foreground">{grade}</div>
+									<div class="text-xs font-medium">{quote?.price ? `${quote.price.toLocaleString()}원` : '-'}</div>
+								</div>
+							{/each}
+						</div>
+						{#if book.buybackRecommendation}
+							<p class="text-[11px] text-muted-foreground">{book.buybackRecommendation.message}</p>
+						{/if}
+						{#if buybackError}
+							<p class="text-[11px] text-error">{buybackError}</p>
+						{/if}
+					</div>
+				</div>
 				<div class="grid grid-cols-[88px_minmax(0,1fr)] items-start gap-2 text-sm"><span class="pt-1 text-xs text-muted-foreground">마지막 확인</span><span>{book.lastCheckedAt ?? '-'}</span></div>
+				<button type="button" disabled={buybackLoading} onclick={() => booksState.refreshAladinBuyback(book.id)} class="inline-flex items-center justify-center gap-1 rounded-md border border-border bg-card px-3 py-1.5 text-xs font-medium hover:bg-accent disabled:cursor-not-allowed disabled:opacity-60">
+					<RefreshCw class="h-3.5 w-3.5 {buybackLoading ? 'animate-spin' : ''}" />
+					알라딘 매입가 확인
+				</button>
 			</div>
 		</section>
 

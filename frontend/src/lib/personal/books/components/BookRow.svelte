@@ -18,7 +18,7 @@
 	<div class="truncate text-muted-foreground">{book.author}</div>
 	<StatusBadge status={book.disposal} />
 	<StatusBadge status={book.recommendation} prefix="추천:" />
-	<span class="text-xs text-muted-foreground">{book.reviewDate ?? '-'}</span>
+	<span class="text-xs text-muted-foreground">{book.usedBuybackPrice ? `${book.usedBuybackPrice.toLocaleString()}원` : (book.reviewDate ?? '-')}</span>
 	<span class="truncate text-xs text-muted-foreground">{book.location}</span>
 	<span class="text-right text-xs text-muted-foreground">{book.highlights.length}</span>
 </a>

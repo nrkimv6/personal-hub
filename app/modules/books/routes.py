@@ -10,6 +10,7 @@ from app.modules.books.schemas import (
     BookListResponse,
     BookResponse,
     BookUpdate,
+    BuybackRefreshResponse,
     HighlightCreate,
     HighlightResponse,
 )
@@ -61,4 +62,9 @@ def get_highlights(book_id: int, db: Session = Depends(get_db)):
 @router.post("/{book_id}/highlights", response_model=HighlightResponse, status_code=201)
 def create_highlight(book_id: int, data: HighlightCreate, db: Session = Depends(get_db)):
     return svc._highlight_to_dict(svc.create_highlight(db, book_id, data))
+
+
+@router.post("/{book_id}/buyback/aladin/refresh", response_model=BuybackRefreshResponse)
+def refresh_aladin_buyback(book_id: int, db: Session = Depends(get_db)):
+    return svc.refresh_aladin_buyback(db, book_id)
 
