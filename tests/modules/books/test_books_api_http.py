@@ -5,6 +5,8 @@ import uuid
 import httpx
 import pytest
 
+from app.modules.books.aladin_buyback import fetch_aladin_buyback
+
 
 pytestmark = pytest.mark.http_live
 
@@ -34,6 +36,11 @@ def _book_payload() -> dict[str, object]:
         "recommendation": "sell",
         "disposal": "undecided",
     }
+
+
+def _numeric_isbn() -> str:
+    digits = uuid.uuid4().int % 10_000_000
+    return f"979000{digits:07d}"
 
 
 def test_books_http_live_create_update_highlight_delete_flow():
@@ -77,3 +84,48 @@ def test_books_http_live_create_update_highlight_delete_flow():
         finally:
             deleted = client.delete(f"/api/v1/books/{book_id}")
             assert deleted.status_code in (200, 404), deleted.text
+
+
+def test_books_http_live_refresh_endpoint_returns_structured_buyback_response():
+    with _client() as client:
+        liveness = client.get("/api/v1/system/liveness")
+        if liveness.status_code != 200:
+            pytest.skip(f"Admin API liveness unavailable: {liveness.status_code} {liveness.text}")
+
+        payload = _book_payload()
+        payload["isbn"] = _numeric_isbn()
+        created = client.post("/api/v1/books", json=payload)
+        assert created.status_code == 201, created.text
+        book_id = created.json()["id"]
+
+        try:
+            refreshed = client.post(f"/api/v1/books/{book_id}/buyback/aladin/refresh")
+            assert refreshed.status_code == 200, refreshed.text
+            body = refreshed.json()
+            assert body["availability"] in {"yes", "no", "error"}
+            assert "book" in body
+            assert "buyback_quotes" in body["book"]
+        finally:
+            deleted = client.delete(f"/api/v1/books/{book_id}")
+            assert deleted.status_code in (200, 404), deleted.text
+
+
+def test_aladin_buyback_http_live_known_success_or_structured_error():
+    result = fetch_aladin_buyback("9788937460449")
+
+    assert result.availability in {"yes", "no", "error"}
+    if result.availability == "yes":
+        assert {quote.grade for quote in result.quotes} == {"최상", "상", "중"}
+        assert all(quote.price > 0 for quote in result.quotes)
+    else:
+        assert result.raw_status
+
+
+def test_aladin_buyback_http_live_not_buying_or_structured_result():
+    result = fetch_aladin_buyback("9788937473135")
+
+    assert result.availability in {"yes", "no", "error"}
+    if result.availability == "yes":
+        assert {quote.grade for quote in result.quotes} == {"최상", "상", "중"}
+    else:
+        assert result.raw_status

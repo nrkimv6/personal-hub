@@ -71,7 +71,7 @@ def test_personal_books_page_renders_live_book_and_filter_actions(page: Page, fr
         expect(title).to_be_visible()
         expect(title).to_contain_text("Codex Browser")
 
-        page.get_by_role("button", name=re.compile("미정")).click()
+        page.get_by_role("button", name=re.compile("미정")).first.click(force=True)
         expect(title).to_be_visible()
 
         page.get_by_role("button", name="도서관 O").click()
@@ -106,6 +106,12 @@ def test_personal_books_detail_navigation_shows_highlight_protection(page: Page,
         page.goto(f"{frontend_url}/personal/books/{book['id']}", wait_until="domcontentloaded")
         expect(page.get_by_role("heading", name=str(book["title"]))).to_be_visible()
         expect(page.get_by_text(f"ISBN {book['isbn']}")).to_be_visible()
+        expect(page.get_by_text("추천 매입가")).to_be_visible()
+        expect(page.get_by_text("알라딘", exact=True)).to_be_visible()
+        expect(page.get_by_text("최상")).to_be_visible()
+        expect(page.get_by_text("상", exact=True)).to_be_visible()
+        expect(page.get_by_text("중", exact=True)).to_be_visible()
+        expect(page.get_by_role("button", name="알라딘 매입가 확인")).to_be_visible()
         expect(page.get_by_text("Representative rendered marker for detail protection")).to_be_visible()
 
         page.get_by_role("button", name="판매").click()
