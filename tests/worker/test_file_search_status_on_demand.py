@@ -1,21 +1,21 @@
 """
-FileSearchWorker 도구 상태 캐시 재시드 TC
+FileSearchWorker on-demand 상태 체크 TC
 
 검증 대상:
     - 워커 초기화 시 도구 상태 1회 시드 (TC1)
-    - 메인 루프에서 STATUS_CHECK_INTERVAL 경과 시 재시드 (TC-R)
-    - interval 이내 재시드 미호출 (TC-B)
-    - 재시드 예외가 _safe_execute로 흡수되어 루프 계속 (TC-E)
+    - status_check_queue에 요청 있으면 _check_tool_status 호출 (TC-OD-present)
+    - status_check_queue 비어있으면 _check_tool_status 미호출 (TC-OD-empty)
+    - _check_tool_status 실행 후 Redis 키 file_search:status_cache 갱신 (TC-RK)
 
-GET /status는 API에서 직접 체크하며, 즉석 실패 시 워커가 주기적으로 갱신하는
-DB 캐시를 폴백으로 사용한다. 따라서 캐시를 24h 이내로 신선하게 유지하는 것이 핵심.
+이전 STATUS_CHECK_INTERVAL 주기 재시드 방식을 대체:
+GET /status가 호출될 때 on-demand 큐를 통해 워커(Session 1)에 위임.
 """
-import time
-from unittest.mock import AsyncMock, MagicMock
+import json
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from app.worker.file_search_worker import FileSearchWorker, STATUS_CHECK_INTERVAL
+from app.worker.file_search_worker import FileSearchWorker
 
 
 # ---------------------------------------------------------------------------
@@ -28,6 +28,7 @@ def _make_worker() -> FileSearchWorker:
     worker.use_redis = False
     worker.redis_queue = None
     worker.open_queue = None
+    worker.status_check_queue = None
     worker._redis_initialized = True  # Redis 초기화 생략
     worker._last_status_check = 0.0
     worker._last_db_poll = 0.0
@@ -67,25 +68,24 @@ async def test_initialize_calls_status_check():
 
 
 # ---------------------------------------------------------------------------
-# TC-R: interval 경과 시 재시드
+# TC-OD-present: status_check_queue에 요청 있으면 _check_tool_status 호출
 # ---------------------------------------------------------------------------
 
 @pytest.mark.asyncio
-async def test_main_loop_iteration_R_reseeds_when_interval_elapsed():
-    """_last_status_check가 STATUS_CHECK_INTERVAL 이상 지난 경우 재시드가 호출된다."""
+async def test_main_loop_iteration_ondemand_processes_status_check_queue():
+    """status_check_queue에 요청이 있으면 _check_tool_status가 호출된다."""
     worker = _make_worker()
-    worker._last_status_check = time.time() - STATUS_CHECK_INTERVAL - 1
+
+    mock_queue = AsyncMock()
+    mock_queue.pop_nowait = AsyncMock(return_value={"request": "status_check"})
+    worker.status_check_queue = mock_queue
 
     check_calls = []
 
     async def _fake_check():
         check_calls.append(1)
 
-    async def _fake_process_db():
-        pass
-
     worker._check_tool_status = _fake_check
-    worker._process_db_pending = _fake_process_db
 
     safe_calls = []
 
@@ -94,38 +94,33 @@ async def test_main_loop_iteration_R_reseeds_when_interval_elapsed():
         await coro_fn()
 
     worker._safe_execute = _tracking_safe_execute
-    worker._last_db_poll = 0.0
-    old_ts = worker._last_status_check
 
     await worker._main_loop_iteration()
 
     assert "check_tool_status" in safe_calls, \
-        "interval 경과 시 _main_loop_iteration()에서 check_tool_status가 호출되어야 한다"
-    assert len(check_calls) == 1, "_check_tool_status가 1회 호출되어야 한다"
-    assert worker._last_status_check > old_ts, "_last_status_check가 갱신되어야 한다"
+        "status_check_queue에 요청 있으면 check_tool_status가 호출되어야 한다"
+    assert len(check_calls) == 1, "_check_tool_status가 정확히 1회 호출되어야 한다"
 
 
 # ---------------------------------------------------------------------------
-# TC-B: interval 이내 재시드 미호출
+# TC-OD-empty: status_check_queue 비어있으면 _check_tool_status 미호출
 # ---------------------------------------------------------------------------
 
 @pytest.mark.asyncio
-async def test_main_loop_iteration_B_no_reseed_within_interval():
-    """_last_status_check가 STATUS_CHECK_INTERVAL 이내이면 재시드를 하지 않는다."""
+async def test_main_loop_iteration_no_status_check_without_queue_item():
+    """status_check_queue가 비어 있으면 _check_tool_status가 호출되지 않는다."""
     worker = _make_worker()
-    # interval 직전 (1초 여유) → 재시드 안 됨
-    worker._last_status_check = time.time() - STATUS_CHECK_INTERVAL + 1
+
+    mock_queue = AsyncMock()
+    mock_queue.pop_nowait = AsyncMock(return_value=None)  # 빈 큐
+    worker.status_check_queue = mock_queue
 
     check_calls = []
 
     async def _fake_check():
         check_calls.append(1)
 
-    async def _fake_process_db():
-        pass
-
     worker._check_tool_status = _fake_check
-    worker._process_db_pending = _fake_process_db
 
     safe_calls = []
 
@@ -134,49 +129,48 @@ async def test_main_loop_iteration_B_no_reseed_within_interval():
         await coro_fn()
 
     worker._safe_execute = _tracking_safe_execute
-    worker._last_db_poll = 0.0
 
     await worker._main_loop_iteration()
 
     assert "check_tool_status" not in safe_calls, \
-        "interval 이내에는 check_tool_status가 호출되면 안 된다"
+        "큐가 비어있으면 check_tool_status가 호출되면 안 된다"
     assert len(check_calls) == 0
 
 
 # ---------------------------------------------------------------------------
-# TC-E: 재시드 예외가 루프를 중단하지 않음
+# TC-RK: _check_tool_status 실행 후 Redis 키 file_search:status_cache 갱신
 # ---------------------------------------------------------------------------
 
 @pytest.mark.asyncio
-async def test_main_loop_iteration_E_reseed_failure_does_not_break_loop():
-    """_check_tool_status 예외가 _safe_execute로 흡수되어 루프가 계속된다."""
+async def test_check_tool_status_writes_redis_key():
+    """_check_tool_status() 실행 후 Redis 키 file_search:status_cache가 TTL 60으로 갱신된다."""
     worker = _make_worker()
-    worker._last_status_check = time.time() - STATUS_CHECK_INTERVAL - 1
 
-    async def _failing_check():
-        raise RuntimeError("ripgrep 상태 체크 실패 시뮬레이션")
+    mock_redis = AsyncMock()
+    mock_redis.set = AsyncMock()
 
-    post_check_calls = []
+    mock_db = MagicMock()
+    mock_db.query.return_value.filter_by.return_value.first.return_value = None
 
-    async def _fake_process_db():
-        post_check_calls.append(1)
+    with patch("app.shared.redis.RedisClient.get_client",
+               new_callable=AsyncMock, return_value=mock_redis), \
+         patch("app.worker.file_search_worker.SessionLocal", return_value=mock_db), \
+         patch("app.modules.file_search.services.everything.EverythingService.is_available",
+               new_callable=AsyncMock, return_value=(True, "")), \
+         patch("app.modules.file_search.services.ripgrep.RipgrepService.is_available",
+               return_value=(True, "C:\\fake\\rg.exe")), \
+         patch("os.path.exists", return_value=True), \
+         patch("app.services.failure_alert_delivery.report_failure_alert",
+               new_callable=AsyncMock):
+        await worker._check_tool_status()
 
-    worker._check_tool_status = _failing_check
-    worker._process_db_pending = _fake_process_db
+    mock_redis.set.assert_called_once()
+    args, kwargs = mock_redis.set.call_args
+    assert args[0] == "file_search:status_cache", \
+        "Redis 키 이름이 'file_search:status_cache'여야 한다"
+    assert kwargs.get("ex") == 60, "Redis 키 TTL이 60초여야 한다"
 
-    # _safe_execute는 예외를 흡수하고 계속하는 실제 구현을 모사
-    async def _absorbing_safe_execute(name, coro_fn):
-        try:
-            await coro_fn()
-        except Exception:
-            pass  # 흡수
-
-    worker._safe_execute = _absorbing_safe_execute
-    worker._last_db_poll = 0.0
-
-    # 예외 없이 완료되어야 함
-    await worker._main_loop_iteration()
-
-    # DB 폴링도 정상 실행됨
-    assert len(post_check_calls) == 1, \
-        "재시드 실패 후에도 DB 폴링이 실행되어야 한다"
+    cache = json.loads(args[1])
+    assert cache["ripgrep_ok"] is True
+    assert "C:\\fake\\rg.exe" in cache["ripgrep_path"]
+    assert cache["everything_ok"] is True

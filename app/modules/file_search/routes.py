@@ -18,6 +18,7 @@
 """
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import os
@@ -54,7 +55,7 @@ from app.modules.file_search.services.presets import PRESETS
 from app.modules.file_search.services.ripgrep import RipgrepService
 from app.modules.file_search.services.search_service import FilePreviewError, SearchService
 from app.shared.redis import RedisClient, RedisQueue
-from app.shared.redis.queue import FILE_SEARCH_QUEUE, FILE_SEARCH_OPEN_QUEUE
+from app.shared.redis.queue import FILE_SEARCH_QUEUE, FILE_SEARCH_OPEN_QUEUE, FILE_SEARCH_STATUS_CHECK_QUEUE
 
 logger = logging.getLogger("file_search.routes")
 
@@ -65,17 +66,19 @@ _service = SearchService()
 # 캐시된 Redis 큐 인스턴스 (None = 미연결)
 _redis_queue: Optional[RedisQueue] = None
 _open_queue: Optional[RedisQueue] = None
+_status_check_queue: Optional[RedisQueue] = None
 _redis_checked = False
 
 
 async def _get_redis_queues():
     """Redis 큐 인스턴스 (lazy init, 연결 실패 시 None 반환)."""
-    global _redis_queue, _open_queue, _redis_checked
+    global _redis_queue, _open_queue, _status_check_queue, _redis_checked
     if not _redis_checked:
         redis_client = await RedisClient.get_client()
         if redis_client:
             _redis_queue = RedisQueue(redis_client, FILE_SEARCH_QUEUE)
             _open_queue = RedisQueue(redis_client, FILE_SEARCH_OPEN_QUEUE)
+            _status_check_queue = RedisQueue(redis_client, FILE_SEARCH_STATUS_CHECK_QUEUE)
         _redis_checked = True
     return _redis_queue, _open_queue
 
@@ -259,11 +262,13 @@ _RIPGREP_CACHE_FALLBACK_SECONDS = 24 * 60 * 60
 
 @router.get("/status", response_model=StatusResponse)
 async def get_status(db: Session = Depends(get_db)):
-    """Everything/ripgrep 상태 확인 (API 프로세스에서 직접 체크).
+    """Everything/ripgrep 상태 확인 (직접 체크 → Redis 위임 → DB 폴백).
 
-    Everything: httpx 3초 timeout — Session 0/유저세션 무관, 폴백 없음.
-    ripgrep: shutil.which + glob — Session 0의 PATH/USERPROFILE 차이로 실패 시
-    DB `file_search_status` 캐시(워커가 주기적으로 시드)를 24시간 이내·실파일 존재 조건으로 폴백.
+    1. 직접 탐지 (API 프로세스 — Session 0 PATH로 실패할 수 있음)
+    2. 실패 시 Redis 키 file_search:status_cache 조회 (TTL 60s)
+    3. 키 없으면 file_search:status_check 큐 push → 최대 4초 폴링
+       (워커 0.1s 루프가 즉시 처리 → Redis 키 갱신)
+    4. 4초 후에도 없으면 DB 캐시 폴백 (24시간 이내·실파일 존재 조건)
     """
     everything_ok = False
     everything_message = ""
@@ -286,7 +291,36 @@ async def get_status(db: Session = Depends(get_db)):
     except Exception as e:
         logger.warning(f"[file_search] ripgrep 즉석 체크 실패: {e}")
 
-    # ripgrep 즉석 체크 실패 → 워커가 시드한 DB 캐시로 1단 폴백
+    # ripgrep 즉석 체크 실패 → Redis 위임 경로
+    if not ripgrep_ok:
+        try:
+            # lazy init (status_check_queue 포함)
+            await _get_redis_queues()
+            redis_client = await RedisClient.get_client()
+            if redis_client:
+                cache_raw = await redis_client.get("file_search:status_cache")
+                if cache_raw:
+                    # Redis 키 있음 → 즉시 반환
+                    cache = json.loads(cache_raw)
+                    if cache.get("ripgrep_ok") and cache.get("ripgrep_path"):
+                        ripgrep_ok = True
+                        ripgrep_path = cache["ripgrep_path"]
+                elif _status_check_queue:
+                    # Redis 키 없음 → on-demand 큐 push + 최대 4초 폴링
+                    await _status_check_queue.push({"request": "status_check"})
+                    for _ in range(40):
+                        await asyncio.sleep(0.1)
+                        cache_raw = await redis_client.get("file_search:status_cache")
+                        if cache_raw:
+                            cache = json.loads(cache_raw)
+                            if cache.get("ripgrep_ok") and cache.get("ripgrep_path"):
+                                ripgrep_ok = True
+                                ripgrep_path = cache["ripgrep_path"]
+                            break
+        except Exception as e:
+            logger.warning(f"[file_search] Redis 상태 캐시 조회/위임 실패: {e}")
+
+    # 최종 폴백: DB 캐시 (Redis 없거나 타임아웃 시)
     if not ripgrep_ok:
         try:
             row = db.query(FileSearchStatus).filter_by(id=1).first()
@@ -300,7 +334,7 @@ async def get_status(db: Session = Depends(get_db)):
                 except ValueError:
                     pass
         except Exception as e:
-            logger.warning(f"[file_search] ripgrep 캐시 폴백 조회 실패: {e}")
+            logger.warning(f"[file_search] ripgrep DB 캐시 폴백 조회 실패: {e}")
 
     return StatusResponse(
         everything_ok=everything_ok,

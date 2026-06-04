@@ -12,8 +12,8 @@ API(Session 0)에서 Redis 큐에 적재된 파일 검색 요청을 처리합니
     - Redis 큐(file_search:requests)에서 검색 요청 수신
     - ripgrep / Everything 실행 → 결과를 DB에 저장
     - Redis 큐(file_search:open)에서 파일 열기 요청 처리
-    - 도구 상태 체크: 워커 시작 시 1회 + STATUS_CHECK_INTERVAL(300s)마다 주기 재시드
-      (DB 캐시 신선도 유지용. API GET /status는 직접 체크하며 즉석 실패 시 캐시 폴백)
+    - 도구 상태 체크: 워커 시작 시 1회 + 페이지 접속 on-demand 위임
+      (file_search:status_check 큐 수신 시 즉시 실행 → Redis 키 + DB 동시 갱신)
     - Redis 미연결 시 DB 폴링 fallback (5초 간격)
     - 시작 시 stale 요청(10분 이상 pending/processing) → failed 처리
 
@@ -37,12 +37,10 @@ from app.database import SessionLocal
 from app.models.file_search_request import FileSearchRequest
 from app.models.file_search_status import FileSearchStatus
 from app.shared.redis import RedisClient, RedisQueue
-from app.shared.redis.queue import FILE_SEARCH_QUEUE, FILE_SEARCH_OPEN_QUEUE
+from app.shared.redis.queue import FILE_SEARCH_QUEUE, FILE_SEARCH_OPEN_QUEUE, FILE_SEARCH_STATUS_CHECK_QUEUE
 
 logger = logging.getLogger(__name__)
 
-# 도구 상태 캐시 재시드 간격(초) — API Session 0 폴백 캐시 신선도 유지용. 24h TTL 대비 보수적, alert 버킷(300s)과 정렬
-STATUS_CHECK_INTERVAL = 300
 # DB 폴링 간격 (초) — Redis fallback 모드에서 사용
 DB_POLL_INTERVAL = 5
 # stale 요청 임계값 (분)
@@ -58,8 +56,9 @@ class FileSearchWorker(BaseWorker):
         use_redis: Redis 큐 사용 여부
         redis_queue: 검색 요청 큐
         open_queue: 파일 열기 요청 큐 (fire-and-forget)
+        status_check_queue: 도구 상태 on-demand 체크 큐 (file_search:status_check)
         _redis_initialized: Redis 초기화 완료 여부
-        _last_status_check: 마지막 도구 상태 재시드 타임스탬프 (시작 시 + 주기 재시드)
+        _last_status_check: 마지막 도구 상태 체크 타임스탬프 (시작 시드용)
         _last_db_poll: 마지막 DB 폴링 타임스탬프 (fallback 모드)
     """
 
@@ -71,6 +70,7 @@ class FileSearchWorker(BaseWorker):
         self.use_redis = False
         self.redis_queue: Optional[RedisQueue] = None
         self.open_queue: Optional[RedisQueue] = None
+        self.status_check_queue: Optional[RedisQueue] = None
         self._redis_initialized = False
 
         # 상태 체크 타이밍
@@ -86,6 +86,7 @@ class FileSearchWorker(BaseWorker):
         if redis_client:
             self.redis_queue = RedisQueue(redis_client, FILE_SEARCH_QUEUE)
             self.open_queue = RedisQueue(redis_client, FILE_SEARCH_OPEN_QUEUE)
+            self.status_check_queue = RedisQueue(redis_client, FILE_SEARCH_STATUS_CHECK_QUEUE)
             self.use_redis = True
             logger.info(f"[{self.name}] Redis 큐 모드 활성화")
         else:
@@ -112,18 +113,18 @@ class FileSearchWorker(BaseWorker):
         """메인 루프 한 사이클.
 
         1. Redis 초기화 (최초 1회)
-        2. 도구 상태 재시드 (STATUS_CHECK_INTERVAL 경과 시)
+        2. on-demand 상태 체크 (file_search:status_check 큐 요청 시)
         3. 검색 요청 처리 (Redis 또는 DB 폴링)
         4. 파일 열기 요청 처리
         """
         # Redis 초기화 (첫 번째 호출 시)
         await self._setup_redis()
 
-        # 도구 상태 주기 재시드 — API 폴백 캐시 신선도 유지
-        now = time.time()
-        if now - self._last_status_check >= STATUS_CHECK_INTERVAL:
-            await self._safe_execute("check_tool_status", self._check_tool_status)
-            self._last_status_check = now
+        # on-demand 상태 체크 — API가 큐에 요청 push 시 즉시 처리
+        if self.status_check_queue:
+            job = await self.status_check_queue.pop_nowait()
+            if job is not None:
+                await self._safe_execute("check_tool_status", self._check_tool_status)
 
         # 검색 요청 처리
         if self.use_redis:
@@ -301,11 +302,11 @@ class FileSearchWorker(BaseWorker):
     # ========== 도구 상태 체크 ==========
 
     async def _check_tool_status(self):
-        """Everything/ripgrep 상태 체크 → file_search_status 테이블 UPSERT.
+        """Everything/ripgrep 상태 체크 → DB UPSERT + Redis 키 갱신(TTL 60s).
 
-        워커 시작 시 + STATUS_CHECK_INTERVAL(300s)마다 주기적으로 호출 (DB 캐시 신선도 유지).
-        API GET /status는 직접 체크하며, ripgrep 즉석 체크 실패 시에만 이 캐시를 폴백으로 사용한다.
-        워커는 유저 세션이라 rg를 항상 정상 탐지 → checked_at이 신선하게 유지됨.
+        워커 시작 시 + API on-demand 요청(file_search:status_check 큐) 시 호출.
+        DB와 Redis 키(file_search:status_cache)를 동시에 갱신하여
+        API가 직접 탐지 실패 시 Redis 키를 즉시 읽을 수 있게 한다.
         """
         from app.modules.file_search.services.everything import EverythingService
         from app.modules.file_search.services.ripgrep import RipgrepService
@@ -350,6 +351,19 @@ class FileSearchWorker(BaseWorker):
                 )
                 db.add(status)
             db.commit()
+
+            # Redis 상태 캐시 키 갱신 (TTL 60s) — API on-demand 조회용
+            try:
+                redis_client = await RedisClient.get_client()
+                if redis_client:
+                    cache_data = json.dumps({
+                        "ripgrep_ok": ripgrep_ok,
+                        "ripgrep_path": ripgrep_path,
+                        "everything_ok": everything_ok,
+                    })
+                    await redis_client.set("file_search:status_cache", cache_data, ex=60)
+            except Exception as redis_err:
+                logger.debug(f"[{self.name}] Redis 상태 캐시 키 갱신 실패: {redis_err}")
 
             logger.debug(
                 f"[{self.name}] 도구 상태 업데이트: "

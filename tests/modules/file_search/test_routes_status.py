@@ -16,7 +16,24 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+import app.modules.file_search.routes as routes_module
 from app.modules.file_search.routes import get_status
+
+
+@pytest.fixture(autouse=True)
+def no_redis_and_clean_state():
+    """Redis 미연결 환경 강제 + 모듈 Redis 상태 초기화 (테스트 속도 보장)."""
+    routes_module._redis_checked = False
+    routes_module._redis_queue = None
+    routes_module._open_queue = None
+    routes_module._status_check_queue = None
+    with patch("app.shared.redis.RedisClient.get_client",
+               new_callable=AsyncMock, return_value=None):
+        yield
+    routes_module._redis_checked = False
+    routes_module._redis_queue = None
+    routes_module._open_queue = None
+    routes_module._status_check_queue = None
 
 
 def _make_status_row(*, ripgrep_ok: bool, ripgrep_path: str | None, age_hours: float = 0.0):

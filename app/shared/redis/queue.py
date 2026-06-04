@@ -26,6 +26,7 @@ DESKTOP_NOTIFICATION_QUEUE = "notification:desktop"  # Session 0 → Session 1 D
 KAKAO_NOTIFICATION_QUEUE = "notification:kakao"  # Session 0 → Session 1 Kakao 알림 릴레이
 LAUNCH_CLI_QUEUE = "worker:launch-cli"  # Session 0 → Session 1 CLI 콘솔 실행 릴레이
 OPEN_APP_COMMAND_QUEUE = "worker:open-app"  # Session 0 → Session 1 generic GUI open 릴레이
+FILE_SEARCH_STATUS_CHECK_QUEUE = "file_search:status_check"  # Session 0 → Session 1 상태 체크 위임 (on-demand)
 
 
 class RedisQueue:
