@@ -263,7 +263,7 @@ async def get_status(db: Session = Depends(get_db)):
 
     Everything: httpx 3초 timeout — Session 0/유저세션 무관, 폴백 없음.
     ripgrep: shutil.which + glob — Session 0의 PATH/USERPROFILE 차이로 실패 시
-    DB `file_search_status` 캐시(워커가 시드)를 24시간 이내·실파일 존재 조건으로 폴백.
+    DB `file_search_status` 캐시(워커가 주기적으로 시드)를 24시간 이내·실파일 존재 조건으로 폴백.
     """
     everything_ok = False
     everything_message = ""
