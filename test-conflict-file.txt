@@ -1,2 +1,0 @@
-# Conflict Test - main version
-line2 from main

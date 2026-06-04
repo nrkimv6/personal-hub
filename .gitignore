@@ -1,4 +1,8 @@
 *.py-1
+.env
+.env.*
+!.env.example
+!frontend/.env.example
 .idea/
 __pycache__/
 error_screenshots/
@@ -30,9 +34,16 @@ htmlcov/
 .coverage.*
 data/image_classifier/settings.json
 frontend/static/diagnostics.json
+proxy_list*
 
 *cwd
 .worktrees/
+.codex/
+.cursor/
+.claude/
+.agents/
+.agent/
+.gemini/
 data/image_classifier
 .claude/worktrees/
 /check-full.txt
