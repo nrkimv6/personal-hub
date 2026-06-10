@@ -23,9 +23,6 @@ todo-1 계획서가 `docs/plan/secret-manager-boundary.md` 경로를 명시했�
 
 ## 기술적 고려사항
 
-- personal-hub의 `.gitignore` 에 `.worktrees/` 가 포함되어 있어
-  `git worktree add .worktrees/<name>` 이 실패한다.
-  impl 워크트리는 repo 외부 경로(`../ph-impl-fix-doc-loc`)에 생성한다.
 - 참조 경로 수정 대상:
   - `.worktrees/plans/docs/archive/2026-06-08_public_gcp_free_tier_roadmap_todo-1.md` — Phase 1-2 및 Phase 2-1 체크박스에 `docs/plan/secret-manager-boundary.md` 경로가 언급됨
 
@@ -49,8 +46,8 @@ N/A: 상태 머신 detector seed 없음
 0. ☐ **worktree 준비 상태를 문서에 고정** — `/implement` 진입 게이트
    - ☐ `이 plan`: `> branch:`, `> worktree:`, `> worktree-owner:` 슬롯을 유지한다
    - ☐ `이 plan`: blank 슬롯은 신규 초기 상태이며 다른 `impl/*` 잔여와 무관하다
-   - ☐ `이 plan`: personal-hub `.gitignore` 에 `.worktrees/` 가 포함되어 있으므로 impl 워크트리는 `../ph-impl-fix-doc-loc` 경로에 생성한다: `git worktree add ../ph-impl-fix-doc-loc -b impl/fix-doc-location`
-   - ☐ `이 plan`: worktree cwd = `../ph-impl-fix-doc-loc` 로 고정한다
+   - ☐ `이 plan`: `git worktree add .worktrees/impl-fix-doc-loc -b impl/fix-doc-location` 으로 생성한다
+   - ☐ `이 plan`: worktree cwd = `.worktrees/impl-fix-doc-loc` 로 고정한다
 
 ### Phase 1: 파일 이동
 
