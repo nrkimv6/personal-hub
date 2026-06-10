@@ -1,5 +1,10 @@
 # nrkimv6 Public Repo GCP Free-Tier 적용 로드맵 — TODO 1
 
+> 완료일: 2026-06-11
+> 아카이브됨
+> 진행률: 12/12 (100%)
+> 요약: `personal-hub`의 backend/frontend env boundary를 확인하고 Secret Manager PoC 기준을 문서화한다.
+
 > 계획서: [plan](./2026-06-08_public_gcp_free_tier_roadmap.md)
 > 대상 프로젝트: personal-hub
 > 실행순서: 1
@@ -8,7 +13,8 @@
 > worktree:
 > worktree-owner:
 > 테스트명령: 문서/설정 plan, 구현 전 secret scan evidence
-> 상태: 완료
+> 상태: 구현완료
+> 반영일시: 2026-06-11 01:00
 > 진행률: 12/12 (100%)
 > 요약: `personal-hub`의 backend/frontend env boundary를 확인하고 Secret Manager PoC 기준을 문서화한다.
 
@@ -48,4 +54,4 @@
 
 ---
 
-*상태: 완료 | 진행률: 12/12 (100%)*
+*상태: 구현완료 | 진행률: 12/12 (100%)*
