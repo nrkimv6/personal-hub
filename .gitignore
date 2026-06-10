@@ -37,7 +37,7 @@ frontend/static/diagnostics.json
 proxy_list*
 
 *cwd
-.worktrees/
+.worktrees/plans/
 .codex/
 .cursor/
 .claude/
