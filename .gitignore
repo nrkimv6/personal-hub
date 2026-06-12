@@ -56,3 +56,5 @@ data/image_classifier
 
 # ?„ì‹œ ?¤í¬ë¦½íŠ¸ scratch ê³µê°„ (gitignore ??ì»¤ë°‹?˜ì? ?ŠìŒ)
 scripts/scratch/
+mobile-server/
+tools/chrome-api-capture-extension/
