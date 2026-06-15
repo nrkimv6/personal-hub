@@ -4,10 +4,10 @@
 > 대상 프로젝트: personal-hub
 > 실행순서: 17
 > 선행조건: ./2026-06-15_cloud-run-poc-design-contract.md + ../archive/2026-06-08_public_gcp_free_tier_roadmap_todo-2.md
-> branch:
-> worktree:
-> worktree-owner:
-> 상태: 검토완료
+> branch: impl/gcp-todo-17-cloudrun-impl
+> worktree: .worktrees/impl/gcp-todo-17-cloudrun-impl
+> worktree-owner: D:\work\project\public\personal-hub\.worktrees\impl\gcp-todo-17-cloudrun-impl
+> 상태: 구현중
 > 테스트명령: Python 변경 시 pytest T1~T3 로컬 실행, T4/T5 live 검증은 배포 후 todo-16 위임
 > 진행률: 0/27 (0%)
 > 요약: 설계 계약서 Option A 기반으로 app/main_cloudrun.py slim entrypoint와 Dockerfile.cloudrun을 작성하고 Cloud Run 배포 command를 문서화한다.
@@ -31,10 +31,10 @@ todo-16 live T4/T5 검증은 이 todo의 배포 완료 후 실행된다.
 
 ### Phase 0: Worktree 준비
 
-0. - [ ] **worktree 생성 또는 재개**
-   - [ ] `git worktree add .worktrees/impl/gcp-todo-17-cloudrun-impl -b impl/gcp-todo-17-cloudrun-impl` 실행
-   - [ ] 이 plan 헤더 `> branch: impl/gcp-todo-17-cloudrun-impl` / `> worktree: .worktrees/impl/gcp-todo-17-cloudrun-impl` / `> worktree-owner: <절대경로>` 기록
-   - [ ] `2026-06-15_cloud-run-poc-design-contract.md` 상태 필드를 `초안` → `확정`으로 업데이트 (todo-2 archive 구현완료로 선행조건 충족)
+0. - [x] **worktree 생성 또는 재개**
+   - [x] `git worktree add .worktrees/impl/gcp-todo-17-cloudrun-impl -b impl/gcp-todo-17-cloudrun-impl` 실행
+   - [x] 이 plan 헤더 `> branch: impl/gcp-todo-17-cloudrun-impl` / `> worktree: .worktrees/impl/gcp-todo-17-cloudrun-impl` / `> worktree-owner: <절대경로>` 기록
+   - [x] `2026-06-15_cloud-run-poc-design-contract.md` 상태 필드를 `초안` → `확정`으로 업데이트 (todo-2 archive 구현완료로 선행조건 충족)
 
 ### Phase 1: app/main_cloudrun.py 작성
 
