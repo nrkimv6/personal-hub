@@ -77,7 +77,7 @@ M. - [x] **docs 변경 머지 준비**
 Z. - [x] **post-merge 정리**
    - [x] plans 브랜치 커밋 후 upstream이 없으면 local-only mode evidence를 남긴다 — local-only mode (plans worktree, no remote upstream)
    - [x] 생성된 작업 브랜치나 별도 worktree가 있으면 post-merge owner가 정리한다 — impl worktree 정리 완료 (Phase Z 절차 수행)
-   - [x] 이 plan의 `> branch:`/`> worktree:`/`> worktree-owner:` 메타가 추가된 경우 post-merge owner가 정리한다
+   - [x] 이 plan의 `> branch:`/`> worktree:`/`> worktree-owner:` 메타가 추가된 경우 post-merge owner가 정리한다 — 헤더 비움 + worktree/branch 제거 완료
 
 ## 기술 계약
 
