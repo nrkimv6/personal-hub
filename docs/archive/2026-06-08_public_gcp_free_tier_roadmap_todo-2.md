@@ -1,4 +1,4 @@
-# nrkimv6 Public Repo GCP Free-Tier 적용 로드맵 — TODO 2
+﻿# nrkimv6 Public Repo GCP Free-Tier 적용 로드맵 — TODO 2
 
 > 계획서: [plan](./2026-06-08_public_gcp_free_tier_roadmap.md)
 > 대상 프로젝트: personal-hub
@@ -9,9 +9,14 @@
 > worktree-owner:
 > 테스트명령: Python 변경 시 pytest T1~T5 규칙 적용
 > 상태: 구현완료
+> 반영일시: 2026-06-15 14:13
+> 머지커밋: 087a8203 (impl branch = main 동일, no-op merge — 설계 문서 산출물은 plans 브랜치에 커밋)
+> 후속정리커밋: 66ca37ed
 > 진행률: 15/15 (100%)
 > 요약: 전체 앱 이전이 아니라 read-only/health FastAPI endpoint만 Cloud Run PoC로 분리한다.
 
+> 완료일: 2026-06-15
+> 아카이브됨
 ## TODO
 
 ### Phase 0: Worktree 준비 (/implement 진입 게이트)
