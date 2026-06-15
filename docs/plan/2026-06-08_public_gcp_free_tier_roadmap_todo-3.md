@@ -7,7 +7,7 @@
 > branch:
 > worktree:
 > worktree-owner:
-> 상태: 초안
+> 상태: 검토완료
 > 테스트명령: schema 문서 검증
 > 진행률: 0/17 (0%)
 > 요약: 운영 이벤트를 BigQuery로 보낼 수 있도록 개인정보 없는 synthetic schema를 정의한다.
