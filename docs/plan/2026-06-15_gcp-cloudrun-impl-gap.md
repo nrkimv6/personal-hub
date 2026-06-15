@@ -2,7 +2,10 @@
 
 > 출처: /reflect에서 자동 생성
 > 대상 프로젝트: personal-hub
-> 상태: 검토완료
+> 상태: 구현중
+> branch: impl/gcp-cloudrun-impl-gap
+> worktree: D:\work\project\public\personal-hub\.worktrees\impl-gcp-cloudrun-impl-gap
+> worktree-owner: claude-sonnet-4-6
 > 진행률: 0/37 (0%)
 > 요약: todo-2 설계 계약서가 "별도 todo에서 구현"으로 남긴 `app/main_cloudrun.py` slim entrypoint가 로드맵(todo-3~16) 어디에도 없음. 이 gap을 해소하는 impl todo를 작성하고 등록한다.
 
