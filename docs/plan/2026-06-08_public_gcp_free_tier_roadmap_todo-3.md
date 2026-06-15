@@ -4,52 +4,54 @@
 > 대상 프로젝트: personal-hub
 > 실행순서: 3
 > 선행조건: ./2026-06-08_public_gcp_free_tier_roadmap_todo-1.md
-> branch: impl/gcp-todo-3-bigquery-schema
-> worktree: .worktrees/impl/gcp-todo-3-bigquery-schema
-> worktree-owner: D:\work\project\public\personal-hub\.worktrees\impl\gcp-todo-3-bigquery-schema
-> 상태: 구현중
+> branch:
+> worktree:
+> worktree-owner:
+> 상태: 구현완료
 > 테스트명령: schema 문서 검증
-> 진행률: 0/17 (0%) — 구현중
+> 진행률: 31/31 (100%)
 > 요약: 운영 이벤트를 BigQuery로 보낼 수 있도록 개인정보 없는 synthetic schema를 정의한다.
+> 머지커밋: plans-only (docs 산출물은 plans 브랜치에 커밋)
+> T1~T5 해당 없음: 이 plan은 Python 소스를 수정하지 않고 app/models·app/modules를 read-only로 분석해 plans worktree docs/plan/bigquery-schema-design.md를 산출한다. 코드 변경 산출물이 없으므로 pytest 5-Phase 대상이 아니다.
 
 ## TODO
 
 ### Phase 0: Worktree 준비 (/implement 진입 게이트)
 
-0. - [ ] **worktree 생성 또는 재개** — 산출물은 plans worktree `docs/plan/bigquery-schema-design.md`
-   - [ ] `git worktree add .worktrees/impl/gcp-todo-3-bigquery-schema -b impl/gcp-todo-3-bigquery-schema` 실행
-   - [ ] 이 plan 헤더 `> branch: impl/gcp-todo-3-bigquery-schema` / `> worktree: .worktrees/impl/gcp-todo-3-bigquery-schema` / `> worktree-owner: <절대경로>` 기록
-   - [ ] 산출물 경로 확정: plans worktree 기준 `docs/plan/bigquery-schema-design.md` 신규 작성 예정
+0. - [x] **worktree 생성 또는 재개** — 산출물은 plans worktree `docs/plan/bigquery-schema-design.md`
+   - [x] `git worktree add .worktrees/impl/gcp-todo-3-bigquery-schema -b impl/gcp-todo-3-bigquery-schema` 실행
+   - [x] 이 plan 헤더 `> branch: impl/gcp-todo-3-bigquery-schema` / `> worktree: .worktrees/impl/gcp-todo-3-bigquery-schema` / `> worktree-owner: <절대경로>` 기록
+   - [x] 산출물 경로 확정: plans worktree 기준 `docs/plan/bigquery-schema-design.md` 신규 작성 예정
 
 ### Phase 1: Export Schema 후보 선정 (설계·문서화)
 
-1. - [ ] **Group A — 직접 export 후보 필드 분류** (코드 수정 없음, read-only 분석)
-   - [ ] `app/models/monitoring_event.py` 읽기 → export 가능: `timestamp`(→`event_time`), `event_type`, `status`; 금지: `slots_info`(JSON 슬롯 상세)
-   - [ ] `app/models/scheduled_task_log.py` 읽기 → export 가능: `task_name`(→`module`), `started_at`(→`event_time`), `status`, `duration_seconds`(×1000→`duration_ms`); 금지: `error_message`, `details`(JSON)
-   - [ ] `app/models/test_run.py` 읽기 → export 가능: `started_at`(→`event_time`), `status`, `duration_seconds`(→`duration_ms`); 금지: 없음
-   - [ ] `app/modules/reports/` 구조 확인 → report event synthetic 후보 여부 판단
+1. - [x] **Group A — 직접 export 후보 필드 분류** (코드 수정 없음, read-only 분석)
+   - [x] `app/models/monitoring_event.py` 읽기 → export 가능: `timestamp`(→`event_time`), `event_type`, `status`; 금지: `slots_info`(JSON 슬롯 상세)
+   - [x] `app/models/scheduled_task_log.py` 읽기 → export 가능: `task_name`(→`module`), `started_at`(→`event_time`), `status`, `duration_seconds`(×1000→`duration_ms`); 금지: `error_message`, `details`(JSON)
+   - [x] `app/models/test_run.py` 읽기 → export 가능: `started_at`(→`event_time`), `status`, `duration_seconds`(→`duration_ms`); 금지: 없음
+   - [x] `app/modules/reports/` 구조 확인 → report event synthetic 후보 여부 판단
 
-2. - [ ] **Group B — synthetic 대체 후보 필드 분류**
-   - [ ] `app/models/error_log.py` 읽기 → export 가능: `source`(→`module`), `severity`, `error_type`; 금지: `message`, `traceback`, `context`(account_id·url 포함)
-   - [ ] `app/models/instagram_worker_status.py` 읽기 → export 가능: `current_state`; 금지: `worker_id`(UUID)
-   - [ ] `app/models/proxy_usage.py` 읽기 → export 가능: FK 제외 집계 필드; 금지: 개인 식별 FK
-   - [ ] `app/models/request_log.py` 읽기 → export 가능 여부 판단; URL/body는 금지 후보로 분류
+2. - [x] **Group B — synthetic 대체 후보 필드 분류**
+   - [x] `app/models/error_log.py` 읽기 → export 가능: `source`(→`module`), `severity`, `error_type`; 금지: `message`, `traceback`, `context`(account_id·url 포함)
+   - [x] `app/models/instagram_worker_status.py` 읽기 → export 가능: `current_state`; 금지: `worker_id`(UUID)
+   - [x] `app/models/proxy_usage.py` 읽기 → export 가능: FK 제외 집계 필드; 금지: 개인 식별 FK → export 불가 확정
+   - [x] `app/models/request_log.py` 읽기 → export 가능 여부 판단; URL/body는 금지 후보로 분류 → export 불가 확정
 
-3. - [ ] **BigQuery schema 초안 작성** (`docs/plan/bigquery-schema-design.md` 신규 작성)
-   - [ ] 핵심 5컬럼 table schema 정의: `event_time TIMESTAMP`, `event_type STRING`, `module STRING`, `status STRING`, `duration_ms INTEGER`
-   - [ ] 선택 2컬럼 추가: `severity STRING NULLABLE`, `error_type STRING NULLABLE`
-   - [ ] `event_type` 허용값 열거: `check`, `slot_detected`, `slot_booked`, `task_run`, `test_run`, `error`
-   - [ ] `module` 허용값 열거: `naver_booking`, `scheduled_task`, `test_run`, `error_log`, `instagram_worker`
-   - [ ] 금지 필드 목록 작성: `message`, `traceback`, `context`, `account_id`, `url_token`, `slots_info`, `error_message`, `details`, `worker_id`
-   - [ ] export 가능 필드 집합 ∩ 금지 필드 집합 = ∅ 교차 확인 결과 기록
+3. - [x] **BigQuery schema 초안 작성** (`docs/plan/bigquery-schema-design.md` 신규 작성)
+   - [x] 핵심 5컬럼 table schema 정의: `event_time TIMESTAMP`, `event_type STRING`, `module STRING`, `status STRING`, `duration_ms INTEGER`
+   - [x] 선택 2컬럼 추가: `severity STRING NULLABLE`, `error_type STRING NULLABLE`
+   - [x] `event_type` 허용값 열거: `check`, `slot_detected`, `slot_booked`, `task_run`, `test_run`, `error`
+   - [x] `module` 허용값 열거: `naver_booking`, `scheduled_task`, `test_run`, `error_log`, `instagram_worker`
+   - [x] 금지 필드 목록 작성: `message`, `traceback`, `context`, `account_id`, `url_token`, `slots_info`, `error_message`, `details`, `worker_id`
+   - [x] export 가능 필드 집합 ∩ 금지 필드 집합 = ∅ 교차 확인 결과 기록
 
 ### Phase 2: 완료 기준 (`docs/plan/bigquery-schema-design.md` 산출물)
 
-4. - [ ] **free-tier guard 기록** — 비용 상한 명시
-   - [ ] 월 저장 10GB / 쿼리 1TB 제한 명시 (BigQuery Always Free)
-   - [ ] 추정 row 크기 ~200 bytes → 10GB = 50M rows 상한 기록, 일 1,000 이벤트 기준 연 365K rows는 한도 내임을 확인
-   - [ ] 금지 필드 유입 차단 조건 명시: export 전 필드명 allowlist 검증 게이트 (allowlist = 허용 5~7컬럼만)
-   - [ ] 과금 방지 guard: 단일 쿼리 SELECT *는 금지, SELECT 컬럼 지정 필수 + 파티셔닝 기준(`event_time`) 명시
+4. - [x] **free-tier guard 기록** — 비용 상한 명시
+   - [x] 월 저장 10GB / 쿼리 1TB 제한 명시 (BigQuery Always Free)
+   - [x] 추정 row 크기 ~200 bytes → 10GB = 50M rows 상한 기록, 일 1,000 이벤트 기준 연 365K rows는 한도 내임을 확인
+   - [x] 금지 필드 유입 차단 조건 명시: export 전 필드명 allowlist 검증 게이트 (allowlist = 허용 5~7컬럼만)
+   - [x] 과금 방지 guard: 단일 쿼리 SELECT *는 금지, SELECT 컬럼 지정 필수 + 파티셔닝 기준(`event_time`) 명시
 
 ### Phase M: Merge Handoff
 
@@ -59,11 +61,11 @@
 
 ### Phase Z: Post-Merge Cleanup (/merge-test owner)
 
-Z. - [ ] **post-merge 정리**
-   - [ ] plans worktree에서 `docs/plan/bigquery-schema-design.md` 커밋 후 main merge
-   - [ ] `git worktree remove .worktrees/impl/gcp-todo-3-bigquery-schema`
-   - [ ] `git branch -d impl/gcp-todo-3-bigquery-schema`
-   - [ ] 이 plan 헤더 `> branch:` / `> worktree:` / `> worktree-owner:` 값 제거
+Z. - [x] **post-merge 정리**
+   - [x] plans worktree에서 `docs/plan/bigquery-schema-design.md` 커밋 후 main merge
+   - [x] `git worktree remove .worktrees/impl/gcp-todo-3-bigquery-schema`
+   - [x] `git branch -d impl/gcp-todo-3-bigquery-schema`
+   - [x] 이 plan 헤더 `> branch:` / `> worktree:` / `> worktree-owner:` 값 제거
 
 ### 검증 기준 (RIGHT-BICEP TC)
 
@@ -76,4 +78,4 @@ Z. - [ ] **post-merge 정리**
 
 ---
 
-*상태: 구현중 | 진행률: 0/17 (0%)*
+*상태: 구현완료 | 진행률: 31/31 (100%)*
