@@ -8,30 +8,30 @@
 > worktree: D:\work\project\public\personal-hub\.worktrees\impl-gcp-todo-2-cloud-run-poc
 > worktree-owner: claude-sonnet-4-6
 > 테스트명령: Python 변경 시 pytest T1~T5 규칙 적용
-> 상태: 구현중
-> 진행률: 0/15 (0%)
+> 상태: 머지대기
+> 진행률: 12/15 (80%)
 > 요약: 전체 앱 이전이 아니라 read-only/health FastAPI endpoint만 Cloud Run PoC로 분리한다.
 
 ## TODO
 
 ### Phase 0: Worktree 준비 (/implement 진입 게이트)
 
-0. - [ ] **worktree 생성 또는 재개** — 산출물은 `docs/plan` 설계 문서이므로 plans 워크트리 기준
-   - [ ] `impl/gcp-todo-2-cloud-run-poc` 브랜치와 worktree를 생성하거나 기존 것을 재개한다
-   - [ ] 이 plan 헤더 `> branch:`/`> worktree:`/`> worktree-owner:`를 생성한 값으로 채운다
-   - [ ] worktree cwd를 고정한다
+0. - [x] **worktree 생성 또는 재개** — 산출물은 `docs/plan` 설계 문서이므로 plans 워크트리 기준
+   - [x] `impl/gcp-todo-2-cloud-run-poc` 브랜치와 worktree를 생성하거나 기존 것을 재개한다
+   - [x] 이 plan 헤더 `> branch:`/`> worktree:`/`> worktree-owner:`를 생성한 값으로 채운다
+   - [x] worktree cwd를 고정한다 — `D:\work\project\public\personal-hub\.worktrees\impl-gcp-todo-2-cloud-run-poc`
 
 ### Phase 1: Cloud Run 대상 축소 (설계·문서화)
 
-1. - [ ] **entrypoint 후보 확인** — 최소 API surface 선택 (코드 수정 없음, read-only 분석)
-   - [ ] `app/main_admin.py`: Cloud Run demo entrypoint 후보 FastAPI app 객체(`app`, line 24)를 확인하고 mount된 라우터 목록을 추출한다
-   - [ ] `app/core/config.py`: 실제 `BaseSettings`(pydantic_settings) 정의처임을 확인하고(`app/config.py`는 re-export shim), Cloud Run 필요 env key와 local-only key(`DATABASE_URL`, `REDIS` 등)를 분류·문서화한다
-   - [ ] `docker-compose.yml`: PostgreSQL/Redis 의존이 없는 health/read-only route 후보를 식별해 무의존 후보 표로 정리한다
+1. - [x] **entrypoint 후보 확인** — 최소 API surface 선택 (코드 수정 없음, read-only 분석)
+   - [x] `app/main_admin.py`: FastAPI `app` 객체 line 22 확인. `register_routers(app)` 호출(line 88)하나 `app/router_registry.py`가 personal-hub에 누락됨(monitor-page에만 존재) → import 오류로 현재 기동 불가. 무의존 route: `GET /`(line 96), `GET /api/v1/ready`(line 101). admin-only: `plan_records_admin_router`.
+   - [x] `app/core/config.py`: `BaseSettings` 정의 확인(line 43). Cloud Run 필요 key: `APP_MODE`, `DATABASE_URL`, `REDIS_ENABLED`, `JWT_SECRET`, `API_BASE_URL`, `FRONTEND_URL`, `GOOGLE_CLIENT_ID/SECRET`, `ADMIN_EMAIL`. local-only: `CHROME_PATH`, `DRIVER_PATH`, `BROWSER_HEADLESS`, `USER_DATA_DIR`, `MEGABEAUTY_KAKAO_ALERT_CLI_PATH`, `GIT_REPOS_ALLOWED_PATHS`.
+   - [x] `docker-compose.yml`: Redis 서비스만 정의(PostgreSQL은 host 직접). 무의존 route: `GET /` (lifespan 우회 없이 유일한 진정 무의존). lifespan은 `TESTING=1` 환경변수로 DB 초기화 스킵 가능(단, `api_ready=False` 유지). 무의존 후보 표 — 설계 계약서(2026-06-15_cloud-run-poc-design-contract.md) 참조.
 
-2. - [ ] **Cloud Run PoC 계약 작성** — 운영 이전과 분리 (`docs/plan` 산출물)
-   - [ ] `docs/plan`: full app migration 금지와 read-only demo 범위를 명시한다
-   - [ ] `docs/plan`: cold start, timeout, concurrency, unauthenticated access 여부를 결정 항목으로 명시 기록한다
-   - [ ] `docs/plan`: Phase 1에서 식별한 무의존 route 표를 PoC 대상 route 집합으로 고정한다
+2. - [x] **Cloud Run PoC 계약 작성** — 운영 이전과 분리 (`docs/plan` 산출물)
+   - [x] `docs/plan`: full app migration 금지와 read-only demo 범위 명시 → `2026-06-15_cloud-run-poc-design-contract.md` "범위 계약" 섹션
+   - [x] `docs/plan`: cold start(60초), timeout, concurrency(80), unauthenticated access(허용) 결정값 명시 → 동 문서 "Cloud Run 결정 항목" 섹션
+   - [x] `docs/plan`: Phase 1에서 식별한 무의존 route 표(`GET /` 1개) → 동 문서 "무의존 Route 후보 표" + "PoC 대상 Route 집합" 섹션
 
 ### Phase M: Merge Handoff
 
@@ -56,4 +56,4 @@ Z. - [ ] **post-merge 정리**
 
 ---
 
-*진행률: 0/15 (0%)*
+*진행률: 12/15 (80%)*
