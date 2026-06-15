@@ -4,12 +4,12 @@
 > 대상 프로젝트: personal-hub
 > 실행순서: 3
 > 선행조건: ./2026-06-08_public_gcp_free_tier_roadmap_todo-1.md
-> branch:
-> worktree:
-> worktree-owner:
-> 상태: 검토완료
+> branch: impl/gcp-todo-3-bigquery-schema
+> worktree: .worktrees/impl/gcp-todo-3-bigquery-schema
+> worktree-owner: D:\work\project\public\personal-hub\.worktrees\impl\gcp-todo-3-bigquery-schema
+> 상태: 구현중
 > 테스트명령: schema 문서 검증
-> 진행률: 0/17 (0%)
+> 진행률: 0/17 (0%) — 구현중
 > 요약: 운영 이벤트를 BigQuery로 보낼 수 있도록 개인정보 없는 synthetic schema를 정의한다.
 
 ## TODO
@@ -76,4 +76,4 @@ Z. - [ ] **post-merge 정리**
 
 ---
 
-*진행률: 0/26 (0%)*
+*상태: 구현중 | 진행률: 0/17 (0%)*
