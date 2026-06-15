@@ -7,9 +7,9 @@
 > branch: impl/gcp-todo-17-cloudrun-impl
 > worktree: .worktrees/impl/gcp-todo-17-cloudrun-impl
 > worktree-owner: D:\work\project\public\personal-hub\.worktrees\impl\gcp-todo-17-cloudrun-impl
-> 상태: 구현중
+> 상태: 머지대기
 > 테스트명령: Python 변경 시 pytest T1~T3 로컬 실행, T4/T5 live 검증은 배포 후 todo-16 위임
-> 진행률: 0/27 (0%)
+> 진행률: 27/27 (100%)
 > 요약: 설계 계약서 Option A 기반으로 app/main_cloudrun.py slim entrypoint와 Dockerfile.cloudrun을 작성하고 Cloud Run 배포 command를 문서화한다.
 
 ## 배경
@@ -20,6 +20,35 @@
 - `app/router_registry.py`: personal-hub에 없음 (monitor-page에만 존재) — `app/main_admin.py` line 88에서 import하여 main_admin.py 기동 불가
 - `app/main_cloudrun.py`: 미존재 (이 todo에서 신규 작성)
 - `Dockerfile.cloudrun`: 미존재 (이 todo에서 신규 작성)
+
+## Cloud Run 배포 커맨드 (Phase 3 확정값)
+
+```bash
+# 이미지 빌드 및 푸시
+docker build -f Dockerfile.cloudrun -t gcr.io/<PROJECT_ID>/personal-hub-poc:latest .
+docker push gcr.io/<PROJECT_ID>/personal-hub-poc:latest
+
+# Cloud Run 배포
+gcloud run deploy personal-hub-poc \
+  --image gcr.io/<PROJECT_ID>/personal-hub-poc:latest \
+  --region asia-northeast3 \
+  --allow-unauthenticated \
+  --min-instances=0 \
+  --port=8080
+```
+
+| 결정 항목 | 값 |
+|----------|-----|
+| service name | `personal-hub-poc` |
+| region | `asia-northeast3` (서울) |
+| unauthenticated | `--allow-unauthenticated` |
+| min instances | `--min-instances=0` (idle 과금 없음) |
+| cold start timeout | 60초 |
+| max concurrency | 80 (Cloud Run default) |
+| IMAGE_URL | `gcr.io/<PROJECT_ID>/personal-hub-poc:latest` |
+| 배포 후 URL | `https://personal-hub-poc-<hash>-an.a.run.app` (placeholder) |
+
+> todo-16 선행조건: 배포 URL `https://personal-hub-poc-<hash>-an.a.run.app` 확정 후 T4/T5 live 검증 수행
 
 **확인된 참조처**:
 - `app/main_admin.py:88` — `from app.router_registry import register_routers` (기동 blocker)
@@ -38,52 +67,52 @@ todo-16 live T4/T5 검증은 이 todo의 배포 완료 후 실행된다.
 
 ### Phase 1: app/main_cloudrun.py 작성
 
-1. - [ ] **slim entrypoint 구현**
-   - [ ] `app/main_cloudrun.py` 신규 작성 — `from fastapi import FastAPI` 단 1개 import
-   - [ ] `app = FastAPI(title="personal-hub Cloud Run PoC")` 설정
-   - [ ] `@app.get("/")` → `return {"status": "ok", "version": "poc"}`
-   - [ ] `@app.get("/healthz")` → `return {"healthy": True}`
-   - [ ] `grep -n "router_registry\|lifespan\|database\|redis" app/main_cloudrun.py` 결과 0건 확인
-   - [ ] `app/core/runtime_fingerprint.py` `DEFAULT_SOURCE_FILES`에 `main_cloudrun.py` 추가 없음 확인 (독립 유지)
+1. - [x] **slim entrypoint 구현**
+   - [x] `app/main_cloudrun.py` 신규 작성 — `from fastapi import FastAPI` 단 1개 import
+   - [x] `app = FastAPI(title="personal-hub Cloud Run PoC")` 설정
+   - [x] `@app.get("/")` → `return {"status": "ok", "version": "poc"}`
+   - [x] `@app.get("/healthz")` → `return {"healthy": True}`
+   - [x] `grep -n "router_registry\|lifespan\|database\|redis" app/main_cloudrun.py` 결과 0건 확인
+   - [x] `app/core/runtime_fingerprint.py` `DEFAULT_SOURCE_FILES`에 `main_cloudrun.py` 추가 없음 확인 (독립 유지)
 
 ### Phase 2: Dockerfile.cloudrun + requirements-cloudrun.txt 작성
 
-2. - [ ] **slim 컨테이너 정의**
-   - [ ] `requirements-cloudrun.txt` 신규 작성 — `fastapi==0.104.1` + `uvicorn==0.24.0` 2줄만 (requirements.txt 전체 COPY 금지)
-   - [ ] `Dockerfile.cloudrun` 신규 작성 — base image `python:3.11-slim`
-   - [ ] `WORKDIR /app`, `COPY requirements-cloudrun.txt .`, `RUN pip install --no-cache-dir -r requirements-cloudrun.txt`
-   - [ ] `COPY app/ app/` (app 패키지만, playwright·browser·psycopg2 미포함 확인)
-   - [ ] `CMD ["sh", "-c", "uvicorn app.main_cloudrun:app --host 0.0.0.0 --port ${PORT:-8080}"]` 설정
+2. - [x] **slim 컨테이너 정의**
+   - [x] `requirements-cloudrun.txt` 신규 작성 — `fastapi==0.104.1` + `uvicorn==0.24.0` 2줄만 (requirements.txt 전체 COPY 금지)
+   - [x] `Dockerfile.cloudrun` 신규 작성 — base image `python:3.11-slim`
+   - [x] `WORKDIR /app`, `COPY requirements-cloudrun.txt .`, `RUN pip install --no-cache-dir -r requirements-cloudrun.txt`
+   - [x] `COPY app/ app/` (app 패키지만, playwright·browser·psycopg2 미포함 확인)
+   - [x] `CMD ["sh", "-c", "uvicorn app.main_cloudrun:app --host 0.0.0.0 --port ${PORT:-8080}"]` 설정
 
 ### Phase 3: Cloud Run 배포 command 문서화
 
-3. - [ ] **배포 절차 기록** (이 plan 파일 `## 배경` 섹션 하단 또는 inline 노트로 추가)
-   - [ ] service name `personal-hub-poc`, region `asia-northeast3`(서울), `--allow-unauthenticated`, `--min-instances=0` 결정값 기록
-   - [ ] `gcloud run deploy personal-hub-poc --image <IMAGE_URL> --region asia-northeast3 --allow-unauthenticated --min-instances=0 --port=8080` 샘플 기록
-   - [ ] IMAGE_URL placeholder: `gcr.io/<PROJECT_ID>/personal-hub-poc:latest` 형식 명시
-   - [ ] `todo-16` 선행조건 필드에 `배포 URL: https://personal-hub-poc-<hash>-an.a.run.app` placeholder 기재
+3. - [x] **배포 절차 기록** (이 plan 파일 `## 배경` 섹션 하단 또는 inline 노트로 추가)
+   - [x] service name `personal-hub-poc`, region `asia-northeast3`(서울), `--allow-unauthenticated`, `--min-instances=0` 결정값 기록
+   - [x] `gcloud run deploy personal-hub-poc --image <IMAGE_URL> --region asia-northeast3 --allow-unauthenticated --min-instances=0 --port=8080` 샘플 기록
+   - [x] IMAGE_URL placeholder: `gcr.io/<PROJECT_ID>/personal-hub-poc:latest` 형식 명시
+   - [x] `todo-16` 선행조건 필드에 `배포 URL: https://personal-hub-poc-<hash>-an.a.run.app` placeholder 기재
 
 ### Phase T1: pytest 단위 TC (RIGHT-BICEP)
 
-4. - [ ] **단위 테스트 작성** (`tests/test_main_cloudrun.py` 신규)
-   - [ ] `test_root_returns_200_with_status_ok()` — R: TestClient `GET /` → 200 + `{"status": "ok", "version": "poc"}`
-   - [ ] `test_healthz_returns_200_with_healthy_true()` — R: TestClient `GET /healthz` → 200 + `{"healthy": True}`
-   - [ ] `test_app_title_is_poc()` — C: `from app.main_cloudrun import app; assert app.title == "personal-hub Cloud Run PoC"`
-   - [ ] `test_no_router_registry_import()` — I: `pathlib.Path("app/main_cloudrun.py").read_text()` 에서 `router_registry` 0건 assert
-   - [ ] `test_no_lifespan_import()` — I: 동일 소스에서 `lifespan` 0건 assert
-   - [ ] `test_root_no_db_dependency()` — E: DB/Redis env 미설정 상태에서 `GET /` 200 확인 (TESTING env 불필요, slim entrypoint는 DB 의존 없음)
+4. - [x] **단위 테스트 작성** (`tests/test_main_cloudrun.py` 신규)
+   - [x] `test_root_returns_200_with_status_ok()` — R: TestClient `GET /` → 200 + `{"status": "ok", "version": "poc"}`
+   - [x] `test_healthz_returns_200_with_healthy_true()` — R: TestClient `GET /healthz` → 200 + `{"healthy": True}`
+   - [x] `test_app_title_is_poc()` — C: `from app.main_cloudrun import app; assert app.title == "personal-hub Cloud Run PoC"`
+   - [x] `test_no_router_registry_import()` — I: `pathlib.Path("app/main_cloudrun.py").read_text()` 에서 `router_registry` 0건 assert
+   - [x] `test_no_lifespan_import()` — I: 동일 소스에서 `lifespan` 0건 assert
+   - [x] `test_root_no_db_dependency()` — E: DB/Redis env 미설정 상태에서 `GET /` 200 확인 (TESTING env 불필요, slim entrypoint는 DB 의존 없음)
 
 ### Phase T2: local pytest 실행
 
-5. - [ ] **단위 테스트 실행** (worktree cwd에서)
-   - [ ] `TESTING=1 pytest tests/test_main_cloudrun.py -v` 실행 + 6개 PASSED 확인
-   - [ ] 기존 테스트 회귀 확인: `TESTING=1 pytest tests/test_api_ready_http.py -v` PASSED 확인
+5. - [x] **단위 테스트 실행** (worktree cwd에서)
+   - [x] `TESTING=1 pytest tests/test_main_cloudrun.py -v` 실행 + 6개 PASSED 확인
+   - [x] 기존 테스트 회귀 확인: `TESTING=1 pytest tests/test_api_ready_http.py -v` — pre-existing 실패 (app.main 없음, main branch에서도 동일), 이 todo 변경에 의한 회귀 아님
 
 ### Phase T3: import smoke
 
-6. - [ ] **import smoke** (worktree cwd에서)
-   - [ ] `python -c "from app.main_cloudrun import app; print(app.title)"` → `personal-hub Cloud Run PoC` 출력 확인
-   - [ ] `python -c "import pathlib; src=pathlib.Path('app/main_cloudrun.py').read_text(); assert 'router_registry' not in src and 'lifespan' not in src; print('clean')"` → `clean` 출력 확인
+6. - [x] **import smoke** (worktree cwd에서)
+   - [x] `python -c "from app.main_cloudrun import app; print(app.title)"` → `personal-hub Cloud Run PoC` 출력 확인
+   - [x] `python -c "import pathlib; src=pathlib.Path('app/main_cloudrun.py').read_text(); assert 'router_registry' not in src and 'lifespan' not in src; print('clean')"` → `clean` 출력 확인
 
 ### Phase T4: E2E
 
@@ -91,10 +120,10 @@ todo-16 live T4/T5 검증은 이 todo의 배포 완료 후 실행된다.
 
 ### Phase T5: HTTP 통합 테스트
 
-7. - [ ] **TestClient HTTP 통합** (`tests/test_main_cloudrun_http.py` 신규 — 프로젝트 `*_http.py` 패턴 준수)
-   - [ ] `test_root_http_200()` — TestClient `GET /` → 200 + `{"status": "ok", "version": "poc"}` body assert
-   - [ ] `test_healthz_http_200()` — TestClient `GET /healthz` → 200 + `{"healthy": True}` body assert
-   - [ ] `TESTING=1 pytest tests/test_main_cloudrun_http.py -v` 실행 + PASSED 확인
+7. - [x] **TestClient HTTP 통합** (`tests/test_main_cloudrun_http.py` 신규 — 프로젝트 `*_http.py` 패턴 준수)
+   - [x] `test_root_http_200()` — TestClient `GET /` → 200 + `{"status": "ok", "version": "poc"}` body assert
+   - [x] `test_healthz_http_200()` — TestClient `GET /healthz` → 200 + `{"healthy": True}` body assert
+   - [x] `TESTING=1 pytest tests/test_main_cloudrun_http.py -v` 실행 + PASSED 확인
 
 > T5 live (GCP Cloud Run URL): todo-16에서 배포 후 수행. 이 단계에서 live URL 호출 금지.
 
@@ -120,4 +149,4 @@ Z. - [ ] **post-merge 정리**
 
 ---
 
-*진행률: 0/44 (0%)*
+*진행률: 27/27 (100%) | 상태: 머지대기*
