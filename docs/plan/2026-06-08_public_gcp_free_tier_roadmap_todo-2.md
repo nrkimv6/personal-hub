@@ -4,10 +4,11 @@
 > 대상 프로젝트: personal-hub
 > 실행순서: 2
 > 선행조건: ./2026-06-08_public_gcp_free_tier_roadmap_todo-1.md
-> branch:
-> worktree:
-> worktree-owner:
+> branch: impl/gcp-todo-2-cloud-run-poc
+> worktree: D:\work\project\public\personal-hub\.worktrees\impl-gcp-todo-2-cloud-run-poc
+> worktree-owner: claude-sonnet-4-6
 > 테스트명령: Python 변경 시 pytest T1~T5 규칙 적용
+> 상태: 구현중
 > 진행률: 0/15 (0%)
 > 요약: 전체 앱 이전이 아니라 read-only/health FastAPI endpoint만 Cloud Run PoC로 분리한다.
 
