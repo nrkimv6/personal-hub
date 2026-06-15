@@ -1,5 +1,6 @@
 ﻿# DONE
 
+- [x] 2026-06-15: nrkimv6 Public Repo GCP Free-Tier 적용 로드맵 — TODO 3 (BigQuery schema 설계 — bigquery-schema-design.md 산출)
 - [x] 2026-06-15: nrkimv6 Public Repo GCP Free-Tier 적용 로드맵 — TODO 17
 - [x] 2026-06-15: GCP Cloud Run 구현 todo 누락 — roadmap gap 분석 및 impl todo 등록
 - [x] 2026-06-15: nrkimv6 Public Repo GCP Free-Tier 적용 로드맵 — TODO 2
