@@ -1,15 +1,19 @@
-# GCP Cloud Run 구현 todo 누락 — roadmap gap 분석 및 impl todo 등록
+﻿# GCP Cloud Run 구현 todo 누락 — roadmap gap 분석 및 impl todo 등록
 
 > 출처: /reflect에서 자동 생성
 > 대상 프로젝트: personal-hub
 > 상태: 구현완료
+> 반영일시: 2026-06-15 15:40
 > branch:
 > worktree:
 > worktree-owner:
 > 머지커밋: 087a8203 (impl branch = main 동일, no-op merge — docs 산출물은 plans 브랜치에 커밋)
+> 후속정리커밋: 9fa359f9
 > 진행률: 37/37 (100%)
 > 요약: todo-2 설계 계약서가 "별도 todo에서 구현"으로 남긴 `app/main_cloudrun.py` slim entrypoint가 로드맵(todo-3~16) 어디에도 없음. 이 gap을 해소하는 impl todo를 작성하고 등록한다.
 
+> 완료일: 2026-06-15
+> 아카이브됨
 ## 배경
 
 `2026-06-08_public_gcp_free_tier_roadmap_todo-2.md` (archived)에서 확정된 설계 계약서(`2026-06-15_cloud-run-poc-design-contract.md`)는 다음을 명시한다:
