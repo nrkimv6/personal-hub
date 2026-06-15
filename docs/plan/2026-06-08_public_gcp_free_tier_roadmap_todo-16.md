@@ -3,7 +3,7 @@
 > 계획서: [plan](./2026-06-08_public_gcp_free_tier_roadmap.md)
 > 대상 프로젝트: personal-hub, tool-pdf-to-img (배포된 Cloud Run 및 연계 GCP 리소스)
 > 실행순서: 16
-> 선행조건: todo-1~15 완료 + 각 Phase M deployment 승인
+> 선행조건: todo-1~15 완료 + todo-17 완료(app/main_cloudrun.py 배포) + 각 Phase M deployment 승인
 > branch:
 > worktree:
 > worktree-owner:
