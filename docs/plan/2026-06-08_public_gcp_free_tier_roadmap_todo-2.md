@@ -4,12 +4,12 @@
 > 대상 프로젝트: personal-hub
 > 실행순서: 2
 > 선행조건: ./2026-06-08_public_gcp_free_tier_roadmap_todo-1.md
-> branch: impl/gcp-todo-2-cloud-run-poc
-> worktree: D:\work\project\public\personal-hub\.worktrees\impl-gcp-todo-2-cloud-run-poc
-> worktree-owner: claude-sonnet-4-6
+> branch:
+> worktree:
+> worktree-owner:
 > 테스트명령: Python 변경 시 pytest T1~T5 규칙 적용
-> 상태: 머지대기
-> 진행률: 12/15 (80%)
+> 상태: 구현완료
+> 진행률: 15/15 (100%)
 > 요약: 전체 앱 이전이 아니라 read-only/health FastAPI endpoint만 Cloud Run PoC로 분리한다.
 
 ## TODO
@@ -41,9 +41,9 @@
 
 ### Phase Z: Post-Merge Cleanup (/merge-test owner)
 
-Z. - [ ] **post-merge 정리**
-   - [ ] main merge 시도 + (필요 시) root dirty stash/apply
-   - [ ] worktree remove, branch remove, 헤더 meta(`> branch:`/`> worktree:`/`> worktree-owner:`) 제거
+Z. - [x] **post-merge 정리**
+   - [x] main merge 시도 + (필요 시) root dirty stash/apply — impl 브랜치 = main 동일(커밋 0, no-op merge)
+   - [x] worktree remove, branch remove, 헤더 meta(`> branch:`/`> worktree:`/`> worktree-owner:`) 제거 — 완료
 
 ### 검증 기준 (RIGHT-BICEP TC)
 
@@ -56,4 +56,4 @@ Z. - [ ] **post-merge 정리**
 
 ---
 
-*진행률: 12/15 (80%)*
+*진행률: 15/15 (100%)*
