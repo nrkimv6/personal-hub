@@ -4,10 +4,11 @@
 > 대상 프로젝트: personal-hub
 > 실행순서: 17
 > 선행조건: ./2026-06-15_cloud-run-poc-design-contract.md + ../archive/2026-06-08_public_gcp_free_tier_roadmap_todo-2.md
-> branch: impl/gcp-todo-17-cloudrun-impl
-> worktree: .worktrees/impl/gcp-todo-17-cloudrun-impl
-> worktree-owner: D:\work\project\public\personal-hub\.worktrees\impl\gcp-todo-17-cloudrun-impl
-> 상태: 머지대기
+> branch:
+> worktree:
+> worktree-owner:
+> 상태: 구현완료
+> 머지커밋: 8e61b5fb
 > 테스트명령: Python 변경 시 pytest T1~T3 로컬 실행, T4/T5 live 검증은 배포 후 todo-16 위임
 > 진행률: 27/27 (100%)
 > 요약: 설계 계약서 Option A 기반으로 app/main_cloudrun.py slim entrypoint와 Dockerfile.cloudrun을 작성하고 Cloud Run 배포 command를 문서화한다.
