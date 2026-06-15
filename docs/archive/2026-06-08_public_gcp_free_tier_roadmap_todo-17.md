@@ -1,4 +1,4 @@
-# nrkimv6 Public Repo GCP Free-Tier 적용 로드맵 — TODO 17
+﻿# nrkimv6 Public Repo GCP Free-Tier 적용 로드맵 — TODO 17
 
 > 계획서: [plan](./2026-06-08_public_gcp_free_tier_roadmap.md)
 > 대상 프로젝트: personal-hub
@@ -8,11 +8,15 @@
 > worktree:
 > worktree-owner:
 > 상태: 구현완료
+> 반영일시: 2026-06-15 23:31
 > 머지커밋: 8e61b5fb
+> 후속정리커밋: e2bd8786
 > 테스트명령: Python 변경 시 pytest T1~T3 로컬 실행, T4/T5 live 검증은 배포 후 todo-16 위임
-> 진행률: 27/27 (100%)
+> 진행률: 43/43 (100%)
 > 요약: 설계 계약서 Option A 기반으로 app/main_cloudrun.py slim entrypoint와 Dockerfile.cloudrun을 작성하고 Cloud Run 배포 command를 문서화한다.
 
+> 완료일: 2026-06-15
+> 아카이브됨
 ## 배경
 
 `2026-06-15_cloud-run-poc-design-contract.md`에서 확정된 Option A 구현 단계다.
@@ -126,18 +130,24 @@ todo-16 live T4/T5 검증은 이 todo의 배포 완료 후 실행된다.
    - [x] `test_healthz_http_200()` — TestClient `GET /healthz` → 200 + `{"healthy": True}` body assert
    - [x] `TESTING=1 pytest tests/test_main_cloudrun_http.py -v` 실행 + PASSED 확인
 
-> T5 live (GCP Cloud Run URL): todo-16에서 배포 후 수행. 이 단계에서 live URL 호출 금지.
+> T5 live 해당 없음: GCP Cloud Run URL live 검증은 todo-16 위임, 배포 전 실행 금지
 
 ### Phase M: Merge Handoff
 
 > T4/T5 live (GCP 배포 URL): 배포 owner 또는 todo-16에서 수행. 이 phase에서는 live GCP URL 호출 금지.
 
+#### T4/T5 Evidence Table
+
+| stage | command | cwd | result | exit_code | log_ref | blocker_code |
+|-------|---------|-----|--------|-----------|---------|-------------|
+| T5-http | `TESTING=1 pytest tests/test_main_cloudrun_http.py -v` | `.worktrees/impl/gcp-todo-17-cloudrun-impl` | 완료 | 0 | 2 PASSED: test_root_http_200, test_healthz_http_200 | - |
+
 ### Phase Z: Post-Merge Cleanup
 
-Z. - [ ] **post-merge 정리**
-   - [ ] `git worktree remove .worktrees/impl/gcp-todo-17-cloudrun-impl`
-   - [ ] `git branch -d impl/gcp-todo-17-cloudrun-impl`
-   - [ ] 이 plan 헤더 `> branch:` / `> worktree:` / `> worktree-owner:` 값 제거
+Z. - [x] **post-merge 정리**
+   - [x] `git worktree remove .worktrees/impl/gcp-todo-17-cloudrun-impl`
+   - [x] `git branch -d impl/gcp-todo-17-cloudrun-impl`
+   - [x] 이 plan 헤더 `> branch:` / `> worktree:` / `> worktree-owner:` 값 제거
 
 ### 검증 기준 (RIGHT-BICEP)
 
@@ -150,4 +160,4 @@ Z. - [ ] **post-merge 정리**
 
 ---
 
-*진행률: 27/27 (100%) | 상태: 머지대기*
+*진행률: 30/30 (100%) | 상태: 구현완료*
