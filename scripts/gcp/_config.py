@@ -40,6 +40,7 @@ class GcpConfig:
     cloud_run_service: str
     enable_cloud_build: bool = False
     enable_artifact_registry: bool = False
+    enable_secret_manager: bool = False
 
 
 def load_config() -> GcpConfig:
@@ -52,6 +53,7 @@ def load_config() -> GcpConfig:
 
     raw_cloud_build = os.environ.get("ENABLE_CLOUD_BUILD", "false")
     raw_ar = os.environ.get("ENABLE_ARTIFACT_REGISTRY", "false")
+    raw_sm = os.environ.get("ENABLE_SECRET_MANAGER", "false")
 
     return GcpConfig(
         project_id=project_id,
@@ -61,4 +63,5 @@ def load_config() -> GcpConfig:
         cloud_run_service=cloud_run_service,
         enable_cloud_build=_parse_bool(raw_cloud_build, default=False),
         enable_artifact_registry=_parse_bool(raw_ar, default=False),
+        enable_secret_manager=_parse_bool(raw_sm, default=False),
     )

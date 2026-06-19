@@ -16,6 +16,7 @@ from scripts.gcp._runner import CostGuardBlocked
 from scripts.gcp.bigquery import provision_bigquery
 from scripts.gcp.cloud_build import provision_artifact_registry, provision_cloud_build
 from scripts.gcp.cloud_run import provision_cloud_run
+from scripts.gcp.secret_manager import provision_secrets
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -24,7 +25,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--resource",
-        choices=["cloud-run", "bigquery", "cloud-build", "all"],
+        choices=["cloud-run", "bigquery", "cloud-build", "secret-manager", "all"],
         default="all",
         help="Resource to provision",
     )
@@ -71,6 +72,8 @@ def main(argv: list | None = None) -> int:
             elif resource == "cloud-build":
                 provision_artifact_registry(cfg, dry_run=dry_run)
                 provision_cloud_build(cfg, dry_run=dry_run)
+            elif resource == "secret-manager":
+                provision_secrets(cfg, dry_run=dry_run)
         except CostGuardBlocked as exc:
             print(f"[cost-guard] SKIPPED {resource}: {exc}")
         except Exception as exc:  # noqa: BLE001
