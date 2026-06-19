@@ -49,3 +49,26 @@ def test_provision_cloud_run_only_dry_run_no_subprocess():
         exit_code = main(["--resource", "cloud-run"])
     mock_run.assert_not_called()
     assert exit_code == 0
+
+
+def test_provision_secret_manager_dry_run_cost_guard(capsys):
+    """T3-E: --resource secret-manager (dry-run, ENABLE_SECRET_MANAGER=false default)
+    → CostGuardBlocked, subprocess never called, exit_code=0 (cost-guard is caught).
+    """
+    with patch("scripts.gcp._runner.subprocess.run") as mock_run:
+        exit_code = main(["--resource", "secret-manager"])
+
+    # subprocess must NEVER be called — even dry-run path doesn't reach it when blocked
+    mock_run.assert_not_called()
+
+    # main() catches CostGuardBlocked and returns 0 (not an error exit)
+    assert exit_code == 0
+
+    # The output should contain a cost-guard skip message
+    captured = capsys.readouterr()
+    output = captured.out
+    assert (
+        "cost-guard" in output.lower()
+        or "SKIPPED" in output
+        or "ENABLE_SECRET_MANAGER" in output
+    ), f"Expected cost-guard output, got: {output!r}"
