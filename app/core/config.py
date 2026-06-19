@@ -5,7 +5,7 @@ from datetime import datetime
 import sys
 import os
 from typing import Mapping, Optional, Dict, Any, List, Set
-from pydantic import Field, validator, AnyHttpUrl
+from pydantic import Field, validator, AnyHttpUrl, root_validator
 
 # 로거 구성 - 나중에 setup_logging()에서 초기화됨
 logger = logging.getLogger("monitor_app")
@@ -39,6 +39,44 @@ def get_runtime_app_mode(
         settings_app_mode = getattr(current_settings, "APP_MODE", None)
 
     return normalize_app_mode(settings_app_mode)
+
+
+def _load_secret(env_key: str, secret_name: str, *, sm_enabled: bool) -> str:
+    """Return the value for a secret field, preferring Secret Manager when enabled.
+
+    When ``sm_enabled=True``:
+      1. Attempt to read from GCP Secret Manager via
+         :func:`app.core.secret_manager_client.get_secret`.
+      2. On any exception fall back to ``os.environ.get(env_key, "")``.
+
+    When ``sm_enabled=False`` (default):
+      * Returns ``os.environ.get(env_key, "")`` directly.
+      * The ``google-cloud-secret-manager`` SDK is never imported (lazy import
+        inside ``get_secret``), so the app starts without the package installed.
+
+    Args:
+        env_key: Environment variable name used as fallback (e.g.
+            ``"JWT_SECRET"``).
+        secret_name: GCP Secret Manager secret name (usually the same as
+            ``env_key``).
+        sm_enabled: Whether Secret Manager reads are enabled.
+
+    Returns:
+        The resolved secret string (may be empty string if not configured).
+    """
+    if not sm_enabled:
+        # ENABLE_SECRET_MANAGER=false (default) — env-only path, no SDK import.
+        return os.environ.get(env_key, "")
+
+    # ENABLE_SECRET_MANAGER=true — attempt Secret Manager first, fallback to env.
+    from app.core.secret_manager_client import get_secret  # local import
+
+    project_id = os.getenv("GCP_PROJECT_ID", "personal-hub-project")
+    try:
+        return get_secret(secret_name, project_id)
+    except Exception:  # noqa: BLE001
+        return os.environ.get(env_key, "")
+
 
 class Settings(BaseSettings):
     # 기본 설정
@@ -91,6 +129,9 @@ class Settings(BaseSettings):
     # def supabase(self) -> Client:
     #     return create_client(self.SUPABASE_URL, self.SUPABASE_KEY)
     
+    # Secret Manager 게이트 (기본값: false — 기존 환경변수 fallback 동작 유지)
+    ENABLE_SECRET_MANAGER: str = "false"
+
     # 알림 설정
     TELEGRAM_BOT_TOKEN: str = ""
     TELEGRAM_CHAT_ID: str = ""
@@ -283,6 +324,42 @@ class Settings(BaseSettings):
     REDIS_ENABLED: bool = True  # False면 기존 SQLite 폴링 모드
     REDIS_QUEUE_PREFIX: str = "monitor"  # 큐 이름 prefix
     REDIS_CONNECTION_TIMEOUT: int = 5  # 연결 타임아웃 (초)
+
+    @root_validator(pre=False, skip_on_failure=True)
+    def load_secrets(cls, values: dict) -> dict:
+        """Secret Manager fallback validator (runs after all fields are set).
+
+        When ``ENABLE_SECRET_MANAGER=true``, replaces the 7 secret fields with
+        values fetched from GCP Secret Manager (falling back to env on error).
+
+        When ``ENABLE_SECRET_MANAGER=false`` (default), each field keeps the
+        value already loaded from the environment variable — the SDK is never
+        imported.  Existing app behaviour is completely unchanged.
+        """
+        sm_enabled = values.get("ENABLE_SECRET_MANAGER", "false").lower() == "true"
+
+        # Mapping: Settings field name → GCP Secret Manager secret name
+        secret_field_map = {
+            "TELEGRAM_BOT_TOKEN": "TELEGRAM_BOT_TOKEN",
+            "TELEGRAM_CHAT_ID": "TELEGRAM_CHAT_ID",
+            "EMAIL_ADDRESS": "EMAIL_ADDRESS",
+            "EMAIL_PASSWORD": "EMAIL_PASSWORD",
+            "GOOGLE_CLIENT_ID": "GOOGLE_CLIENT_ID",
+            "GOOGLE_CLIENT_SECRET": "GOOGLE_CLIENT_SECRET",
+            "JWT_SECRET": "JWT_SECRET",
+        }
+
+        for field_name, secret_name in secret_field_map.items():
+            current = values.get(field_name, "")
+            resolved = _load_secret(field_name, secret_name, sm_enabled=sm_enabled)
+            # Only override when Secret Manager returned a non-empty value, or
+            # when env fallback provides a value different from the model default.
+            if resolved:
+                values[field_name] = resolved
+            elif not current:
+                values[field_name] = ""
+
+        return values
 
     model_config = {
         "env_file": str(PROJECT_ROOT / ".env"),
